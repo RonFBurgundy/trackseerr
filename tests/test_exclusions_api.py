@@ -431,3 +431,43 @@ def test_create_from_library_ids_accepts_uuid_strings(db: Database, config: Conf
     assert res_trk.json()["item"]["scope"] == "track"
     assert res_trk.json()["item"]["title"] == "Airbag"
 
+
+def test_create_non_latin_artist_by_name_and_ref(db: Database, config: Config) -> None:
+    client = _client(db, config)
+    headers = _headers(db, config, admin=True)
+
+    # 1. By name
+    res = client.post(
+        "/api/exclusions",
+        json={"scope": "artist", "artist_name": "宇多田ヒカル", "reason": "J-Pop test"},
+        headers=headers,
+    )
+    assert res.status_code == 201
+    body = res.json()["item"]
+    assert body["scope"] == "artist"
+    assert body["artist_name"] == "宇多田ヒカル"
+    excl_id = body["id"]
+    db_row = db.get_exclusion(excl_id)
+    assert db_row is not None
+    assert db_row["match_key"] == "宇多田ヒカル"
+
+    # Delete before testing by ref
+    del_res = client.delete(f"/api/exclusions/{excl_id}", headers=headers)
+    assert del_res.status_code == 204
+
+    # 2. By library_artist_id ref
+    art_id = str(uuid.uuid4())
+    db.upsert_library_artist({"id": art_id, "name": "宇多田ヒカル", "monitored": True})
+    res_ref = client.post(
+        "/api/exclusions",
+        json={"library_artist_id": art_id},
+        headers=headers,
+    )
+    assert res_ref.status_code == 201
+    body_ref = res_ref.json()["item"]
+    assert body_ref["scope"] == "artist"
+    assert body_ref["artist_name"] == "宇多田ヒカル"
+    db_row_ref = db.get_exclusion(body_ref["id"])
+    assert db_row_ref is not None
+    assert db_row_ref["match_key"] == "宇多田ヒカル"
+

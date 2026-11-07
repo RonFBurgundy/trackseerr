@@ -31,6 +31,7 @@ from trackseerr.clients.lidarr import (
 )
 from trackseerr.album_track_hydration import hydrate_album_tracks
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.exclusions import annotate_exclusions
 from trackseerr.library_filters import LibraryFacetFilter, library_facets
 from trackseerr.storage import Database
 
@@ -100,7 +101,9 @@ def paged_artists(
         if not facets.is_empty():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
         return _lidarr_paged(db, "artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, client)
-    return _paged("artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, None, db, _enrich_artists, facets=facets)
+    res = _paged("artists", page, page_size, sort_key, sort_dir, q, monitored_only, None, None, db, _enrich_artists, facets=facets)
+    annotate_exclusions(db, "artist", res.get("records", []))
+    return res
 
 @router.get("/artists/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
 def artists_index(
@@ -139,7 +142,9 @@ def paged_albums(
         if not facets.is_empty():
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
         return _lidarr_paged(db, "albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, client)
-    return _paged("albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, None, db, _enrich_albums, facets=facets)
+    res = _paged("albums", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, None, db, _enrich_albums, facets=facets)
+    annotate_exclusions(db, "album", res.get("records", []))
+    return res
 
 @router.get("/albums/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
 def albums_index(
@@ -190,10 +195,12 @@ def paged_tracks(
         return _lidarr_tracks_paged(page, page_size, sort_key, sort_dir, q, monitored_only, album_id, client)
     if album_id and page == 1 and not q and not monitored_only:
         hydrate_album_tracks(db, enricher, album_id)
-    return _paged(
+    res = _paged(
         "tracks", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, _enrich_tracks,
         facets=facets, has_file=has_file,
     )
+    annotate_exclusions(db, "track", res.get("records", []))
+    return res
 
 @router.get("/tracks/index", dependencies=[Depends(require_core_tier)], response_model=LibraryIndexResponse, response_model_exclude_unset=True)
 def tracks_index(

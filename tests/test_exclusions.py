@@ -315,3 +315,57 @@ def test_describe_plain_english() -> None:
         reason="Radio edit",
     )
     assert hit_trk_r.describe() == 'Excluded track "Yesterday" by The Beatles: Radio edit'
+
+
+def test_match_key_non_latin_artist() -> None:
+    k = match_key("artist", "宇多田ヒカル")
+    assert k != ""
+    assert k == match_key("artist", "宇多田ヒカル")
+    assert k == "宇多田ヒカル"
+
+
+def test_match_key_latin_unchanged() -> None:
+    assert match_key("artist", "The Beatles") == "beatles"
+    assert match_key("artist", "Beyoncé") == "beyonce"
+    assert match_key("album", "The Beatles", "Abbey Road") == "beatles|abbey road"
+    assert match_key("track", "The Beatles", "Yesterday") == "beatles|yesterday"
+
+
+def test_find_non_latin_artist_album_track(db: Database) -> None:
+    db.add_exclusion(scope="artist", artist_name="宇多田ヒカル")
+    db.add_exclusion(scope="album", artist_name="宇多田ヒカル", title="First Love")
+    db.add_exclusion(scope="track", artist_name="宇多田ヒカル", title="Automatic")
+
+    hit_art = find_exclusion(db, artist="宇多田ヒカル")
+    assert hit_art is not None
+    assert hit_art.scope == "artist"
+    assert hit_art.artist_name == "宇多田ヒカル"
+
+    hit_alb = find_exclusion(db, artist="宇多田ヒカル", album="First Love")
+    assert hit_alb is not None
+    assert hit_alb.artist_name == "宇多田ヒカル"
+
+    hit_trk = find_exclusion(db, artist="Other Artist", title="Automatic", album="Some Album")
+    assert hit_trk is None
+
+    hit_trk2 = find_exclusion(db, artist="宇多田ヒカル", title="Automatic")
+    assert hit_trk2 is not None
+
+
+def test_find_non_latin_in_credit(db: Database) -> None:
+    db.add_exclusion(scope="artist", artist_name="宇多田ヒカル")
+    hit = find_exclusion(db, artist="Artist A & 宇多田ヒカル")
+    assert hit is not None
+    assert hit.artist_name == "宇多田ヒカル"
+
+
+def test_hangul_and_cyrillic_names(db: Database) -> None:
+    k_hangul = match_key("artist", "방탄소년단")
+    assert k_hangul == "방탄소년단"
+    db.add_exclusion(scope="artist", artist_name="방탄소년단")
+    assert find_exclusion(db, artist="방탄소년단") is not None
+
+    k_cyrillic = match_key("artist", "Кино")
+    assert k_cyrillic == "кино"
+    db.add_exclusion(scope="artist", artist_name="Кино")
+    assert find_exclusion(db, artist="Кино") is not None
