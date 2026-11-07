@@ -94,10 +94,6 @@ def test_category_is_created_and_used(qbit_target: tuple[str, str, str]) -> None
         driver.cancel(download_id)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="qBittorrent 5 setShareLimits requires shareLimitAction and shareLimitsMode parameters; driver sends only hashes, ratioLimit, seedingTimeLimit, inactiveSeedingTimeLimit returning HTTP 400",
-)
 def test_set_share_limits_accepts_values(qbit_target: tuple[str, str, str]) -> None:
     url, user, password = qbit_target
     driver = QbittorrentDriver(url, user, password)

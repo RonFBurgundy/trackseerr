@@ -56,7 +56,11 @@ class SabnzbdDriver(AcquisitionDriver):
                     version = data.get("version", "connected")
                     # mode=version needs no API key, so probe an authenticated mode too.
                     qresp = client.get(self._api_url("queue", limit=0))
-                    qdata = qresp.json() if qresp.status_code == 200 else {}
+                    if qresp.status_code in (401, 403) or "API Key" in qresp.text:
+                        return False, "Authentication failed: invalid SABnzbd API key"
+                    if qresp.status_code != 200:
+                        return False, f"HTTP {qresp.status_code} from SABnzbd queue"
+                    qdata = qresp.json()
                     if isinstance(qdata, dict) and (
                         qdata.get("status") is False or "API Key" in str(qdata.get("error") or "")
                     ):

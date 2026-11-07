@@ -221,8 +221,14 @@ def test_qbittorrent_set_share_limits_params():
     assert ok is True
     url = [c for c in http.post.call_args_list if "setShareLimits" in c.args[0]][0]
     assert url.args[0].endswith("/api/v2/torrents/setShareLimits")
-    assert url.kwargs["data"] == {"hashes": "abcdef", "ratioLimit": 1.5, "seedingTimeLimit": 4320,
-                                  "inactiveSeedingTimeLimit": -2}
+    assert url.kwargs["data"] == {
+        "hashes": "abcdef",
+        "ratioLimit": 1.5,
+        "seedingTimeLimit": 4320,
+        "inactiveSeedingTimeLimit": -2,
+        "shareLimitAction": "Default",
+        "shareLimitsMode": "Default",
+    }
 
 
 @pytest.mark.parametrize("ratio,minutes,exp_r,exp_t", [(None, None, -2, -2), (0, 0, -1, -1), (2.0, None, 2.0, -2),
