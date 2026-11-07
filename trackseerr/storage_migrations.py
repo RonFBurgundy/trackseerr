@@ -80,6 +80,7 @@ class MigrationsMixin:
                 (90, self._migration_v90),
                 (91, self._migration_v91),
                 (92, self._migration_v92),
+                (93, self._migration_v93),
             ]
 
             applied = 0
@@ -275,6 +276,30 @@ class MigrationsMixin:
                 PRIMARY KEY (event, ref)
             )
             """
+        )
+
+    def _migration_v93(self, cur: sqlite3.Cursor) -> None:
+        """v93: Add exclusions table and indexes."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS exclusions (
+                id TEXT PRIMARY KEY,
+                scope TEXT NOT NULL CHECK (scope IN ('artist','album','track')),
+                mbid TEXT,
+                artist_name TEXT NOT NULL,
+                title TEXT,
+                match_key TEXT NOT NULL,
+                reason TEXT,
+                created_by TEXT,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_exclusions_scope_key ON exclusions(scope, match_key)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exclusions_scope_mbid ON exclusions(scope, mbid)"
         )
 
     def _migration_v90(self, cur: sqlite3.Cursor) -> None:
