@@ -52,6 +52,56 @@ def test_qbit_roots_category_without_save_path():
         assert d.get_download_roots() == ["/data/torrents"]
 
 
+def test_qbit_relative_category_path_joined_to_save_path():
+    d = QbittorrentDriver("http://qbit.local:8080", category="music")
+    routes = {
+        "/app/preferences": _resp({"save_path": "/data/torrents"}),
+        "/torrents/categories": _resp({"music": {"name": "music", "savePath": "music"}}),
+    }
+    with patch("httpx.Client.get", side_effect=_router(routes)):
+        assert d.get_download_roots() == ["/data/torrents", "/data/torrents/music"]
+
+
+def test_qbit_relative_category_path_trailing_slashes():
+    d = QbittorrentDriver("http://qbit.local:8080", category="music")
+    routes = {
+        "/app/preferences": _resp({"save_path": "/data/torrents/"}),
+        "/torrents/categories": _resp({"music": {"name": "music", "savePath": "music/"}}),
+    }
+    with patch("httpx.Client.get", side_effect=_router(routes)):
+        assert d.get_download_roots() == ["/data/torrents/", "/data/torrents/music"]
+
+
+def test_qbit_absolute_category_path_unchanged():
+    d = QbittorrentDriver("http://qbit.local:8080", category="music")
+    routes = {
+        "/app/preferences": _resp({"save_path": "/data/torrents"}),
+        "/torrents/categories": _resp({"music": {"name": "music", "savePath": "/downloads/music"}}),
+    }
+    with patch("httpx.Client.get", side_effect=_router(routes)):
+        assert d.get_download_roots() == ["/data/torrents", "/downloads/music"]
+
+
+def test_qbit_relative_category_without_save_path_skipped():
+    d = QbittorrentDriver("http://qbit.local:8080", category="music")
+    routes = {
+        "/app/preferences": _resp({"save_path": ""}),
+        "/torrents/categories": _resp({"music": {"name": "music", "savePath": "music"}}),
+    }
+    with patch("httpx.Client.get", side_effect=_router(routes)):
+        assert d.get_download_roots() == []
+
+
+def test_qbit_windows_relative_category_path():
+    d = QbittorrentDriver("http://qbit.local:8080", category="music")
+    routes = {
+        "/app/preferences": _resp({"save_path": r"D:\Torrents"}),
+        "/torrents/categories": _resp({"music": {"name": "music", "savePath": "music"}}),
+    }
+    with patch("httpx.Client.get", side_effect=_router(routes)):
+        assert d.get_download_roots() == [r"D:\Torrents", r"D:\Torrents\music"]
+
+
 def test_qbit_roots_failure_returns_empty_and_records_error():
     d = QbittorrentDriver("http://qbit.local:8080")
     with patch("httpx.Client.get", side_effect=httpx.ConnectError("refused")):

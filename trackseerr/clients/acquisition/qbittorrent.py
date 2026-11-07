@@ -1,6 +1,8 @@
 """qBittorrent WebAPI v2 Acquisition Driver."""
 
 import logging
+import ntpath
+import posixpath
 import re
 from typing import Any, Optional
 
@@ -323,6 +325,7 @@ class QbittorrentDriver(AcquisitionDriver):
             self.last_roots_error = "Prohibited host URL"
             return []
         roots: list[str] = []
+        save_path = ""
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 prefs = self._get_json(client, "/api/v2/app/preferences")
@@ -336,7 +339,28 @@ class QbittorrentDriver(AcquisitionDriver):
                     if isinstance(cat, dict):
                         cat_path = str(cat.get("savePath") or cat.get("save_path") or "").strip()
                         if cat_path:
-                            roots.append(cat_path)
+                            is_abs = cat_path.startswith("/") or (
+                                len(cat_path) >= 2
+                                and cat_path[0].isalpha()
+                                and cat_path[1] == ":"
+                                and (len(cat_path) == 2 or cat_path[2] in ("\\", "/"))
+                            )
+                            if is_abs:
+                                roots.append(cat_path)
+                            elif not save_path:
+                                logger.debug(
+                                    "Skipping relative category savePath %r because qBittorrent reported no save_path",
+                                    cat_path,
+                                )
+                            else:
+                                is_win = (
+                                    len(save_path) >= 2
+                                    and save_path[0].isalpha()
+                                    and save_path[1] == ":"
+                                    and (len(save_path) == 2 or save_path[2] in ("\\", "/"))
+                                ) or "\\" in save_path
+                                pmod = ntpath if is_win else posixpath
+                                roots.append(pmod.normpath(pmod.join(save_path, cat_path)))
         except (httpx.HTTPError, RuntimeError, ValueError) as e:
             logger.warning("Could not read qBittorrent download folders from %s: %s", self.host_url, e)
             self.last_roots_error = str(e) or type(e).__name__
