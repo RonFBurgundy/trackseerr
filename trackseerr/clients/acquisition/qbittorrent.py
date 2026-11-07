@@ -411,6 +411,8 @@ class QbittorrentDriver(AcquisitionDriver):
             "ratioLimit": ratio_limit,
             "seedingTimeLimit": time_limit,
             "inactiveSeedingTimeLimit": -2,
+            "shareLimitAction": "Default",
+            "shareLimitsMode": "Default",
         }
         try:
             with httpx.Client(timeout=self.timeout) as client:
@@ -427,7 +429,12 @@ class QbittorrentDriver(AcquisitionDriver):
                         client.headers["Cookie"] = self._cookie
                     resp = client.post(url, data=payload)
                 if resp.status_code != 200:
-                    logger.warning("qBittorrent setShareLimits failed for %s (HTTP %s)", lookup, resp.status_code)
+                    logger.warning(
+                        "qBittorrent setShareLimits failed for %s (HTTP %s): %s",
+                        lookup,
+                        resp.status_code,
+                        resp.text[:120],
+                    )
                     return False
                 return True
         except httpx.HTTPError as e:

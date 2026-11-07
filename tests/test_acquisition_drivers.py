@@ -829,6 +829,30 @@ def test_sabnzbd_test_connection_success():
         assert "4.2.1" in msg
 
 
+def test_sabnzbd_wrong_key_403_fails():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="badkey")
+    ver_resp = MagicMock(status_code=200)
+    ver_resp.json.return_value = {"version": "5.1.3"}
+    q_resp = MagicMock(status_code=403, text="API Key Incorrect")
+
+    with patch("httpx.Client.get", side_effect=[ver_resp, q_resp]):
+        ok, msg = driver.test_connection()
+        assert ok is False
+        assert "API key" in msg
+
+
+def test_sabnzbd_queue_500_fails():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secretapikey")
+    ver_resp = MagicMock(status_code=200)
+    ver_resp.json.return_value = {"version": "5.1.3"}
+    q_resp = MagicMock(status_code=500, text="Internal Server Error")
+
+    with patch("httpx.Client.get", side_effect=[ver_resp, q_resp]):
+        ok, msg = driver.test_connection()
+        assert ok is False
+        assert "500" in msg
+
+
 def test_sabnzbd_download_and_status():
     driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secretapikey", category="music")
     mock_add_resp = MagicMock()
@@ -915,6 +939,24 @@ def test_qbittorrent_test_connection_success():
             ok, msg = driver.test_connection()
             assert ok is True
             assert "v4.6.3" in msg
+
+
+def test_qbittorrent_set_share_limits_sends_qbit5_fields():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=valid"
+
+    mock_resp = MagicMock(status_code=200)
+    with patch("httpx.Client.post", return_value=mock_resp) as mock_post:
+        ok = driver.set_share_limits("ABC", 2.0, 60)
+        assert ok is True
+        assert mock_post.called
+        _url, kwargs = mock_post.call_args
+        data = kwargs.get("data", {})
+        assert data.get("shareLimitAction") == "Default"
+        assert data.get("shareLimitsMode") == "Default"
+        assert data.get("hashes") == "abc"
+        assert data.get("ratioLimit") == 2.0
+        assert data.get("seedingTimeLimit") == 60
 
 
 def test_qbittorrent5_login_204_qbt_sid_cookie():

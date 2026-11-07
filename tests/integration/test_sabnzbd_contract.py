@@ -20,10 +20,6 @@ def test_valid_key_connects(sab_target: tuple[str, str]) -> None:
     assert msg.startswith("SABnzbd")
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="SabnzbdDriver.test_connection ignores HTTP 403 on invalid API key and treats fallback empty dict as success",
-)
 def test_wrong_key_fails(sab_target: tuple[str, str]) -> None:
     url, _key = sab_target
     ok, _msg = SabnzbdDriver(url, api_key="wrong_test_key_12345").test_connection()
