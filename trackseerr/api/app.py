@@ -41,6 +41,7 @@ from trackseerr.api.routes import (
     seed_cleanup,
     slskd_challenges,
     recycle_bin,
+    exclusions,
     missing,
     mixes,
     notifications,
@@ -252,6 +253,7 @@ def _build_api_router(app: FastAPI) -> APIRouter:
     api_router.include_router(seed_cleanup.router, prefix="/seed-cleanup", tags=["seed-cleanup"])
     api_router.include_router(slskd_challenges.router, prefix="/slskd-challenges", tags=["slskd-challenges"])
     api_router.include_router(recycle_bin.router, prefix="/recycle-bin", tags=["recycle-bin"])
+    api_router.include_router(exclusions.router, prefix="/exclusions", tags=["exclusions"])
     api_router.include_router(itunes_import.router, prefix="/import/itunes", tags=["itunes-import"])
     api_router.include_router(tags.router, prefix="/tags", tags=["tags"])
     api_router.include_router(settings.router, prefix="/settings", tags=["settings"])

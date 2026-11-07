@@ -1332,6 +1332,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/exclusions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List exclusions
+         * @description List exclusions with optional filtering and pagination.
+         */
+        get: operations["list_exclusions_api_exclusions_get"];
+        put?: never;
+        /**
+         * Create an exclusion
+         * @description Create a new exclusion and unmonitor matching native library items.
+         */
+        post: operations["create_exclusion_api_exclusions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exclusions/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Check if an item is excluded
+         * @description Check if an item matches an active exclusion by match key or MBID.
+         */
+        get: operations["check_exclusion_api_exclusions_check_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/exclusions/{exclusion_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete an exclusion
+         * @description Delete an exclusion by ID. Removing an exclusion does not re-monitor items.
+         */
+        delete: operations["delete_exclusion_api_exclusions__exclusion_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/health": {
         parameters: {
             query?: never;
@@ -8012,6 +8076,87 @@ export interface components {
             upgrade?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * ExclusionCheckResponse
+         * @description Response returned by the exclusion pre-flight check endpoint.
+         */
+        ExclusionCheckResponse: {
+            /** Excluded */
+            excluded: boolean;
+            /** Reason */
+            reason?: string | null;
+        };
+        /**
+         * ExclusionCreate
+         * @description Request model for creating an exclusion.
+         *
+         *     Either names (artist_name and title for album/track) or exactly one source ref must be given.
+         */
+        ExclusionCreate: {
+            /** Artist Name */
+            artist_name?: string | null;
+            /** Library Album Id */
+            library_album_id?: string | null;
+            /** Library Artist Id */
+            library_artist_id?: string | null;
+            /** Library Track Id */
+            library_track_id?: string | null;
+            /** Mbid */
+            mbid?: string | null;
+            /** Missing Track Id */
+            missing_track_id?: number | null;
+            /** Reason */
+            reason?: string | null;
+            /** Scope */
+            scope?: ("artist" | "album" | "track") | null;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * ExclusionCreated
+         * @description Response returned when an exclusion is created.
+         */
+        ExclusionCreated: {
+            item: components["schemas"]["ExclusionItem"];
+            /** Unmonitored */
+            unmonitored: number;
+        };
+        /**
+         * ExclusionItem
+         * @description An exclusion record.
+         */
+        ExclusionItem: {
+            /** Artist Name */
+            artist_name: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Created By */
+            created_by?: string | null;
+            /** Id */
+            id: string;
+            /** Mbid */
+            mbid?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Scope */
+            scope: string;
+            /** Title */
+            title?: string | null;
+        };
+        /**
+         * ExclusionPage
+         * @description Paginated list of exclusion records.
+         */
+        ExclusionPage: {
+            /** Items */
+            items: components["schemas"]["ExclusionItem"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
         };
         /**
          * ExportedCustomFormat
@@ -16973,6 +17118,138 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DiscoveryListResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_exclusions_api_exclusions_get: {
+        parameters: {
+            query?: {
+                scope?: string | null;
+                search?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_exclusion_api_exclusions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExclusionCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionCreated"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_exclusion_api_exclusions_check_get: {
+        parameters: {
+            query?: {
+                artist?: string | null;
+                title?: string | null;
+                album?: string | null;
+                artist_mbid?: string | null;
+                album_mbid?: string | null;
+                recording_mbid?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ExclusionCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_exclusion_api_exclusions__exclusion_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                exclusion_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
