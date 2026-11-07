@@ -30,6 +30,7 @@ import httpx
 from trackseerr import lidarr_library
 from trackseerr.clients.lidarr import LidarrApiError, LidarrClient
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.exclusions import find_exclusion
 from trackseerr.mb_metadata_store import get_shared_enricher
 from trackseerr.item_history import TRIGGER_PLAYLIST, GrabTrigger, provenance
 from trackseerr.library_manager import MODE_LIDARR, ModeChanged, build_lidarr_client, run_for_mode
@@ -468,6 +469,8 @@ def _submit_track(
     except RequestRejected as exc:
         # Admin-level submissions are never quota-limited and skip the duplicate check, but stay defensive.
         logger.info("List track request not created (%s): %s", exc.code, exc.detail)
+        if exc.code == "excluded":
+            return exc.detail
         if exc.code not in ("duplicate", "in_library"):
             raise
     return None
@@ -481,6 +484,39 @@ def apply_list_item(db: Database, config: Any, item: Any, mode: str, **kwargs: A
         return _apply_list_item(db, config, item, mode, **kwargs)
     with provenance(trigger):
         return _apply_list_item(db, config, item, mode, **kwargs)
+
+
+def _apply_track_item(
+    db: Database,
+    config: Any,
+    list_item: ListItem,
+    quality_profile_id: Optional[str],
+    requested_by: Optional[dict[str, Any]],
+    trigger: Optional[GrabTrigger],
+) -> ApplyResult:
+    if requested_by is None:
+        return ApplyResult(STATUS_FAILED, error="No user to attribute the request to")
+    note = _submit_track(db, config, list_item, quality_profile_id, requested_by, trigger)
+    return ApplyResult(STATUS_APPLIED, "track", error=note, mbid=list_item.mbid)
+
+
+def _check_level_exclusion(
+    db: Database,
+    level: str,
+    resolved: Any,
+    item_mbid: Optional[str],
+) -> Optional[ApplyResult]:
+    if level in ("artist", "album"):
+        hit = find_exclusion(
+            db,
+            artist=resolved.artist_name,
+            album=resolved.album_title or None,
+            artist_mbid=resolved.artist_mbid,
+            album_mbid=resolved.album_mbid,
+        )
+        if hit is not None:
+            return ApplyResult(STATUS_SKIPPED, error=hit.describe(), mbid=item_mbid)
+    return None
 
 
 def _apply_list_item(
@@ -518,15 +554,15 @@ def _apply_list_item(
 
     try:
         if level == "track":
-            if requested_by is None:
-                return ApplyResult(STATUS_FAILED, error="No user to attribute the request to")
-            note = _submit_track(db, config, list_item, quality_profile_id, requested_by, trigger)
-            return ApplyResult(STATUS_APPLIED, "track", error=note, mbid=list_item.mbid)
+            return _apply_track_item(db, config, list_item, quality_profile_id, requested_by, trigger)
 
         if enricher is None:
             enricher = get_shared_enricher(db)
         resolved = _resolve(list_item, level, enricher)
         item_mbid = resolved.artist_mbid if level == "artist" else resolved.album_mbid
+        excl_res = _check_level_exclusion(db, level, resolved, item_mbid)
+        if excl_res is not None:
+            return excl_res
         notes: list[str] = []
 
         def _native() -> None:

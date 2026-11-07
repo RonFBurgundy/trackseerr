@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 import uuid
 
 from trackseerr import delay_gate
+from trackseerr.exclusions import find_exclusion
 from trackseerr.indexer_status import indexer_status
 from trackseerr.acquisition_coordinator import (
     acquisition_coordinator,
@@ -341,6 +342,7 @@ def _record_sweep_event(db: Database, stats: dict[str, int], stopped_offline: bo
     checked = stats.get("items_checked", 0)
     grabbed = stats.get("items_grabbed", 0)
     skipped = stats.get("items_backed_off", 0)
+    excluded = stats.get("items_excluded", 0)
     if stopped_offline:
         msg = f"Backlog sweep stopped: Soulseek is not connected ({checked} items checked, {grabbed} grabbed)"
         sev = "warning"
@@ -348,6 +350,8 @@ def _record_sweep_event(db: Database, stats: dict[str, int], stopped_offline: bo
         msg = f"Backlog sweep completed: {checked} items checked, {grabbed} grabbed"
         if skipped > 0:
             msg += f", {skipped} skipped (searched often with no luck)"
+        if excluded > 0:
+            msg += f", {excluded} excluded"
         sev = "info"
     try:
         db.record_event(
@@ -476,6 +480,8 @@ class WantedBacklogWorker:
                         "items_checked": 0,
                         "items_grabbed": 0,
                         "errors": 0,
+                        "items_backed_off": 0,
+                        "items_excluded": 0,
                         "skipped": reason,
                         "catalog_seeded": catalog_seeded,
                     }
@@ -485,7 +491,14 @@ class WantedBacklogWorker:
                 return res
         except ModeChanged:
             logger.debug("WantedBacklogWorker: library manager is Lidarr; skipping native backlog sweep")
-            return {"items_checked": 0, "items_grabbed": 0, "errors": 0, "skipped": "library manager is Lidarr"}
+            return {
+                "items_checked": 0,
+                "items_grabbed": 0,
+                "errors": 0,
+                "items_backed_off": 0,
+                "items_excluded": 0,
+                "skipped": "library manager is Lidarr",
+            }
 
     def search_batch_running(self) -> bool:
         """True while a manual wanted-search batch thread is still working through its targets."""
@@ -987,6 +1000,7 @@ class WantedBacklogWorker:
             "items_grabbed": 0,
             "errors": 0,
             "items_backed_off": 0,
+            "items_excluded": 0,
         }
         items = self._collect_sweep_items(db, stats)
         if items is None:
@@ -1011,6 +1025,16 @@ class WantedBacklogWorker:
 
             artist, title = item[0], item[1]
             if not artist or not title:
+                continue
+
+            hit = find_exclusion(
+                db,
+                artist=item[0],
+                title=item[1] if item[3] == "track" else None,
+                album=item[2] if item[3] == "track" else item[1],
+            )
+            if hit is not None:
+                stats["items_excluded"] += 1
                 continue
 
             key = _backoff_key(item)

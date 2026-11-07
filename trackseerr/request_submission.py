@@ -19,6 +19,7 @@ import uuid
 from typing import Any, Optional
 
 from trackseerr.acquisition_coordinator import acquisition_coordinator
+from trackseerr.exclusions import find_exclusion
 from trackseerr.item_history import (
     GrabTrigger,
     emit_named,
@@ -49,7 +50,7 @@ def user_request_lock(user_id: str) -> threading.RLock:
 
 
 class RequestRejected(Exception):
-    """Policy refused the request. ``code`` is ``quota``, ``duplicate`` or ``in_library``; ``status_code`` mirrors the HTTP mapping."""
+    """Policy refused the request. ``code`` is ``quota``, ``duplicate``, ``in_library``, or ``excluded``; ``status_code`` mirrors the HTTP mapping."""
 
     def __init__(self, code: str, status_code: int, detail: str) -> None:
         super().__init__(detail)
@@ -225,6 +226,17 @@ def submit_track_request(
     if not is_admin:
         quality_profile_id = None
 
+    hit = find_exclusion(
+        db,
+        artist=clean_artist,
+        title=clean_title if item_type == "track" else None,
+        album=clean_album if item_type == "track" else clean_title,
+        album_mbid=foreign_id if item_type == "album" else None,
+        recording_mbid=foreign_id if item_type == "track" else None,
+    )
+    if hit is not None:
+        raise RequestRejected("excluded", 409, hit.describe())
+
     kind = _quota_type(item_type)
     in_library = _library_has(db, item_type, clean_artist, clean_title, clean_album, foreign_id)
     if in_library:
@@ -373,21 +385,42 @@ def submit_batch_requests(  # noqa: C901
         seen_keys: set[tuple[str, str]] = set()
         seen_fids: set[str] = set()
         fresh: list[dict[str, Any]] = []
+        first_exclusion_hit = None
+        excluded_count = 0
         for it in items:
             title = (it.get("title") or "").strip()
             art = (it.get("artist") or "").strip()
             fid = (it.get("foreign_id") or "").strip() or None
             key = (art.casefold(), title.casefold())
+            it_type = it.get("item_type") or "album"
+            alb = (it.get("album") or "").strip() or None
+
+            hit = find_exclusion(
+                db,
+                artist=art,
+                title=title if it_type == "track" else None,
+                album=alb if it_type == "track" else title,
+                album_mbid=fid if it_type == "album" else None,
+                recording_mbid=fid if it_type == "track" else None,
+            )
+            if hit is not None:
+                if first_exclusion_hit is None:
+                    first_exclusion_hit = hit
+                excluded_count += 1
+                continue
+
             if not is_admin and (key in existing_keys or (fid and fid in existing_fids)):
                 continue
             if key in seen_keys or (fid and fid in seen_fids):
                 continue
-            if _library_has(db, it.get("item_type") or "album", art, title, (it.get("album") or "").strip() or None, fid):
+            if _library_has(db, it_type, art, title, alb, fid):
                 continue
             seen_keys.add(key)
             if fid:
                 seen_fids.add(fid)
             fresh.append({**it, "title": title, "artist": art, "foreign_id": fid})
+        if excluded_count == len(items) and first_exclusion_hit is not None:
+            raise RequestRejected("excluded", 409, first_exclusion_hit.describe())
         if not fresh:
             return []
 

@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
+from trackseerr.exclusions import find_exclusion
 from trackseerr.library_monitoring import (
     ALBUM_MONITORED_SQL,
     DEFAULT_MONITOR_OPTION,
@@ -129,6 +130,14 @@ class LibraryArtistStoreMixin:
         genres = str(d["genres"]) if d.get("genres") is not None else None
         country = str(d["country"]) if d.get("country") is not None else None
         created_at = d.get("created_at")
+
+        art_mbid = foreign_artist_id or mbid
+        hit = find_exclusion(self, artist=name, artist_mbid=art_mbid)
+        if hit is None and art_mbid and "musicbrainz:artist:" in art_mbid:
+            hit = find_exclusion(self, artist=name, artist_mbid=art_mbid.split(":")[-1])
+        if hit is not None:
+            monitored = 0
+            preserve_monitoring = False
 
         with self._lock:
             is_new = self.conn.execute("SELECT 1 FROM library_artists WHERE id = ?", (artist_id,)).fetchone() is None
