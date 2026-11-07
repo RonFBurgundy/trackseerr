@@ -27,6 +27,7 @@ import { useDiscographyFilter } from '@/hooks/useDiscographyFilter';
 import { useBulkSelection } from '@/hooks/useBulkSelection';
 import { useAlbumBulkEdit } from '@/hooks/useAlbumBulkEdit';
 import { errorMessage } from '@/services/apiClient';
+import { deleteExclusion } from '@/services/exclusionsService';
 import { ConfirmDialog, MachinedCard, TactileSwitch, TapeDeckButton, TabStrip, CassetteLoader, OverflowMenu, type OverflowMenuItem } from '@/components/ui';
 import { DetailHeaderBar, PageFrame } from '@/components/layout';
 
@@ -158,8 +159,25 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   issuesHook,
 }) => {
   const detail = useArtistDetail(artistId, onToast, onChanged);
-  const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored, patchArtistTags } = detail;
+  const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored, patchArtistTags, reloadArtist } = detail;
   const [excludeOpen, setExcludeOpen] = useState<boolean>(false);
+  const [removeArtistConfirmOpen, setRemoveArtistConfirmOpen] = useState<boolean>(false);
+  const [removeArtistBusy, setRemoveArtistBusy] = useState<boolean>(false);
+
+  const handleRemoveArtistExclusion = async (): Promise<void> => {
+    if (!artist?.exclusion_id) return;
+    setRemoveArtistBusy(true);
+    try {
+      await deleteExclusion(artist.exclusion_id);
+      onToast('Exclusion removed', 'ok');
+      setRemoveArtistConfirmOpen(false);
+      await reloadArtist();
+    } catch (err: unknown) {
+      onToast(errorMessage(err, 'Failed to remove exclusion'), 'error');
+    } finally {
+      setRemoveArtistBusy(false);
+    }
+  };
   const [tab, setTab] = useState<DiscographyTab>('studio');
   const filter = useDiscographyFilter(artistId);
   const { filterAlbums } = filter;
@@ -255,7 +273,9 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
     if (ok) {
       const picked = new Set(ids);
       for (const a of artist?.albums ?? []) {
-        if (picked.has(a.id)) patchAlbumMonitored(a.id, monitored);
+        if (picked.has(a.id) && !(monitored && a.excluded)) {
+          patchAlbumMonitored(a.id, monitored);
+        }
       }
       onChanged();
     }
@@ -345,12 +365,21 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
     });
   }
   if (isAdmin && !lidarrMode) {
-    artistToolItems.push({
-      key: 'exclude',
-      label: 'Exclude artist…',
-      icon: <Ban className="h-3.5 w-3.5" />,
-      onSelect: () => setExcludeOpen(true),
-    });
+    if (artist?.excluded) {
+      artistToolItems.push({
+        key: 'exclude',
+        label: 'Remove exclusion',
+        icon: <Ban className="h-3.5 w-3.5 text-red-400" />,
+        onSelect: () => setRemoveArtistConfirmOpen(true),
+      });
+    } else {
+      artistToolItems.push({
+        key: 'exclude',
+        label: 'Exclude artist…',
+        icon: <Ban className="h-3.5 w-3.5" />,
+        onSelect: () => setExcludeOpen(true),
+      });
+    }
   }
 
   return (
@@ -468,6 +497,12 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                     name="monitor_preset"
                     className={`${COMPACT_SELECT} flex-[4_1_0] sm:flex-none sm:w-48`}
                     value=""
+                    disabled={artist.excluded === true}
+                    title={
+                      artist.excluded
+                        ? `${artist.exclusion_reason || 'Excluded'}. Remove the exclusion to monitor it.`
+                        : undefined
+                    }
                     onChange={(e) => {
                       const picked = presetOptions.find((o) => o.value === e.target.value);
                       if (picked) preset(picked.value);
@@ -505,9 +540,27 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
                     </>
                   )}
                   <TactileSwitch
-                    checked={artist.monitored === true}
+                    checked={!artist.excluded && artist.monitored === true}
+                    disabled={artist.excluded === true}
+                    variant={artist.excluded ? 'danger' : 'default'}
+                    title={
+                      artist.excluded
+                        ? `${artist.exclusion_reason || 'Excluded'}. Remove the exclusion to monitor it.`
+                        : undefined
+                    }
                     onChange={(val) => void toggleArtist(val)}
-                    label={artist.monitored ? 'Monitored' : 'Unmonitored'}
+                    label={
+                      artist.excluded
+                        ? 'Excluded'
+                        : artist.monitored
+                        ? 'Monitored'
+                        : 'Unmonitored'
+                    }
+                    ariaLabel={
+                      artist.excluded
+                        ? `Excluded: ${artist.name}`
+                        : `Monitor ${artist.name}`
+                    }
                     className="shrink-0 max-sm:-mx-1 max-sm:[&>span]:sr-only"
                   />
                 </>
@@ -575,12 +628,14 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
               isAdmin={isAdmin}
               canCollect={canCollect}
               lidarrMode={lidarrMode}
+              artistExcluded={artist?.excluded === true}
               onCollect={onCollect}
               onOpenAlbum={onOpenAlbum}
               onImportAlbum={onImportAlbum}
               onToggleAlbumMonitored={(id, cur) => void toggleAlbum(id, cur)}
               onToggleTrackMonitored={onToggleTrackMonitored}
               onToast={onToast}
+              onRefresh={() => void reloadArtist()}
               trackFilter={filter.trackFilterFor(album.id)}
               selected={
                 canBulkEdit && selection.active
@@ -625,19 +680,33 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
         </p>
       </ConfirmDialog>
       {artist && (
-        <ExcludeConfirm
-          isOpen={excludeOpen}
-          scope="artist"
-          name={artist.name}
-          payload={{ library_artist_id: String(artist.id) }}
-          onClose={() => setExcludeOpen(false)}
-          onSuccess={() => {
-            patchArtistMonitored(false);
-            onChanged();
-            void detail.refreshDiscography();
-          }}
-          onToast={onToast}
-        />
+        <>
+          <ExcludeConfirm
+            isOpen={excludeOpen}
+            scope="artist"
+            name={artist.name}
+            payload={{ library_artist_id: String(artist.id) }}
+            onClose={() => setExcludeOpen(false)}
+            onSuccess={() => {
+              patchArtistMonitored(false);
+              onChanged();
+              void reloadArtist();
+            }}
+            onToast={onToast}
+          />
+          <ConfirmDialog
+            isOpen={removeArtistConfirmOpen}
+            title="Remove exclusion?"
+            confirmLabel="Remove exclusion"
+            onConfirm={() => void handleRemoveArtistExclusion()}
+            onCancel={() => setRemoveArtistConfirmOpen(false)}
+            busy={removeArtistBusy}
+          >
+            <p className="text-xs sm:text-sm font-mono text-neutral-300">
+              Allow &ldquo;{artist.name}&rdquo; again? It stays unmonitored until you monitor it.
+            </p>
+          </ConfirmDialog>
+        </>
       )}
     </div>
     </PageFrame>

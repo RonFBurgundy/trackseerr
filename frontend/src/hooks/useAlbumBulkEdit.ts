@@ -18,6 +18,9 @@ export function useAlbumBulkEdit(onToast: (msg: string, tone?: 'ok' | 'error') =
       try {
         const res = await bulkEditAlbums({ album_ids: albumIds.map(String), monitored });
         onToast(`${res.albums_updated.toLocaleString()} ${res.albums_updated === 1 ? 'album' : 'albums'} ${monitored ? 'monitored' : 'unmonitored'}`);
+        if ((res.skipped_excluded ?? 0) > 0) {
+          onToast(`Skipped ${res.skipped_excluded} excluded`);
+        }
         return true;
       } catch (err: unknown) {
         onToast(errorMessage(err, 'Bulk edit failed'), 'error');

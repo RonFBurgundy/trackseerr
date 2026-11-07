@@ -43,9 +43,11 @@ from trackseerr.api.routes.activity import (
 )
 from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.clients.lidarr import (
+    LidarrApiError,
     LidarrClient,
     LidarrNotFound,
 )
+from trackseerr.exclusions import annotate_exclusions, find_exclusion
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
 from trackseerr.library_monitoring import (
     RELEASE_PRIMARY_TYPES,
@@ -103,7 +105,9 @@ def list_artists(
     )
     if not artists:
         return []
-    return _enrich_artists(db, artists)
+    enriched = _enrich_artists(db, artists)
+    annotate_exclusions(db, "artist", enriched)
+    return enriched
 
 def _ingest_artist_lidarr(db: Database, lidarr: LidarrClient, body: IngestArtistRequest) -> dict[str, Any]:
     results = lidarr.lookup_artist(body.artist_name)
@@ -230,6 +234,13 @@ def get_artist(
                 img = alb["cover_url"]
                 break
     result["image_url"] = _versioned_art_url("artist", artist_id, artist.get("art_version"), img)
+    annotate_exclusions(db, "artist", [result])
+    annotate_exclusions(
+        db,
+        "album",
+        albums,
+        artist_name_by_id={artist["id"]: artist["name"]} if artist.get("id") and artist.get("name") else None,
+    )
     return _with_discovery_ids(db, [result])[0]
 
 @router.get("/artists/{artist_id}/image", dependencies=[Depends(require_core_tier)])
@@ -320,6 +331,53 @@ def get_artist_banner(
 
     return RedirectResponse(url="/placeholder.svg", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
+def _assert_artist_not_excluded(db: Database, name: str | None, mbid: str | None) -> None:
+    hit = find_exclusion(db, artist=name, artist_mbid=mbid)
+    if hit is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{hit.describe()}. Remove the exclusion to monitor it.",
+        )
+
+
+def _assert_lidarr_artist_not_excluded(db: Database, lidarr: LidarrClient, numeric: int) -> None:
+    raw_art = _lidarr_fetch(lambda: lidarr.fetch_artist(numeric), "Artist")
+    art_name = raw_art.get("artistName") or raw_art.get("name")
+    art_mbid = raw_art.get("foreignArtistId") or raw_art.get("mbId")
+    _assert_artist_not_excluded(db, art_name, art_mbid)
+
+
+def _filter_excluded_artists(db: Database, artist_ids: list[str]) -> list[str]:
+    placeholders = ",".join("?" for _ in artist_ids)
+    rows = db.conn.execute(
+        f"SELECT id, name, foreign_artist_id, mbid FROM library_artists WHERE id IN ({placeholders})",
+        artist_ids,
+    ).fetchall()
+    allowed = []
+    for r in rows:
+        hit = find_exclusion(db, artist=r["name"], artist_mbid=r["foreign_artist_id"] or r["mbid"])
+        if not hit:
+            allowed.append(r["id"])
+    return allowed
+
+
+def _filter_lidarr_excluded_artists(db: Database, lidarr: LidarrClient, artist_ids: list[str]) -> list[str]:
+    allowed = []
+    for aid_str in artist_ids:
+        num = lidarr_numeric_id(aid_str, "Artist")
+        hit = None
+        try:
+            raw_art = _lidarr_fetch(lambda n=num: lidarr.fetch_artist(n), "Artist")
+            art_name = raw_art.get("artistName") or raw_art.get("name")
+            art_mbid = raw_art.get("foreignArtistId") or raw_art.get("mbId")
+            hit = find_exclusion(db, artist=art_name, artist_mbid=art_mbid)
+        except (LidarrApiError, LidarrNotFound, HTTPException):
+            pass
+        if not hit:
+            allowed.append(aid_str)
+    return allowed
+
+
 @router.put("/artists/{artist_id}/monitored", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=LibraryArtistRecord, response_model_exclude_unset=True)
 def set_artist_monitored(
     artist_id: str,
@@ -334,6 +392,8 @@ def set_artist_monitored(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
         numeric = lidarr_numeric_id(artist_id, "Artist")
         lidarr = require_lidarr(client)
+        if body.monitored:
+            _assert_lidarr_artist_not_excluded(db, lidarr, numeric)
         preset = body.monitor_option
         if preset is not None:
             try:
@@ -349,6 +409,9 @@ def set_artist_monitored(
     artist = db.get_library_artist(artist_id)
     if artist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+
+    if body.monitored:
+        _assert_artist_not_excluded(db, artist.get("name"), artist.get("foreign_artist_id") or artist.get("mbid"))
 
     profile_given = "metadata_profile_id" in body.model_fields_set
     if body.monitor_option is not None or profile_given:
@@ -393,6 +456,7 @@ def set_artist_monitored(
     updated = db.get_library_artist(artist_id)
     if updated is None:  # deleted between the write and the read
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artist not found")
+    annotate_exclusions(db, "artist", [updated])
     return updated
 
 @router.put(
@@ -456,9 +520,12 @@ def bulk_edit_artists(
         body.apply_monitor_to_albums if body.apply_monitor_to_albums is not None else body.monitored is False
     )
     recompute_on_change = body.apply_monitor_to_albums is None and body.monitor_option == "existing"
+    target_artist_ids = list(body.artist_ids) if has_ids else None
     if _is_lidarr(db):
         lidarr = require_lidarr(client)
-        numeric_ids = [lidarr_numeric_id(i, "Artist") for i in body.artist_ids] if has_ids else None
+        if body.monitored and has_ids and target_artist_ids:
+            target_artist_ids = _filter_lidarr_excluded_artists(db, lidarr, target_artist_ids)
+        numeric_ids = [lidarr_numeric_id(i, "Artist") for i in target_artist_ids] if target_artist_ids is not None else None
         profile_id: Optional[int] = None
         if profile_given:
             if body.quality_profile_id is None:
@@ -478,9 +545,11 @@ def bulk_edit_artists(
             )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    if body.monitored and has_ids and target_artist_ids:
+        target_artist_ids = _filter_excluded_artists(db, target_artist_ids)
     try:
         return db.bulk_edit_library_artists(
-            body.artist_ids if has_ids else None,
+            target_artist_ids,
             monitored=body.monitored,
             monitor_option=body.monitor_option,
             quality_profile_id=body.quality_profile_id if profile_given else Database._UNSET,

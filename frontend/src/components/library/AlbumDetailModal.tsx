@@ -52,7 +52,7 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   onToast,
   onOpenAlbum,
 }) => {
-  const { tracks, loading, error, patchMonitored } = useAlbumTracks(album ? album.id : null);
+  const { tracks, loading, error, patchMonitored, reload } = useAlbumTracks(album ? album.id : null);
   const mbSubmit = useMbSubmit();
   const lidarrSearch = useLidarrSearch(onToast);
   const [searchTarget, setSearchTarget] = useState<ManualSearchTarget | null>(null);
@@ -249,6 +249,8 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
             canReject={isAdmin && !lidarrMode}
             onToast={onToast}
             albumMonitored={album.monitored === true}
+            artistExcluded={album?.excluded === true || (album?.exclusion_reason ? album.exclusion_reason.toLowerCase().startsWith('excluded artist') : false)}
+            onRefresh={reload}
             onOpenAlbum={onOpenAlbum}
             renderRowAction={
               isAdmin

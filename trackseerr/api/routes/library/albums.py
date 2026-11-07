@@ -34,8 +34,11 @@ from trackseerr.api.routes.activity import (
 )
 from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.clients.lidarr import (
+    LidarrApiError,
     LidarrClient,
+    LidarrNotFound,
 )
+from trackseerr.exclusions import annotate_exclusions, find_exclusion
 from trackseerr.album_track_hydration import hydrate_album_tracks
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
 from trackseerr.mb_seed import build_release_seed, link_album_release
@@ -71,7 +74,9 @@ def list_albums(
     )
     if not albums:
         return []
-    return _enrich_albums(db, albums)
+    enriched = _enrich_albums(db, albums)
+    annotate_exclusions(db, "album", enriched)
+    return enriched
 
 @router.get("/albums/{album_id}", dependencies=[Depends(require_core_tier)], response_model=LibraryAlbumRecord, response_model_exclude_unset=True)
 def get_album(
@@ -89,11 +94,30 @@ def get_album(
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
     result = dict(album)
+    art = db.get_library_artist(result["artist_id"]) if result.get("artist_id") else None
+    artist_name = art["name"] if art else None
+    result["artist_name"] = artist_name
     result["cover_url"] = _versioned_art_url("album", album_id, album.get("art_version"), album.get("cover_url"))
     tracks = db.list_library_tracks(album_id=album_id, limit=500)
     for t in tracks:
         file_info = db.get_library_file_for_track(t["id"])
         t["file"] = file_info
+        if not t.get("artist_name"):
+            t["artist_name"] = artist_name
+        if not t.get("album_title"):
+            t["album_title"] = result.get("title")
+    annotate_exclusions(
+        db,
+        "album",
+        [result],
+        artist_name_by_id={result["artist_id"]: artist_name} if result.get("artist_id") and artist_name else None,
+    )
+    annotate_exclusions(
+        db,
+        "track",
+        tracks,
+        artist_name_by_id={result["artist_id"]: artist_name} if result.get("artist_id") and artist_name else None,
+    )
     result["tracks"] = tracks
     return result
 
@@ -137,12 +161,36 @@ def set_album_monitored(
     if _is_lidarr(db):
         numeric = lidarr_numeric_id(album_id, "Album")
         lidarr = require_lidarr(client)
+        if body.monitored:
+            raw_alb = _lidarr_fetch(lambda: lidarr.fetch_album(numeric), "Album")
+            art_name = raw_alb.get("artist", {}).get("artistName") if isinstance(raw_alb.get("artist"), dict) else None
+            if not art_name:
+                art_name = raw_alb.get("artistName")
+            alb_title = raw_alb.get("title")
+            alb_mbid = raw_alb.get("foreignAlbumId")
+            hit = find_exclusion(db, artist=art_name, album=alb_title, album_mbid=alb_mbid)
+            if hit is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=f"{hit.describe()}. Remove the exclusion to monitor it.",
+                )
         return _lidarr_mutation(
             db, lambda: lidarr_library.set_album_monitored(lidarr, numeric, body.monitored), "Album"
         )
     album = db.get_library_album(album_id)
     if album is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+
+    if body.monitored:
+        art = db.get_library_artist(album["artist_id"]) if album.get("artist_id") else None
+        art_name = art["name"] if art else None
+        alb_mbid = album.get("mb_release_group_id") or album.get("foreign_album_id")
+        hit = find_exclusion(db, artist=art_name, album=album.get("title"), album_mbid=alb_mbid)
+        if hit is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{hit.describe()}. Remove the exclusion to monitor it.",
+            )
 
     if body.monitored and body.cascade_tracks:
         hydrate_album_tracks(db, enricher, album_id)  # no tracks yet: fetch them so the cascade has rows to monitor
@@ -154,7 +202,65 @@ def set_album_monitored(
     updated = db.get_library_album(album_id)
     if updated is None:  # deleted between the write and the read
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    annotate_exclusions(db, "album", [updated])
     return updated
+
+def _filter_excluded_albums(db: Database, album_ids: list[str]) -> tuple[list[str], int]:
+    placeholders = ",".join("?" for _ in album_ids)
+    rows = db.conn.execute(
+        f"SELECT id, artist_id, title, mb_release_group_id, foreign_album_id FROM library_albums WHERE id IN ({placeholders})",
+        album_ids,
+    ).fetchall()
+    album_map = {r["id"]: dict(r) for r in rows}
+    artist_ids = {r["artist_id"] for r in album_map.values() if r.get("artist_id")}
+    artist_names: dict[str, str] = {}
+    if artist_ids:
+        a_placeholders = ",".join("?" for _ in artist_ids)
+        a_rows = db.conn.execute(
+            f"SELECT id, name FROM library_artists WHERE id IN ({a_placeholders})",
+            list(artist_ids),
+        ).fetchall()
+        artist_names = {r["id"]: r["name"] for r in a_rows}
+
+    allowed_ids: list[str] = []
+    skipped = 0
+    for aid in album_ids:
+        alb = album_map.get(aid)
+        if not alb:
+            allowed_ids.append(aid)
+            continue
+        art_name = artist_names.get(alb.get("artist_id"))
+        alb_mbid = alb.get("mb_release_group_id") or alb.get("foreign_album_id")
+        hit = find_exclusion(db, artist=art_name, album=alb.get("title"), album_mbid=alb_mbid)
+        if hit is not None:
+            skipped += 1
+        else:
+            allowed_ids.append(aid)
+    return allowed_ids, skipped
+
+
+def _filter_lidarr_excluded_albums(db: Database, lidarr: LidarrClient, album_ids: list[str]) -> tuple[list[str], int]:
+    allowed = []
+    skipped = 0
+    for alb_id_str in album_ids:
+        num = lidarr_numeric_id(alb_id_str, "Album")
+        hit = None
+        try:
+            raw_alb = _lidarr_fetch(lambda n=num: lidarr.fetch_album(n), "Album")
+            art_name = raw_alb.get("artist", {}).get("artistName") if isinstance(raw_alb.get("artist"), dict) else None
+            if not art_name:
+                art_name = raw_alb.get("artistName")
+            alb_title = raw_alb.get("title")
+            alb_mbid = raw_alb.get("foreignAlbumId")
+            hit = find_exclusion(db, artist=art_name, album=alb_title, album_mbid=alb_mbid)
+        except (LidarrApiError, LidarrNotFound, HTTPException):
+            pass
+        if hit is not None:
+            skipped += 1
+        else:
+            allowed.append(alb_id_str)
+    return allowed, skipped
+
 
 @router.post("/albums/bulk-edit", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=AlbumsUpdatedResponse, response_model_exclude_unset=True)
 def bulk_edit_albums(
@@ -163,27 +269,41 @@ def bulk_edit_albums(
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     enricher: MbidEnricherClient = Depends(get_mbid_enricher),
     _admin: dict[str, Any] = Depends(require_admin),
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Monitors or unmonitors many albums at once (native: albums and their tracks; Lidarr: one album/monitor call)."""
     if not body.album_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="album_ids must not be empty")
+
+    target_ids = list(body.album_ids)
+    skipped_excluded = 0
+
     if _is_lidarr(db):
         lidarr = require_lidarr(client)
-        numeric_ids = [lidarr_numeric_id(i, "Album") for i in body.album_ids]
+        if body.monitored:
+            target_ids, skipped_excluded = _filter_lidarr_excluded_albums(db, lidarr, target_ids)
+
+        numeric_ids = [lidarr_numeric_id(i, "Album") for i in target_ids]
         updated = _lidarr_mutation(
             db, lambda: lidarr_library.set_albums_monitored(lidarr, numeric_ids, body.monitored), "Album"
-        )
-        return {"albums_updated": int(updated)}
+        ) if numeric_ids else 0
+        res: dict[str, Any] = {"albums_updated": int(updated)}
+        if skipped_excluded > 0:
+            res["skipped_excluded"] = skipped_excluded
+        return res
+
     if body.monitored:
-        # Albums without a tracklist are hydrated first, bounded by BULK_HYDRATE_LIMIT albums AND one TOTAL deadline
-        # for the whole batch (each fetch is a rate-limited MusicBrainz call). Albums not reached in time are still
-        # monitored and simply hydrate lazily on first open.
+        target_ids, skipped_excluded = _filter_excluded_albums(db, target_ids)
         deadline = time.monotonic() + BULK_HYDRATE_DEADLINE_SECONDS
-        for alb_id in body.album_ids[:BULK_HYDRATE_LIMIT]:
+        for alb_id in target_ids[:BULK_HYDRATE_LIMIT]:
             if time.monotonic() >= deadline:
                 break
             hydrate_album_tracks(db, enricher, alb_id, deadline=deadline)
-    return {"albums_updated": db.bulk_set_albums_monitored(body.album_ids, body.monitored)}
+
+    updated_count = db.bulk_set_albums_monitored(target_ids, body.monitored) if target_ids else 0
+    res_albums: dict[str, Any] = {"albums_updated": updated_count}
+    if skipped_excluded > 0:
+        res_albums["skipped_excluded"] = skipped_excluded
+    return res_albums
 
 @router.post("/albums/{album_id}/search", dependencies=[Depends(require_core_tier), Depends(track_admin_actor)], response_model=CommandResponse, response_model_exclude_unset=True)
 def search_album(

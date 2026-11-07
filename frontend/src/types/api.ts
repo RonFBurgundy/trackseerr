@@ -6910,6 +6910,8 @@ export interface components {
         AlbumsUpdatedResponse: {
             /** Albums Updated */
             albums_updated: number;
+            /** Skipped Excluded */
+            skipped_excluded?: number | null;
         };
         /** ApiKeyRegenerateResponse */
         ApiKeyRegenerateResponse: {
@@ -8897,6 +8899,12 @@ export interface components {
             discovery_id?: string | null;
             /** End Year */
             end_year?: number | null;
+            /** Excluded */
+            excluded?: boolean | null;
+            /** Exclusion Id */
+            exclusion_id?: string | null;
+            /** Exclusion Reason */
+            exclusion_reason?: string | null;
             /** Foreign Artist Id */
             foreign_artist_id?: string | null;
             /** Genres */
@@ -9411,6 +9419,12 @@ export interface components {
             cover_url?: string | null;
             /** Created At */
             created_at?: string | null;
+            /** Excluded */
+            excluded?: boolean | null;
+            /** Exclusion Id */
+            exclusion_id?: string | null;
+            /** Exclusion Reason */
+            exclusion_reason?: string | null;
             /** Foreign Album Id */
             foreign_album_id?: string | null;
             /** Genres */
@@ -9484,6 +9498,12 @@ export interface components {
             discovery_id?: string | null;
             /** End Year */
             end_year?: number | null;
+            /** Excluded */
+            excluded?: boolean | null;
+            /** Exclusion Id */
+            exclusion_id?: string | null;
+            /** Exclusion Reason */
+            exclusion_reason?: string | null;
             /** Foreign Artist Id */
             foreign_artist_id?: string | null;
             /** Genres */
@@ -9853,6 +9873,12 @@ export interface components {
             disc_number?: number | null;
             /** Duration Seconds */
             duration_seconds?: number | null;
+            /** Excluded */
+            excluded?: boolean | null;
+            /** Exclusion Id */
+            exclusion_id?: string | null;
+            /** Exclusion Reason */
+            exclusion_reason?: string | null;
             file?: components["schemas"]["LibraryFileRecord"] | null;
             /** Foreign Track Id */
             foreign_track_id?: string | null;
@@ -14453,6 +14479,8 @@ export interface components {
         };
         /** TracksUpdatedResponse */
         TracksUpdatedResponse: {
+            /** Skipped Excluded */
+            skipped_excluded?: number | null;
             /** Tracks Updated */
             tracks_updated: number;
         };

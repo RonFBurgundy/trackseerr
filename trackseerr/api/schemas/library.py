@@ -70,6 +70,9 @@ class LibraryTrackRecord(ApiModel):
     owned_elsewhere: Optional[OwnedElsewhere] = None
     has_file: Optional[bool] = None  # Lidarr mode only
     source: Optional[str] = None  # "lidarr" in Lidarr mode
+    excluded: Optional[bool] = None
+    exclusion_id: Optional[str] = None
+    exclusion_reason: Optional[str] = None
 
 
 class MbUnlinkedAlbum(ApiModel):
@@ -142,6 +145,9 @@ class LibraryAlbumRecord(ApiModel):
     added_at: Optional[str] = None  # Lidarr mode
     size_bytes: Optional[int] = None  # Lidarr mode
     source: Optional[str] = None  # "lidarr" in Lidarr mode
+    excluded: Optional[bool] = None
+    exclusion_id: Optional[str] = None
+    exclusion_reason: Optional[str] = None
 
 
 class LibraryArtistFields(ApiModel):
@@ -168,6 +174,9 @@ class LibraryArtistFields(ApiModel):
     begin_year: Optional[int] = None
     end_year: Optional[int] = None
     popularity: Optional[int] = None
+    excluded: Optional[bool] = None
+    exclusion_id: Optional[str] = None
+    exclusion_reason: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     sort_name: Optional[str] = None
@@ -319,10 +328,12 @@ class BulkArtistsResult(ApiModel):
 
 class AlbumsUpdatedResponse(ApiModel):
     albums_updated: int
+    skipped_excluded: Optional[int] = None
 
 
 class TracksUpdatedResponse(ApiModel):
     tracks_updated: int
+    skipped_excluded: Optional[int] = None
 
 
 # -------------------------------------------------------------------------------------------- metadata profiles

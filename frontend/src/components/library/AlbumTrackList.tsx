@@ -25,6 +25,10 @@ export interface AlbumTrackListProps {
   onToast?: (msg: string, tone?: 'ok' | 'error') => void;
   /** Opens the specified album detail view when clicking an "On <album>" badge. */
   onOpenAlbum?: (albumId: string) => void;
+  /** True when the parent artist (or album) is excluded. */
+  artistExcluded?: boolean;
+  /** Callback to refresh tracks/record after an exclusion changes. */
+  onRefresh?: () => void;
 }
 
 /** One album's tracks (from the paged endpoint) with quality badge and monitoring switch. */
@@ -42,6 +46,8 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
   canReject = false,
   onToast,
   onOpenAlbum,
+  artistExcluded = false,
+  onRefresh,
 }) => {
   const [historyTrack, setHistoryTrack] = useState<TrackItem | null>(null);
   if (loading) {
@@ -112,19 +118,30 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                 </span>
               )}
               {renderRowAction?.(t)}
-              {isAdmin && canMonitorTracks && t.monitored !== null && (
+              {isAdmin && canMonitorTracks && (t.monitored !== null || t.excluded === true) && (
                 <div className="flex items-center gap-1.5 pl-1">
                   <span
                     className={`text-[9px] uppercase tracking-wider hidden sm:inline ${
-                      t.monitored ? 'text-[#e5a00d]' : 'text-neutral-500'
+                      t.excluded
+                        ? 'text-red-400'
+                        : t.monitored
+                        ? 'text-[#e5a00d]'
+                        : 'text-neutral-500'
                     }`}
                   >
-                    {t.monitored ? 'Monitored' : 'Unmonitored'}
+                    {t.excluded ? 'Excluded' : t.monitored ? 'Monitored' : 'Unmonitored'}
                   </span>
                   <TactileSwitch
-                    checked={t.monitored === true}
+                    checked={!t.excluded && t.monitored === true}
+                    disabled={t.excluded === true}
+                    variant={t.excluded ? 'danger' : 'default'}
+                    title={
+                      t.excluded
+                        ? `${t.exclusion_reason || 'Excluded'}. Remove the exclusion to monitor it.`
+                        : undefined
+                    }
                     onChange={() => onToggleMonitored(t.id, t.monitored === true)}
-                    ariaLabel={`Monitor ${t.title}`}
+                    ariaLabel={t.excluded ? `Excluded: ${t.title}` : `Monitor ${t.title}`}
                   />
                 </div>
               )}
@@ -134,7 +151,20 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
       })}
     </div>
     {historyTrack && (
-      <ItemHistoryModal isOpen onClose={() => setHistoryTrack(null)} entity="track" entityId={String(historyTrack.id)} title={historyTrack.title ?? ''} canReject={canReject} onToast={onToast} />
+      <ItemHistoryModal
+        isOpen
+        onClose={() => setHistoryTrack(null)}
+        entity="track"
+        entityId={String(historyTrack.id)}
+        title={historyTrack.title ?? ''}
+        canReject={canReject}
+        onToast={onToast}
+        excluded={historyTrack.excluded === true}
+        exclusionId={historyTrack.exclusion_id}
+        exclusionReason={historyTrack.exclusion_reason}
+        artistExcluded={artistExcluded || (historyTrack.exclusion_reason ? historyTrack.exclusion_reason.toLowerCase().startsWith('excluded artist') : false)}
+        onExclusionChanged={onRefresh}
+      />
     )}
     </>
   );

@@ -5,7 +5,9 @@ import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { textMatches } from '@/hooks/useDiscographyFilter';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
 import { errorMessage } from '@/services/apiClient';
+import { deleteExclusion } from '@/services/exclusionsService';
 import {
+  ConfirmDialog,
   MachinedCard,
   OverflowMenu,
   SelectionCheckbox,
@@ -32,6 +34,10 @@ export interface ArtistAlbumCardProps {
   selected?: { checked: boolean; onToggle: () => void };
   /** Set when the discography filter matched this album through its tracks: opens it and narrows the list. */
   trackFilter?: string;
+  /** True when the parent artist is excluded. */
+  artistExcluded?: boolean;
+  /** Refreshes parent record when exclusions change. */
+  onRefresh?: () => void;
 }
 
 /** One release in an artist's discography; expanding it loads the tracks through the paged endpoint. */
@@ -48,6 +54,8 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   onToast,
   selected,
   trackFilter,
+  artistExcluded = false,
+  onRefresh,
 }) => {
   const [expanded, setExpanded] = useState<boolean>(false);
   // An album that matched the discography filter through its tracks opens itself to show them.
@@ -55,7 +63,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
     if (trackFilter !== undefined) setExpanded(true);
   }, [trackFilter]);
   const tracksId = useId();
-  const { tracks, loading, error, patchMonitored } = useAlbumTracks(expanded ? album.id : null);
+  const { tracks, loading, error, patchMonitored, reload } = useAlbumTracks(expanded ? album.id : null);
   // Narrow to the matching tracks when the filter matched through them; fall back to all if the lookup was broader.
   const shownTracks = useMemo(() => {
     if (trackFilter === undefined) return tracks;
@@ -79,17 +87,52 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
 
   const [historyOpen, setHistoryOpen] = useState<boolean>(false);
   const [excludeOpen, setExcludeOpen] = useState<boolean>(false);
+  const [removeConfirmOpen, setRemoveConfirmOpen] = useState<boolean>(false);
+  const [removeBusy, setRemoveBusy] = useState<boolean>(false);
   const toggleExpanded = (): void => setExpanded((v) => !v);
+
+  const isExcludedWithArtist = Boolean(
+    album.excluded &&
+      (artistExcluded ||
+        (album.exclusion_reason && album.exclusion_reason.toLowerCase().startsWith('excluded artist')))
+  );
+
+  const handleRemoveExclusion = async (): Promise<void> => {
+    if (!album.exclusion_id) return;
+    setRemoveBusy(true);
+    try {
+      await deleteExclusion(album.exclusion_id);
+      onToast('Exclusion removed', 'ok');
+      setRemoveConfirmOpen(false);
+      onRefresh?.();
+    } catch (err: unknown) {
+      onToast(errorMessage(err, 'Failed to remove exclusion'), 'error');
+    } finally {
+      setRemoveBusy(false);
+    }
+  };
 
   const menuItems: OverflowMenuItem[] = [];
   if (isAdmin) {
-    menuItems.push({
-      key: 'monitor',
-      label: 'Monitored',
-      icon: <Sliders className="h-3.5 w-3.5 text-[#e5a00d]" />,
-      checked: album.monitored === true,
-      onSelect: () => onToggleAlbumMonitored(album.id, album.monitored === true),
-    });
+    if (album.excluded) {
+      menuItems.push({
+        key: 'monitor',
+        label: 'Excluded',
+        icon: <Ban className="h-3.5 w-3.5 text-red-400" />,
+        disabled: true,
+        checked: false,
+        title: `${album.exclusion_reason || 'Excluded'}. Remove the exclusion to monitor it.`,
+        onSelect: () => {},
+      });
+    } else {
+      menuItems.push({
+        key: 'monitor',
+        label: 'Monitored',
+        icon: <Sliders className="h-3.5 w-3.5 text-[#e5a00d]" />,
+        checked: album.monitored === true,
+        onSelect: () => onToggleAlbumMonitored(album.id, album.monitored === true),
+      });
+    }
   }
   if (isAdmin && lidarrMode) {
     menuItems.push({
@@ -119,12 +162,32 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
       icon: <FolderInput className="h-3.5 w-3.5" />,
       onSelect: () => onImportAlbum(album),
     });
-    menuItems.push({
-      key: 'exclude',
-      label: 'Exclude album…',
-      icon: <Ban className="h-3.5 w-3.5" />,
-      onSelect: () => setExcludeOpen(true),
-    });
+    if (album.excluded) {
+      if (isExcludedWithArtist) {
+        menuItems.push({
+          key: 'exclude',
+          label: 'Excluded with the artist',
+          icon: <Ban className="h-3.5 w-3.5 text-neutral-500" />,
+          disabled: true,
+          title: 'Excluded with the artist (undo on artist page)',
+          onSelect: () => {},
+        });
+      } else {
+        menuItems.push({
+          key: 'exclude',
+          label: 'Remove exclusion',
+          icon: <Ban className="h-3.5 w-3.5 text-red-400" />,
+          onSelect: () => setRemoveConfirmOpen(true),
+        });
+      }
+    } else {
+      menuItems.push({
+        key: 'exclude',
+        label: 'Exclude album…',
+        icon: <Ban className="h-3.5 w-3.5" />,
+        onSelect: () => setExcludeOpen(true),
+      });
+    }
   }
   if (canCollect) {
     menuItems.push({
@@ -185,22 +248,34 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
 
         <div className="flex items-center flex-shrink-0 -my-1.5">
           {isAdmin && (
-            <button
-              type="button"
-              aria-pressed={album.monitored === true}
-              aria-label={`${album.monitored ? 'Monitored' : 'Not monitored'} ${album.title ?? ''}`.trim()}
-              title={album.monitored ? 'Monitored for automated library acquisition' : 'Unmonitored'}
-              onClick={() => onToggleAlbumMonitored(album.id, album.monitored === true)}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
-            >
-              <Bookmark
-                className={`h-4 w-4 ${
-                  album.monitored === true
-                    ? 'fill-[#e5a00d] text-[#e5a00d]'
-                    : 'text-neutral-500'
-                }`}
-              />
-            </button>
+            album.excluded ? (
+              <button
+                type="button"
+                disabled
+                aria-label={`Excluded: ${album.title ?? ''}`}
+                title={`${album.exclusion_reason || 'Excluded'}. Remove the exclusion to monitor it.`}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] text-red-400 opacity-60 cursor-not-allowed focus:outline-none"
+              >
+                <Ban className="h-4 w-4 text-red-400" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                aria-pressed={album.monitored === true}
+                aria-label={`${album.monitored ? 'Monitored' : 'Not monitored'} ${album.title ?? ''}`.trim()}
+                title={album.monitored ? 'Monitored for automated library acquisition' : 'Unmonitored'}
+                onClick={() => onToggleAlbumMonitored(album.id, album.monitored === true)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-[3px] text-neutral-400 hover:text-white focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+              >
+                <Bookmark
+                  className={`h-4 w-4 ${
+                    album.monitored === true
+                      ? 'fill-[#e5a00d] text-[#e5a00d]'
+                      : 'text-neutral-500'
+                  }`}
+                />
+              </button>
+            )
           )}
           <button
             type="button"
@@ -231,7 +306,12 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             canReject={isAdmin && !lidarrMode}
             onToast={onToast}
             albumMonitored={album.monitored === true}
+            artistExcluded={artistExcluded || album.excluded === true}
             onToggleMonitored={(id, cur) => void handleTrackToggle(id, cur)}
+            onRefresh={() => {
+              void reload();
+              onRefresh?.();
+            }}
           />
         </div>
       )}
@@ -248,9 +328,22 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
           if (album.monitored) {
             onToggleAlbumMonitored(album.id, true);
           }
+          onRefresh?.();
         }}
         onToast={onToast}
       />
+      <ConfirmDialog
+        isOpen={removeConfirmOpen}
+        title="Remove exclusion?"
+        confirmLabel="Remove exclusion"
+        onConfirm={() => void handleRemoveExclusion()}
+        onCancel={() => setRemoveConfirmOpen(false)}
+        busy={removeBusy}
+      >
+        <p className="text-xs sm:text-sm font-mono text-neutral-300">
+          Allow &ldquo;{album.title}&rdquo; again? It stays unmonitored until you monitor it.
+        </p>
+      </ConfirmDialog>
     </MachinedCard>
   );
 };

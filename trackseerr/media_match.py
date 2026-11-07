@@ -31,13 +31,20 @@ def norm_name(text: str) -> str:
     return " ".join(cleaned.split())
 
 
+def split_artist_credits(text: str) -> list[str]:
+    """Split artist credit string on common delimiters into stripped non-empty parts."""
+    if not text:
+        return []
+    parts = _SPLIT_CREDITS_RE.split(text)
+    return [p.strip() for p in parts if p.strip()]
+
+
 def artist_credits(text: str) -> list[str]:
     """Split artist credit string on common delimiters and normalize parts."""
     if not text:
         return []
-    parts = _SPLIT_CREDITS_RE.split(text)
     credits: list[str] = []
-    for part in parts:
+    for part in split_artist_credits(text):
         normed = norm_name(part)
         if normed:
             credits.append(normed)

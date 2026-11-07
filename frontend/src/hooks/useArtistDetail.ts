@@ -27,6 +27,7 @@ export interface UseArtistDetailReturn {
   patchAlbumMonitored: (albumId: number | string, monitored: boolean) => void;
   patchArtistMonitored: (monitored: boolean) => void;
   patchArtistTags: (tagIds: number[]) => void;
+  reloadArtist: () => Promise<void>;
 }
 
 /** Artist detail (with its releases) from `/api/library/artists/{id}`; works in native and Lidarr mode. */
@@ -125,6 +126,16 @@ export function useArtistDetail(
     setArtist((prev) => (prev ? { ...prev, tags: tagIds } : prev));
   }, []);
 
+  const reloadArtist = useCallback(async (): Promise<void> => {
+    try {
+      const data = await getArtistDetail(artistId);
+      setArtist(data);
+      onChanged();
+    } catch (err: unknown) {
+      onToast(errorMessage(err, 'Failed to reload artist details'), 'error');
+    }
+  }, [artistId, onChanged, onToast]);
+
   return {
     artist,
     loading,
@@ -135,5 +146,6 @@ export function useArtistDetail(
     patchAlbumMonitored,
     patchArtistMonitored,
     patchArtistTags,
+    reloadArtist,
   };
 }

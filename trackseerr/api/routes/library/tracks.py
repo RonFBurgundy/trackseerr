@@ -27,6 +27,7 @@ from trackseerr.api.schemas.library import (
 )
 from trackseerr.clients.core_client import CoreClient
 from trackseerr.config import Config
+from trackseerr.exclusions import annotate_exclusions, find_exclusion
 from trackseerr.library_availability import get_item_availability
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.models import (
@@ -63,7 +64,9 @@ def list_tracks(
         limit=limit,
         offset=offset,
     )
-    return _enrich_tracks(db, tracks)
+    enriched = _enrich_tracks(db, tracks)
+    annotate_exclusions(db, "track", enriched)
+    return enriched
 
 @router.put("/tracks/{track_id}/monitored", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=LibraryTrackRecord, response_model_exclude_unset=True)
 def set_track_monitored(
@@ -77,10 +80,29 @@ def set_track_monitored(
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
 
+    if body.monitored:
+        art = db.get_library_artist(track["artist_id"]) if track.get("artist_id") else None
+        art_name = art["name"] if art else None
+        alb = db.get_library_album(track["album_id"]) if track.get("album_id") else None
+        alb_title = alb["title"] if alb else None
+        hit = find_exclusion(
+            db,
+            artist=art_name,
+            title=track.get("title"),
+            album=alb_title,
+            recording_mbid=track.get("mb_recording_id"),
+        )
+        if hit is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"{hit.describe()}. Remove the exclusion to monitor it.",
+            )
+
     db.set_track_monitored(track_id=track_id, monitored=body.monitored)
     updated = db.get_library_track(track_id)
     if updated is None:  # deleted between the write and the read
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
+    annotate_exclusions(db, "track", [updated])
     return updated
 
 @router.post("/tracks/bulk-edit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=TracksUpdatedResponse, response_model_exclude_unset=True)
@@ -88,11 +110,65 @@ def bulk_edit_tracks(
     body: TrackBulkEditRequest,
     db: Database = Depends(get_db),
     _admin: dict[str, Any] = Depends(require_admin),
-) -> dict[str, int]:
+) -> dict[str, Any]:
     """Sets ``monitored`` on many tracks at once (native mode only; 409 while Lidarr manages the library)."""
     if not body.track_ids:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="track_ids must not be empty")
-    return {"tracks_updated": db.bulk_set_tracks_monitored(body.track_ids, body.monitored)}
+
+    target_ids = list(body.track_ids)
+    skipped_excluded = 0
+    if body.monitored:
+        placeholders = ",".join("?" for _ in target_ids)
+        rows = db.conn.execute(
+            f"SELECT id, artist_id, album_id, title, mb_recording_id FROM library_tracks WHERE id IN ({placeholders})",
+            target_ids,
+        ).fetchall()
+        track_map = {r["id"]: dict(r) for r in rows}
+        artist_ids = {r["artist_id"] for r in track_map.values() if r.get("artist_id")}
+        album_ids = {r["album_id"] for r in track_map.values() if r.get("album_id")}
+        artist_names: dict[str, str] = {}
+        if artist_ids:
+            a_placeholders = ",".join("?" for _ in artist_ids)
+            a_rows = db.conn.execute(
+                f"SELECT id, name FROM library_artists WHERE id IN ({a_placeholders})",
+                list(artist_ids),
+            ).fetchall()
+            artist_names = {r["id"]: r["name"] for r in a_rows}
+        album_titles: dict[str, str] = {}
+        if album_ids:
+            alb_placeholders = ",".join("?" for _ in album_ids)
+            alb_rows = db.conn.execute(
+                f"SELECT id, title FROM library_albums WHERE id IN ({alb_placeholders})",
+                list(album_ids),
+            ).fetchall()
+            album_titles = {r["id"]: r["title"] for r in alb_rows}
+
+        allowed_ids: list[str] = []
+        for tid in target_ids:
+            t = track_map.get(tid)
+            if not t:
+                allowed_ids.append(tid)
+                continue
+            art_name = artist_names.get(t.get("artist_id"))
+            alb_title = album_titles.get(t.get("album_id"))
+            hit = find_exclusion(
+                db,
+                artist=art_name,
+                title=t.get("title"),
+                album=alb_title,
+                recording_mbid=t.get("mb_recording_id"),
+            )
+            if hit is not None:
+                skipped_excluded += 1
+            else:
+                allowed_ids.append(tid)
+        target_ids = allowed_ids
+
+    updated = db.bulk_set_tracks_monitored(target_ids, body.monitored) if target_ids else 0
+    res: dict[str, Any] = {"tracks_updated": updated}
+    if skipped_excluded > 0:
+        res["skipped_excluded"] = skipped_excluded
+    return res
 
 @router.delete("/tracks/{track_id}", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=SuccessResponse, response_model_exclude_unset=True)
 def delete_track(

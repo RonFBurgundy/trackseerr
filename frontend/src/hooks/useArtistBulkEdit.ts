@@ -67,6 +67,10 @@ export function useArtistBulkEdit(
       try {
         const result = await bulkEditArtists(target);
         onToast(`${staged.changes}: ${formatBulkArtistResult(result)}`);
+        const skipped = (result as { skipped_excluded?: number }).skipped_excluded;
+        if (typeof skipped === 'number' && skipped > 0) {
+          onToast(`Skipped ${skipped} excluded`);
+        }
         setPending(null);
         onDone();
         return true;

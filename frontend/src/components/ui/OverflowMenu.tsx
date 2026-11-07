@@ -10,6 +10,7 @@ export interface OverflowMenuItem {
   /** Reflects a toggled state (role menuitemcheckbox). */
   checked?: boolean;
   highlight?: boolean;
+  title?: string;
   onSelect: () => void;
 }
 
@@ -174,6 +175,7 @@ export const OverflowMenu: React.FC<OverflowMenuProps> = ({ items, label, attent
               role={item.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
               aria-checked={item.checked}
               disabled={item.disabled}
+              title={item.title}
               onClick={() => {
                 close();
                 item.onSelect();

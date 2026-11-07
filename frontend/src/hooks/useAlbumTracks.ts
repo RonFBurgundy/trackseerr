@@ -9,6 +9,7 @@ export interface UseAlbumTracksReturn {
   error: string | null;
   /** Applies a monitored change to the loaded rows after the server accepted it. */
   patchMonitored: (trackId: number | string, monitored: boolean) => void;
+  reload: () => Promise<void>;
 }
 
 function isAbort(err: unknown): boolean {
@@ -20,11 +21,12 @@ export function useAlbumTracks(albumId: number | string | null): UseAlbumTracksR
   const [tracks, setTracks] = useState<TrackItem[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState<number>(0);
 
   useEffect(() => {
-    setTracks([]);
     setError(null);
     if (albumId === null) {
+      setTracks([]);
       setLoading(false);
       return undefined;
     }
@@ -42,11 +44,15 @@ export function useAlbumTracks(albumId: number | string | null): UseAlbumTracksR
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [albumId]);
+  }, [albumId, reloadToken]);
 
   const patchMonitored = useCallback((trackId: number | string, monitored: boolean): void => {
     setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, monitored } : t)));
   }, []);
 
-  return { tracks, loading, error, patchMonitored };
+  const reload = useCallback(async (): Promise<void> => {
+    setReloadToken((v) => v + 1);
+  }, []);
+
+  return { tracks, loading, error, patchMonitored, reload };
 }
