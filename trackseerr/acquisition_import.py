@@ -53,8 +53,8 @@ from trackseerr.artist_folders import resolve_artist_folder
 from trackseerr.track_credits import naming_credits
 from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
-from trackseerr.lidarr_release import titles_match
-from trackseerr.quality import evaluate_release, parse_release_title
+from trackseerr.lidarr_release import norm_title, titles_match
+from trackseerr.quality import QualityProfile, evaluate_release, parse_release_title
 from trackseerr.storage import Database
 
 from trackseerr.import_files import (
@@ -194,9 +194,19 @@ def record_import_events(
     common: dict[str, Any] = {
         "track_id": track_id, "request_id": item.get("request_id"), "download_id": download_id, **provenance,
     }
+    details: dict[str, Any] = {
+        "path": str(placed),
+        "quality": quality,
+        "codec": codec,
+        "release": item.get("title"),
+    }
+    skipped = item.get("skipped_files")
+    if skipped:
+        details["skipped_other_files"] = len(skipped)
+        details["note"] = f"Skipped {len(skipped)} other files in {item.get('title')}: not the wanted song"
     emit(
         db, "imported", message=f"Imported {placed.name}",
-        details={"path": str(placed), "quality": quality, "codec": codec, "release": item.get("title")}, **common,
+        details=details, **common,
     )
     if replaced_rows:
         old_quality = ", ".join(dict.fromkeys(str(r.get("quality_name") or "Unknown") for r in replaced_rows))
@@ -234,6 +244,7 @@ class _ImportJob:
     import_mode: str
     status_dict: dict[str, Any]
     target_lookup: Any
+    db: Optional[Database] = None
     audio_files: list[Path] = field(default_factory=list)
     probes: dict[str, Any] = field(default_factory=dict)
     req: Optional[dict[str, Any]] = None
@@ -245,6 +256,7 @@ class _ImportJob:
     imported_paths: list[str] = field(default_factory=list)
     held_files: list[str] = field(default_factory=list)
     duplicate_files: list[str] = field(default_factory=list)
+    skipped_files: list[str] = field(default_factory=list)
     held_msg: Optional[str] = None
     placed_to_track: dict[str, dict[str, Any]] = field(default_factory=dict)
     recycled_in_place: dict[str, tuple[DisposeResult, dict[str, Any]]] = field(default_factory=dict)
@@ -256,6 +268,323 @@ class _ImportJob:
     should_keep_seeding: bool = False
     duplicate_owned_title: Optional[str] = None
     duplicate_owned_track_id: Optional[str] = None
+    selected_track_match: Optional[tuple[Path, dict[str, Any]]] = None
+
+
+_LEADING_TRACK_DISC_RE = re.compile(
+    r"^(?:(?:\d{1,3}\s*[-._]\s*)?\d{1,3}|\d{1,4})\s*[-._\s]\s*",
+    re.IGNORECASE,
+)
+_SINGLE_VARIANT_RE = re.compile(
+    r"(?:[\(\[]\s*(?:(?:original\s+)?single\s+version|(?:radio|single)\s+edit|(?:radio|single)\s+version|single)\s*[\)\]]|\b(?:single\s+version|single\s+edit|radio\s+edit|radio\s+version)\b)",
+    re.IGNORECASE,
+)
+
+
+def _strip_leading_track_number(stem: str) -> str:
+    cleaned = _LEADING_TRACK_DISC_RE.sub("", stem).strip()
+    return cleaned if cleaned else stem
+
+
+def _strip_artist_prefix(title: str, artist: Optional[str]) -> str:
+    if not artist:
+        return title
+    art_clean = artist.strip().casefold()
+    t_clean = title.strip()
+    if t_clean.casefold().startswith(art_clean):
+        remainder = t_clean[len(art_clean):].lstrip(" -–—_.")
+        if remainder:
+            return remainder
+    return title
+
+
+def _candidate_file_title(af: Path, meta: dict[str, Any], artist: Optional[str] = None) -> str:
+    eff = _effective_file_title(meta) if meta else None
+    if eff and str(eff).strip():
+        tag_title = str(eff).strip()
+    else:
+        tag_title = str(meta.get("title") or "").strip()
+    if tag_title:
+        cleaned_tag = _strip_leading_track_number(tag_title)
+        if artist:
+            cleaned_tag = _strip_artist_prefix(cleaned_tag, artist)
+        return cleaned_tag
+    stem = af.stem
+    cleaned = _strip_leading_track_number(stem)
+    if artist:
+        cleaned = _strip_artist_prefix(cleaned, artist)
+    return cleaned
+
+
+def _resolve_wanted_track(
+    db: Database,
+    item: dict[str, Any],
+    req: Optional[dict[str, Any]],
+) -> Optional[dict[str, Any]]:
+    """Resolves a catalog track row for a wanted download item without creating any new rows."""
+    if item.get("track_id"):
+        trk = db.get_library_track(str(item["track_id"]))
+        if trk:
+            return trk
+    if req and req.get("track_id"):
+        trk = db.get_library_track(str(req["track_id"]))
+        if trk:
+            return trk
+    rec_id = (req.get("mb_recording_id") if req else None) or item.get("mb_recording_id")
+    if rec_id:
+        trk = db.get_library_track_by_mb_recording_id(str(rec_id))
+        if trk:
+            return trk
+
+    artist_name = (req.get("artist") if req else None) or item.get("artist")
+    track_title = (
+        (req.get("title") if req else None)
+        or (item.get("title") if item.get("item_type") == "track" else None)
+    )
+    if artist_name and track_title:
+        aids = candidate_artist_ids(db, item, artist_name)
+        for aid in aids:
+            if not aid:
+                continue
+            for t in db.list_fileless_tracks_for_artist(aid):
+                if titles_match(t.get("title"), track_title):
+                    return t
+            for t in db.list_filed_tracks_for_artist(aid):
+                if titles_match(t.get("title"), track_title):
+                    return t
+    return None
+
+
+def _file_quality_key(
+    path: Path, meta: dict[str, Any], profile: Optional[QualityProfile]
+) -> tuple[int, int, int, int, str]:
+    """Sort key for quality comparison: best file has the lowest key tuple."""
+    quality_name = _quality_from_codec(meta) or ""
+    try:
+        size = path.stat().st_size
+    except OSError:
+        size = 0
+
+    ext = path.suffix.lower()
+    is_lossless = ext in (".flac", ".alac", ".wav", ".aiff") or "FLAC" in quality_name.upper()
+
+    if not quality_name:
+        if ext == ".flac":
+            quality_name = "FLAC 16bit"
+        elif ext == ".mp3":
+            quality_name = "MP3 320"
+        elif ext in (".m4a", ".aac"):
+            quality_name = "AAC 256"
+
+    allowed_rank = 0
+    tier_rank = 0 if is_lossless else 10
+    if profile and quality_name:
+        res = evaluate_release(parse_release_title(quality_name), profile)
+        if not res.is_acceptable:
+            allowed_rank = 1
+            tier_rank = 999999
+        elif res.tier is not None:
+            tier_rank = res.tier
+
+    return (allowed_rank, tier_rank, 0 if is_lossless else 1, -size, str(path))
+
+
+def _resolve_job_wanted_track_and_title(
+    job: _ImportJob,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Resolves catalog track and returns (wanted_track, wanted_title) for the import job without mutating job."""
+    db = job.db
+    resolved_track = None
+    if db:
+        resolved_track = _resolve_wanted_track(db, job.item, job.req)
+
+    if resolved_track and resolved_track.get("title"):
+        return resolved_track, str(resolved_track["title"])
+    if job.item.get("track_id") and db:
+        trk = db.get_library_track(str(job.item["track_id"]))
+        if trk and trk.get("title"):
+            return trk, str(trk["title"])
+    if job.req and job.req.get("title"):
+        return resolved_track, str(job.req["title"])
+    if job.item.get("title"):
+        return resolved_track, str(job.item["title"])
+    return resolved_track, None
+
+
+def _match_files_for_track(
+    audio_files: list[Path],
+    wanted_title: str,
+    artist: Optional[str],
+) -> list[tuple[Path, dict[str, Any]]]:
+    """Matches files against wanted title, preferring exact plain matches over single version variants."""
+    wanted_has_single_variant = bool(_SINGLE_VARIANT_RE.search(wanted_title))
+    tier1_plain: list[tuple[Path, dict[str, Any]]] = []
+    tier2_variant: list[tuple[Path, dict[str, Any]]] = []
+
+    for af in audio_files:
+        try:
+            meta = inspect_audio_file(af)
+        except (ValueError, OSError, KeyError) as insp_err:
+            logger.debug("Inspection error during file selection for %s: %s", af, insp_err)
+            meta = {}
+        cand_title = _candidate_file_title(af, meta, artist)
+        matches = titles_match(cand_title, wanted_title)
+        if not matches and artist:
+            cand_stripped = _strip_artist_prefix(cand_title, artist)
+            matches = titles_match(cand_stripped, wanted_title)
+
+        if not matches:
+            continue
+
+        cand_has_single_variant = bool(
+            _SINGLE_VARIANT_RE.search(cand_title) or _SINGLE_VARIANT_RE.search(af.stem)
+        )
+        if wanted_has_single_variant or not cand_has_single_variant:
+            tier1_plain.append((af, meta))
+        else:
+            tier2_variant.append((af, meta))
+
+    return tier1_plain if tier1_plain else tier2_variant
+
+
+def _job_quality_profile(job: _ImportJob) -> Optional[QualityProfile]:
+    """Retrieves the effective QualityProfile for the job."""
+    db = job.db
+    if not db:
+        return None
+    profile_dict = None
+    if job.req and job.req.get("quality_profile_id"):
+        profile_dict = db.get_quality_profile(job.req["quality_profile_id"])
+    profile_dict = profile_dict or db.get_default_quality_profile()
+    return _to_quality_profile(profile_dict) if profile_dict else None
+
+
+def _record_skipped_files(job: _ImportJob, skipped: list[Path]) -> None:
+    """Logs and records event for files skipped during track selection."""
+    release_title = str(job.item.get("title") or job.download_id)
+    logger.info("Skipped %d other files in %s: not the wanted song", len(skipped), release_title)
+    job.skipped_files = [str(f) for f in skipped]
+    job.item["skipped_files"] = job.skipped_files
+    if job.db:
+        try:
+            job.db.record_event(
+                "skipped_files",
+                f"Skipped {len(skipped)} other files in '{release_title}': not the wanted song",
+                source="AcquisitionWorker",
+                severity="info",
+            )
+        except sqlite3.Error as ev_err:
+            logger.warning("Failed to record skipped_files event: %s", ev_err)
+
+
+def _select_files_for_track(job: _ImportJob) -> list[Path]:
+    """Selects the single best audio file for a track-level download item."""
+    if not job.audio_files:
+        return []
+
+    wanted_track, wanted_title = _resolve_job_wanted_track_and_title(job)
+    if not wanted_title:
+        return job.audio_files
+
+    artist = job.item.get("artist") or (job.req.get("artist") if job.req else None)
+    candidate_pool = _match_files_for_track(job.audio_files, wanted_title, artist)
+
+    if not candidate_pool:
+        if len(job.audio_files) <= 1:
+            return job.audio_files
+        job.held_files = [str(f) for f in job.audio_files]
+        job.held_msg = f'No file in the download matches "{wanted_title}"'
+        if job.db:
+            job.db.set_download_unmatched_files(job.download_id, job.held_files)
+            job.db.update_download_status(
+                job.download_id,
+                status=DownloadStatus.WARNING.value,
+                error_message=job.held_msg,
+            )
+        return []
+
+    profile = _job_quality_profile(job)
+    best_file, _ = min(
+        candidate_pool,
+        key=lambda pair: _file_quality_key(pair[0], pair[1], profile),
+    )
+
+    skipped = [f for f in job.audio_files if f != best_file]
+    if skipped:
+        _record_skipped_files(job, skipped)
+
+    if wanted_track:
+        job.selected_track_match = (best_file, wanted_track)
+        if not job.item.get("track_id"):
+            job.item["track_id"] = str(wanted_track["id"])
+        if not job.target_album and wanted_track.get("album_id") and job.db:
+            job.target_album = job.db.get_library_album(str(wanted_track["album_id"]))
+
+    return [best_file]
+
+
+def _select_files_for_album(job: _ImportJob) -> list[Path]:
+    """For an album grab with dual formats per track, keeps only the best format per track."""
+    if len(job.audio_files) <= 1:
+        return job.audio_files
+
+    artist = job.item.get("artist") or (job.req.get("artist") if job.req else None)
+    file_records: list[tuple[Path, dict[str, Any], Any]] = []
+
+    for af in job.audio_files:
+        try:
+            meta = inspect_audio_file(af)
+        except (ValueError, OSError, KeyError) as insp_err:
+            logger.debug("Album inspection error for %s: %s", af, insp_err)
+            meta = {}
+        cand_title = _candidate_file_title(af, meta, artist)
+        disc_num = meta.get("disc_number") or 1
+        track_num = meta.get("track_number")
+        if track_num is None:
+            m = re.match(r"^\s*(\d{1,3})", af.stem)
+            if m:
+                track_num = int(m.group(1))
+
+        if track_num is not None:
+            key = (int(disc_num), int(track_num), norm_title(cand_title))
+        else:
+            key = (int(disc_num), 0, norm_title(cand_title))
+
+        file_records.append((af, meta, key))
+
+    groups: dict[Any, list[tuple[Path, dict[str, Any]]]] = {}
+    for af, meta, key in file_records:
+        groups.setdefault(key, []).append((af, meta))
+
+    if all(len(g) == 1 for g in groups.values()):
+        return job.audio_files
+
+    profile = _job_quality_profile(job)
+
+    selected: list[Path] = []
+    skipped_count = 0
+    for key, members in groups.items():
+        formats = {pair[0].suffix.lower() for pair in members}
+        if len(members) == 1 or len(formats) == 1:
+            selected.extend(pair[0] for pair in members)
+        else:
+            best_af, _ = min(
+                members,
+                key=lambda pair: _file_quality_key(pair[0], pair[1], profile),
+            )
+            selected.append(best_af)
+            skipped_count += len(members) - 1
+
+    if skipped_count:
+        logger.info(
+            "Album grab %s has dual formats: kept best format for %d tracks (%d files skipped)",
+            job.download_id,
+            len(groups),
+            skipped_count,
+        )
+
+    selected_set = set(selected)
+    return [f for f in job.audio_files if f in selected_set]
 
 
 
@@ -264,6 +593,34 @@ from trackseerr.acquisition_catalog import ImportCatalogMixin
 
 class ImportPipelineMixin(ImportCatalogMixin):
     """Import pipeline mixin for AcquisitionWorker."""
+
+    _select_files_for_track = staticmethod(_select_files_for_track)
+    _select_files_for_album = staticmethod(_select_files_for_album)
+
+    def _filter_download_files(
+        self,
+        db: Database,
+        ctx: _PollContext,
+        job: _ImportJob,
+        stats: dict[str, int],
+    ) -> bool:
+        """Filter files for track-level or album-level downloads before security and placement."""
+        if job.item.get("request_id") and not job.req:
+            job.req = db.get_request(job.item["request_id"])
+
+        effective_type = (job.req.get("item_type") if job.req else None) or job.item.get("item_type") or "track"
+
+        if effective_type == "track":
+            selected = self._select_files_for_track(job)
+            if not selected:
+                return False
+            job.audio_files = selected
+        elif effective_type == "album":
+            selected = self._select_files_for_album(job)
+            job.audio_files = selected
+
+        return True
+
     def _finalize_lidarr_item(
         self,
         db: Database,
@@ -346,11 +703,14 @@ class ImportPipelineMixin(ImportCatalogMixin):
             import_mode=import_mode,
             status_dict=status_dict,
             target_lookup=target_lookup,
+            db=db,
         )
 
         if not self._locate_audio_files(db, ctx, job, stats):
             return
         if not self._security_gate(db, ctx, job, stats):
+            return
+        if not self._filter_download_files(db, ctx, job, stats):
             return
         if not self._bitrate_gate(db, ctx, job, stats):
             return
@@ -776,6 +1136,28 @@ class ImportPipelineMixin(ImportCatalogMixin):
             job.duplicate_owned_track_id = str(matched["id"])
         return True
 
+    def _destination_blocks_placement(
+        self,
+        db: Database,
+        job: _ImportJob,
+        desired_path: Path,
+        metadata: dict[str, Any],
+        matched_expected_track: Optional[dict[str, Any]],
+    ) -> bool:
+        """True when destination already imported in this pass or already exists and is not a strict upgrade."""
+        if str(desired_path) in job.imported_paths:
+            logger.warning("Two files map to %s; kept the first", desired_path)
+            return True
+        if desired_path.exists():
+            existing = db.get_library_file_by_path(str(desired_path))
+            is_upgrade = False
+            if existing and matched_expected_track and str(existing.get("track_id")) == str(matched_expected_track.get("id")):
+                is_upgrade = self._is_strict_upgrade(db, job, existing, metadata)
+            if not is_upgrade:
+                logger.warning("Two files map to %s; kept the first", desired_path)
+                return True
+        return False
+
     def _place_one_file(  # noqa: C901, PLR0915
         self,
         db: Database,
@@ -791,7 +1173,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
             logger.warning("Mutagen inspection failed for %s: %s; using item defaults", af, e)
             metadata = {
                 "artist": job.item.get("artist", "Unknown Artist"),
-                "title": job.item.get("title", af.stem),
+                "title": _candidate_file_title(af, {}, job.item.get("artist")),
                 "album": job.item.get("title") if job.item.get("item_type") == "album" else "Unknown Album",
                 "file_path": str(af),
                 "extension": af.suffix.lower(),
@@ -804,7 +1186,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
         if not metadata.get("artist"):
             metadata["artist"] = job.item.get("artist") or "Unknown Artist"
         if not metadata.get("title"):
-            metadata["title"] = job.item.get("title") or af.stem
+            metadata["title"] = _candidate_file_title(af, metadata, job.item.get("artist"))
 
         tag_artist = metadata.get("artist")
         tag_mbid = metadata.get("musicbrainz_artistid")
@@ -850,6 +1232,10 @@ class ImportPipelineMixin(ImportCatalogMixin):
                     )
 
         if job.expected_tracks and matched_expected_track is None:
+            cand_target = Path(build_track_path(metadata, ctx.media_settings)).resolve()
+            if str(cand_target) in job.imported_paths:
+                logger.warning("Two files map to %s; kept the first", cand_target)
+                return
             artist_id = _download_artist_id(db, job.item, job.target_album)
             title = metadata.get("title") or ""
             duration = metadata.get("duration") or metadata.get("duration_seconds")
@@ -874,13 +1260,43 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 if not job.duplicate_owned_track_id and owned.get("id"):
                     job.duplicate_owned_track_id = str(owned["id"])
                 return
-            matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
+
+            if job.selected_track_match:
+                sel_path, sel_track = job.selected_track_match
+                if af.resolve() == sel_path.resolve():
+                    matched_expected_track = sel_track
+                    if self._existing_file_blocks_placement(
+                        db, job, af, metadata, matched_expected_track
+                    ):
+                        return
+                    if matched_expected_track in job.remaining_expected_tracks:
+                        job.remaining_expected_tracks.remove(matched_expected_track)
+                    metadata["title"] = matched_expected_track["title"]
+                    metadata["track_number"] = int(matched_expected_track.get("track_number") or 1)
+                    metadata["disc_number"] = int(matched_expected_track.get("disc_number") or 1)
+                    matched_album = (
+                        db.get_library_album(str(matched_expected_track["album_id"]))
+                        if matched_expected_track.get("album_id")
+                        and (not job.target_album or str(matched_expected_track["album_id"]) != str(job.target_album.get("id")))
+                        else job.target_album
+                    )
+                    if matched_album:
+                        _apply_catalog_album(
+                            metadata,
+                            matched_album,
+                            db.get_library_artist(matched_album["artist_id"]) if matched_album.get("artist_id") else None,
+                            ctx.media_settings,
+                            db=db,
+                        )
+
             if matched_expected_track is None:
-                logger.warning(
-                    "Holding unmatched file %s for download %s (manual import required)", af, job.download_id
-                )
-                job.held_files.append(str(af))
-                return
+                matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
+                if matched_expected_track is None:
+                    logger.warning(
+                        "Holding unmatched file %s for download %s (manual import required)", af, job.download_id
+                    )
+                    job.held_files.append(str(af))
+                    return
 
         # Disc 1 of a multi-disc release must use the multi-disc format only when owned files span multiple discs.
         known_discs: list[int] = [1]
@@ -919,6 +1335,9 @@ class ImportPipelineMixin(ImportCatalogMixin):
 
         target_str = build_track_path(metadata, ctx.media_settings)
         desired_path = Path(target_str).resolve()
+        if self._destination_blocks_placement(db, job, desired_path, metadata, matched_expected_track):
+            return
+
         pre_recycled = self._recycle_in_place_target(
             db, ctx.media_settings, job.root_path, desired_path, matched_expected_track
         )
@@ -928,6 +1347,17 @@ class ImportPipelineMixin(ImportCatalogMixin):
             logger.error("Destination %s escapes music root %s", target_path, job.root_path)
             if pre_recycled is not None:
                 restore_recycled(pre_recycled[0])
+            return
+
+        if str(target_path) != str(desired_path) and self._destination_blocks_placement(
+            db, job, target_path, metadata, matched_expected_track
+        ):
+            if pre_recycled is not None:
+                restore_recycled(pre_recycled[0])
+            return
+
+        if target_path.exists() and pre_recycled is None:
+            logger.warning("Two files map to %s; kept the first", target_path)
             return
 
         try:
@@ -1063,7 +1493,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
         """Check placed files against held/error conditions after placement pass."""
         if job.held_files:
             db.set_download_unmatched_files(job.download_id, job.held_files)
-            job.held_msg = f"{len(job.held_files)} file(s) couldn't be matched — manual import required"
+            if not job.held_msg:
+                job.held_msg = f"{len(job.held_files)} file(s) couldn't be matched — manual import required"
             if str(job.item.get("error_message") or "").startswith("Retried import"):
                 job.held_msg = f"Retried import: {job.held_msg}"
             if not job.imported_paths:
