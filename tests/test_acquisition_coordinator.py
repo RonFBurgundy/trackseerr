@@ -229,6 +229,110 @@ def test_search_all_indexers_aggregates_sources(test_db):
     assert "Radiohead - Karma Police.flac" in titles
 
 
+def test_search_indexers_records_indexer_error(test_db):
+    """Verifies that when an indexer driver raises IndexerRateLimited, the error is recorded
+    in search_log and returned in the errors list, while other indexers still return results.
+    """
+    from trackseerr.clients.acquisition.torznab import IndexerRateLimited
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-torznab",
+            name="Prowlarr Torznab",
+            indexer_type="torznab",
+            host_url="http://prowlarr:9696",
+            api_key="key1",
+            enabled=True,
+        )
+    )
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-newznab",
+            name="NZBGeek Newznab",
+            indexer_type="newznab",
+            host_url="http://nzbgeek.info",
+            api_key="key2",
+            enabled=True,
+        )
+    )
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="cli-slskd",
+            name="slskd Soulseek",
+            driver_type="slskd",
+            host_url="http://slskd:5030",
+            api_key="slskdkey",
+            enabled=True,
+        )
+    )
+
+    newznab_res = [
+        AcquisitionSearchResult(
+            download_id="n1",
+            title="Radiohead - Karma Police (1997) [MP3 320]",
+            artist="Radiohead",
+            item_type="track",
+            source="newznab",
+            protocol="usenet",
+        )
+    ]
+    slskd_res = [
+        AcquisitionSearchResult(
+            download_id="s1",
+            title="Radiohead - Karma Police.flac",
+            artist="Radiohead",
+            item_type="track",
+            source="slskd",
+            protocol="slskd",
+        )
+    ]
+
+    mock_torznab_driver = MagicMock()
+    mock_torznab_driver.search.side_effect = IndexerRateLimited("Request limit reached", code=500, retry_after=60)
+
+    mock_newznab_driver = MagicMock()
+    mock_newznab_driver.search.return_value = newznab_res
+
+    mock_slskd_driver = MagicMock()
+    mock_slskd_driver.search.return_value = slskd_res
+
+    def mock_get_indexer_driver(cfg):
+        return mock_torznab_driver if cfg.get("indexer_type") == "torznab" else mock_newznab_driver
+
+    def mock_get_acquisition_driver(cfg):
+        return mock_slskd_driver
+
+    coordinator = AcquisitionCoordinator()
+    errors: list[dict[str, str]] = []
+
+    with patch(
+        "trackseerr.acquisition_coordinator.get_indexer_driver",
+        side_effect=mock_get_indexer_driver,
+    ), patch(
+        "trackseerr.acquisition_coordinator.get_acquisition_driver",
+        side_effect=mock_get_acquisition_driver,
+    ):
+        results = coordinator.search_all_indexers("Radiohead", "Karma Police", db=test_db, errors=errors)
+
+    assert len(results) == 2
+    titles = [r.title for r in results]
+    assert "Radiohead - Karma Police (1997) [MP3 320]" in titles
+    assert "Radiohead - Karma Police.flac" in titles
+
+    assert len(errors) == 1
+    assert errors[0]["source"] == "Prowlarr Torznab"
+    assert "Request limit reached" in errors[0]["error"]
+
+    rows, _ = test_db.list_search_log(1, 50)
+    torznab_row = next(r for r in rows if r["source_name"] == "Prowlarr Torznab")
+    assert torznab_row["error"] is not None
+    assert "Request limit reached" in torznab_row["error"]
+    assert torznab_row["result_count"] == 0
+
+    newznab_row = next(r for r in rows if r["source_name"] == "NZBGeek Newznab")
+    assert newznab_row["error"] is None
+    assert newznab_row["result_count"] == 1
+
+
 def _result(title):
     return AcquisitionSearchResult(
         download_id=title, title=title, artist="Morgan Page", item_type="track", source="torznab", protocol="torrent"
