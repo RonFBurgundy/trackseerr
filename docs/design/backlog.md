@@ -241,13 +241,16 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
       (`rip`, `purchase:<store>`) in item history. Lossless rips/purchases count as the profile's top tier.
     - **CD rips**: read EAC / XLD / whipper / dBpoweramp rip logs and CUE files next to the audio. Show AccurateRip /
       CUETools verification, flag rips with errors, and use the disc ID (TOC) to pick the exact MusicBrainz release.
-    - **Where to buy**: "Buy" links on wanted albums and missing playlist songs, built from MusicBrainz URL relationships
-      (Bandcamp, Qobuz, 7digital, HDtracks, Beatport, Apple/Amazon) plus a search link for stores MusicBrainz doesn't list.
+    - **Where to buy**: "View on Bandcamp" / "View on Qobuz" (and other stores MusicBrainz lists) in the
+      artist and album tools menu, next to the existing "Open on MusicBrainz" link (`ArtistDetail.tsx` ~L451). Built
+      from MusicBrainz URL relationships; prefer stores selling lossless downloads (Bandcamp, Qobuz, HDtracks, 7digital).
       Links only: no store accounts, no scraping, no affiliate tracking.
     - **Discogs**: import a user's Discogs collection (owned physical copies → "owned on vinyl/CD, not ripped yet") and
       wantlist (→ wanted, optionally "getting it myself"); export TrackSeerr's wanted albums to the Discogs wantlist;
       link wanted albums to their Discogs marketplace page. Uses the user's own Discogs token.
     - **Bandcamp collection sync** (later): match purchases in the user's Bandcamp collection and offer to import the
       downloaded files from the inbox.
-    Open questions: per-user or admin-only? Should owned physical copies count as "in library" for requests and
-    playlists? Store links need a UI pass under the no-new-elements rule (reuse the overflow menu).
+    Decided 2026-11-07: **admin only** (no user uploads; the inbox is a server folder only the admin fills). Files in
+    the library count for requests as usual, wherever they came from. A Discogs copy with **no files** is "owned on
+    vinyl/CD, not ripped": it does not count as in the library, so requests and playlists still want a digital copy;
+    the item shows the physical copy so the admin can choose to rip it. Store links live in the existing tools menu.
