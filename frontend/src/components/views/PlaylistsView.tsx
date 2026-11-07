@@ -927,6 +927,10 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
           setIsOverridesModalOpen(true);
         }}
         overridesCount={missingHook.overrides.length}
+        isAdmin={isAdmin}
+        lidarrMode={lidarrMode}
+        onRefresh={() => void missingHook.reload()}
+        onToast={showToast}
       />
 
       <MatchOverridesModal

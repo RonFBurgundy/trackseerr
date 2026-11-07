@@ -1,8 +1,15 @@
 import React, { useState } from 'react';
-import { Ban, ClipboardCheck, DownloadCloud, History, Search } from 'lucide-react';
+import { Ban, CircleOff, ClipboardCheck, DownloadCloud, History, Search } from 'lucide-react';
 import { PageFrame } from '@/components/layout';
 import { TabStrip, TapeDeckButton, ToastBanner } from '@/components/ui';
-import { ActivityQueuePanel, ActivityHistoryPanel, ActivityBlocklistPanel, ActivitySearchesPanel, NeedsReviewPanel } from '@/components/activity';
+import {
+  ActivityQueuePanel,
+  ActivityHistoryPanel,
+  ActivityBlocklistPanel,
+  ActivityExclusionsPanel,
+  ActivitySearchesPanel,
+  NeedsReviewPanel,
+} from '@/components/activity';
 import { useToast } from '@/hooks/useToast';
 import { useRefreshHandler } from '@/hooks/useRefreshHandler';
 import type { ActivitySub, NavigateOptions } from '@/hooks/useAppRoute';
@@ -13,6 +20,7 @@ const TABS: Array<{ id: ActivitySub; label: string; icon: React.ReactNode }> = [
   { id: 'queue', label: 'Queue', icon: <DownloadCloud className="h-3.5 w-3.5" /> },
   { id: 'history', label: 'History', icon: <History className="h-3.5 w-3.5" /> },
   { id: 'blocklist', label: 'Blocklist', icon: <Ban className="h-3.5 w-3.5" /> },
+  { id: 'exclusions', label: 'Exclusions', icon: <CircleOff className="h-3.5 w-3.5" /> },
   { id: 'searches', label: 'Searches', icon: <Search className="h-3.5 w-3.5" /> },
   { id: 'review', label: 'Needs review', icon: <ClipboardCheck className="h-3.5 w-3.5" /> },
 ];
@@ -61,6 +69,7 @@ export const ActivityView: React.FC<ActivityViewProps> = ({
       {tab === 'queue' && <ActivityQueuePanel onToast={showToast} />}
       {tab === 'history' && <ActivityHistoryPanel onToast={showToast} />}
       {tab === 'blocklist' && <ActivityBlocklistPanel onToast={showToast} />}
+      {tab === 'exclusions' && <ActivityExclusionsPanel onToast={showToast} />}
       {tab === 'searches' && <ActivitySearchesPanel onToast={showToast} />}
       {tab === 'review' && <NeedsReviewPanel onToast={showToast} onChanged={onReviewChanged ?? noop} />}
       </React.Fragment>

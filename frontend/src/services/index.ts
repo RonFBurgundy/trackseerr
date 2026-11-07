@@ -45,3 +45,4 @@ export * from './retagService';
 export * from './smartCollectionService';
 export * from './trackFixService';
 export * from './acquisitionService';
+export * from './exclusionsService';

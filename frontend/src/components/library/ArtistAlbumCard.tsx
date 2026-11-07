@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
-import { Bookmark, BookmarkPlus, ChevronDown, Disc, FolderInput, History, Info, Loader2, Search, Sliders } from 'lucide-react';
+import { Ban, Bookmark, BookmarkPlus, ChevronDown, Disc, FolderInput, History, Info, Loader2, Search, Sliders } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { textMatches } from '@/hooks/useDiscographyFilter';
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui';
 import { AlbumTrackList } from './AlbumTrackList';
 import { ItemHistoryModal } from './ItemHistoryModal';
+import { ExcludeConfirm } from './ExcludeConfirm';
 
 export interface ArtistAlbumCardProps {
   album: AlbumItem;
@@ -77,6 +78,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   );
 
   const [historyOpen, setHistoryOpen] = useState<boolean>(false);
+  const [excludeOpen, setExcludeOpen] = useState<boolean>(false);
   const toggleExpanded = (): void => setExpanded((v) => !v);
 
   const menuItems: OverflowMenuItem[] = [];
@@ -116,6 +118,12 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
       label: 'Import files',
       icon: <FolderInput className="h-3.5 w-3.5" />,
       onSelect: () => onImportAlbum(album),
+    });
+    menuItems.push({
+      key: 'exclude',
+      label: 'Exclude album…',
+      icon: <Ban className="h-3.5 w-3.5" />,
+      onSelect: () => setExcludeOpen(true),
     });
   }
   if (canCollect) {
@@ -230,6 +238,19 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
       {historyOpen && (
         <ItemHistoryModal isOpen onClose={() => setHistoryOpen(false)} entity="album" entityId={String(album.id)} title={album.title ?? ''} canReject={isAdmin && !lidarrMode} onToast={onToast} />
       )}
+      <ExcludeConfirm
+        isOpen={excludeOpen}
+        scope="album"
+        name={album.title ?? 'Album'}
+        payload={{ library_album_id: String(album.id) }}
+        onClose={() => setExcludeOpen(false)}
+        onSuccess={() => {
+          if (album.monitored) {
+            onToggleAlbumMonitored(album.id, true);
+          }
+        }}
+        onToast={onToast}
+      />
     </MachinedCard>
   );
 };

@@ -3,6 +3,7 @@ export * from './ActivityQueuePanel';
 export * from './SoulseekQueueDetail';
 export * from './ActivityHistoryPanel';
 export * from './ActivityBlocklistPanel';
+export * from './ActivityExclusionsPanel';
 export * from './ActivitySearchesPanel';
 export * from './NeedsReviewPanel';
 export * from './ReviewSlskdChallenges';

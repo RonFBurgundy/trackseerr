@@ -231,6 +231,7 @@ const LEAF_WORDS: Record<string, string> = {
   'activity/queue': 'downloads queue active progress transfer clients speed',
   'activity/history': 'download history grabs imported completed failed activity log',
   'activity/blocklist': 'blocklist blacklisted releases ignored failed bad releases block',
+  'activity/exclusions': 'exclusions excluded artists albums tracks songs ignore unmonitored never add',
   'activity/searches': 'search log soulseek indexer results zero responses',
   'activity/review': 'needs review manual import held files soulseek chat challenge',
   'wanted/missing': 'missing wanted albums tracks search missing unmonitored',

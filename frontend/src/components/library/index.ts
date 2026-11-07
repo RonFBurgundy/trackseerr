@@ -39,3 +39,4 @@ export * from './SmartCollectionsSection';
 export * from './SmartCollectionDetail';
 export * from './AddArtistDialog';
 export * from './MbUnlinkedModal';
+export * from './ExcludeConfirm';
