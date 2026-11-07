@@ -118,6 +118,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- A qBittorrent category folder set as a plain name (like `music`) is now read as a folder inside qBittorrent's default save folder. Before, the Health card showed a false "folder not found" error for it.
 - The container starts again. A new release of a library TrackSeerr uses (deezer-python 8) dropped a module TrackSeerr needs, and images built after it crashed on boot with "No module named 'httpx'". Images now include it directly, and a broken image can no longer be published.
 - An indexer address ending in `/api`, like the one Prowlarr copies for an indexer, now works. Before, TrackSeerr added a second `/api` and every search failed. The Add indexer form now shows the right example and says how to sync all your Prowlarr indexers instead.
 - Seeding rules now reach qBittorrent 5. qBittorrent 5 rejected the seed ratio and seed time TrackSeerr sets per torrent, so its own global seed settings applied instead. If you use per-indexer seeding rules with qBittorrent 5, torrents grabbed before this update still have the old limits.
