@@ -79,6 +79,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Manual search is easier to find: an album's **⋯** menu on the artist page has **Manual search…**, and each song in an open album has a search button, like in the album details window.
 - TrackSeerr is gentler on the MusicBrainz mirror: at most 3 requests per second and 2 at a time (set with `MUSICBRAINZ_MIRROR_RPS` and `MUSICBRAINZ_MIRROR_CONCURRENCY`). When the mirror asks it to slow down, it waits as long as asked, and it stops asking a mirror that keeps refusing it.
 - On phones, task rows on the Tasks page show icon-only Run and Cancel buttons and drop the Running badge while the progress bar shows, so task names have room (they wrap to two lines instead of being cut off).
 - The Requests page loads in pages and scrolls smoothly with thousands of requests, instead of loading every request at once.
