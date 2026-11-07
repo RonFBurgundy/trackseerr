@@ -20,6 +20,7 @@ import httpx
 from trackseerr.clients.acquisition import get_acquisition_driver, get_indexer_driver
 from trackseerr.config import MEDIA_SERVER_NONE
 from trackseerr.download_roots import allowed_roots_for_all_clients
+from trackseerr.indexer_status import indexer_status
 from trackseerr.media_servers import get_media_server
 from trackseerr.models import DownloadStatus, NotificationEvent
 from trackseerr.notifications import notification_dispatcher
@@ -197,19 +198,27 @@ def _check_indexers(
         seen_keys.append(key)
         label = f"Indexer {name}"
 
-        try:
-            driver = get_indexer_driver(cfg)
-            ok, msg = driver.test_connection()
-            if not ok and not msg:
-                msg = "Connection test failed"
-        except (httpx.HTTPError, OSError, ValueError, TypeError, sqlite3.Error) as exc:
-            logger.warning("Indexer probe exception for %s: %s", key, safe_exc(exc))
+        until = indexer_status.paused_until(indexer_id, now=now)
+        if until is not None:
+            idx_state = indexer_status.snapshot(indexer_id)
+            failures = idx_state.failures if idx_state else 1
+            last_err = idx_state.last_error if idx_state else "unknown error"
             ok = False
-            msg = redact_text(str(exc)) or type(exc).__name__
-        except Exception as exc:  # a third-party driver error must not stop the other checks
-            logger.warning("Indexer probe failed: %s", safe_exc(exc))
-            ok = False
-            msg = redact_text(str(exc)) or type(exc).__name__
+            msg = f"Paused until {until:%H:%M} UTC after {failures} failures: {last_err}"
+        else:
+            try:
+                driver = get_indexer_driver(cfg)
+                ok, msg = driver.test_connection()
+                if not ok and not msg:
+                    msg = "Connection test failed"
+            except (httpx.HTTPError, OSError, ValueError, TypeError, sqlite3.Error) as exc:
+                logger.warning("Indexer probe exception for %s: %s", key, safe_exc(exc))
+                ok = False
+                msg = redact_text(str(exc)) or type(exc).__name__
+            except Exception as exc:  # a third-party driver error must not stop the other checks
+                logger.warning("Indexer probe failed: %s", safe_exc(exc))
+                ok = False
+                msg = redact_text(str(exc)) or type(exc).__name__
 
         state = observe(
             db,

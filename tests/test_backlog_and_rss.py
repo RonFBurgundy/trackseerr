@@ -38,6 +38,14 @@ from trackseerr.models import (
     RequestStatus,
 )
 from trackseerr.storage import Database
+from trackseerr.indexer_status import indexer_status
+
+
+@pytest.fixture(autouse=True)
+def _reset_indexer_backoff_state():
+    indexer_status.reset()
+    yield
+    indexer_status.reset()
 
 
 SAMPLE_TORZNAB_FEED_XML = """<?xml version="1.0" encoding="UTF-8"?>
@@ -1008,6 +1016,29 @@ class TestWantedBacklogWorker:
 
 
 class TestRSSSyncWorker:
+    def test_rss_skips_paused_indexer(self, test_db):
+        """Validates that RSSSyncWorker skips indexers currently paused by backoff."""
+        worker = RSSSyncWorker()
+        test_db.create_indexer(
+            {
+                "id": "idx-rss-paused",
+                "name": "Paused Indexer",
+                "indexer_type": "torznab",
+                "host_url": "http://127.0.0.1:9696",
+                "enabled": True,
+            }
+        )
+
+        indexer_status.record_failure("idx-rss-paused", RuntimeError("error 1"))
+        indexer_status.record_failure("idx-rss-paused", RuntimeError("error 2"))
+        assert indexer_status.paused_until("idx-rss-paused") is not None
+
+        mock_driver = MagicMock()
+        with patch("trackseerr.backlog_worker.get_indexer_driver", return_value=mock_driver):
+            res = worker._fetch_recent_releases({"id": "idx-rss-paused", "name": "Paused Indexer"})
+            assert res is None
+            mock_driver.fetch_recent.assert_not_called()
+
     def test_rss_worker_start_stop_lifecycle(self, test_db):
         """Tests start, running state, and clean stop of RSSSyncWorker."""
         worker = RSSSyncWorker()

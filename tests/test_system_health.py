@@ -10,6 +10,14 @@ from trackseerr.config import Config
 from trackseerr.models import DownloadStatus, NotificationEvent
 from trackseerr.storage import Database
 from trackseerr.system_health import observe, run_health_checks
+from trackseerr.indexer_status import indexer_status
+
+
+@pytest.fixture(autouse=True)
+def _reset_indexer_backoff_state():
+    indexer_status.reset()
+    yield
+    indexer_status.reset()
 
 
 @pytest.fixture
@@ -263,6 +271,36 @@ def test_indexer_probe_exception_counts_as_failure(test_db, test_config):
         assert check is not None
         assert check["state"] in ("warning", "error")
         assert "ConnectError" in check["message"] or "Connection refused" in check["message"]
+
+
+def test_paused_indexer_reported_failing_without_probe(test_db, test_config):
+    test_db.create_indexer(
+        {
+            "id": "idx-paused",
+            "name": "Paused Torznab",
+            "host_url": "http://paused.example.com",
+            "indexer_type": "torznab",
+            "api_key": "dummy",
+            "enabled": True,
+        }
+    )
+
+    indexer_status.record_failure("idx-paused", RuntimeError("Server down"))
+    indexer_status.record_failure("idx-paused", RuntimeError("Server down again"))
+    assert indexer_status.paused_until("idx-paused") is not None
+
+    with patch("trackseerr.system_health.get_indexer_driver") as mock_get_driver:
+        mock_driver = MagicMock()
+        mock_get_driver.return_value = mock_driver
+
+        res = run_health_checks(test_db, test_config)
+        assert res["checked"] >= 1
+        mock_driver.test_connection.assert_not_called()
+
+        check = test_db.get_health_check("indexer:idx-paused")
+        assert check is not None
+        assert check["state"] in ("warning", "error")
+        assert check["message"].startswith("Paused until")
 
 
 def test_deleted_indexer_row_removed(test_db, test_config):

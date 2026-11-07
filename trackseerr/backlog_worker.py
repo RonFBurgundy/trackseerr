@@ -18,6 +18,7 @@ from typing import Any, Callable, Optional
 import uuid
 
 from trackseerr import delay_gate
+from trackseerr.indexer_status import indexer_status
 from trackseerr.acquisition_coordinator import (
     acquisition_coordinator,
     NoClientAvailable,
@@ -1192,6 +1193,16 @@ class RSSSyncWorker:
         self, idx_cfg: dict[str, Any], stats: Optional[dict[str, int]] = None
     ) -> Optional[list[Any]]:
         """Fetch recent releases from an enabled indexer driver."""
+        idx_id = str(idx_cfg.get("id"))
+        until = indexer_status.paused_until(idx_id)
+        if until is not None:
+            logger.debug(
+                "Indexer '%s' (%s) is paused until %s UTC; skipping RSS fetch",
+                idx_cfg.get("name"),
+                idx_id,
+                f"{until:%H:%M}",
+            )
+            return None
         try:
             driver = get_indexer_driver(idx_cfg)
             if hasattr(driver, "fetch_recent"):
