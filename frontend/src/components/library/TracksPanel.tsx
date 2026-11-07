@@ -133,9 +133,9 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
 
   const handleToggle = useCallback(
     async (trackId: number | string, next: boolean): Promise<void> => {
-      overrides.set(trackId, next);
       try {
         await onToggleMonitored(trackId, next);
+        overrides.set(trackId, next);
         await refresh();
       } catch (err: unknown) {
         onToast(errorMessage(err, 'Failed to update monitoring'), 'error');
@@ -193,24 +193,34 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
 
   const rowActions = useCallback(
     (t: TrackItem): React.ReactNode => {
+      const isExcluded = t.excluded === true;
       const monitored = overrides.resolve(t.id, t.monitored ?? null);
       // Unknown (Lidarr mode may not report it): no indicator at all rather than a false "Unmonitored".
-      if (monitored === null) return null;
+      if (monitored === null && !isExcluded) return null;
+      const exclusionTooltip = isExcluded
+        ? `${t.exclusion_reason || 'Excluded'}. Remove the exclusion to monitor it.`
+        : undefined;
       return (
         <div className="flex items-center justify-end gap-2">
           <span
             className={`hidden lg:inline text-[10px] font-mono uppercase tracking-wider ${
-              monitored ? 'text-[#e5a00d]' : 'text-neutral-500'
+              isExcluded
+                ? 'text-red-400'
+                : monitored
+                ? 'text-[#e5a00d]'
+                : 'text-neutral-500'
             }`}
           >
-            {monitored ? 'Monitored' : 'Unmonitored'}
+            {isExcluded ? 'Excluded' : monitored ? 'Monitored' : 'Unmonitored'}
           </span>
           {isAdmin && (
             <TactileSwitch
-              checked={monitored}
+              checked={!isExcluded && monitored === true}
+              disabled={isExcluded}
+              variant={isExcluded ? 'danger' : 'default'}
               onChange={(val) => void handleToggle(t.id, val)}
-              title={monitored ? 'Monitored' : 'Unmonitored'}
-              ariaLabel={`Monitor ${t.title}`}
+              title={exclusionTooltip ?? (monitored ? 'Monitored' : 'Unmonitored')}
+              ariaLabel={isExcluded ? `Excluded: ${t.title}` : `Monitor ${t.title}`}
             />
           )}
         </div>

@@ -21,6 +21,9 @@ export function useTrackBulkEdit(onToast: (msg: string, tone?: 'ok' | 'error') =
         onToast(
           `${res.tracks_updated.toLocaleString()} ${res.tracks_updated === 1 ? 'track' : 'tracks'} ${monitored ? 'monitored' : 'unmonitored'}`
         );
+        if ((res.skipped_excluded ?? 0) > 0) {
+          onToast(`Skipped ${res.skipped_excluded} excluded`);
+        }
         return true;
       } catch (err: unknown) {
         onToast(errorMessage(err, 'Bulk edit failed'), 'error');
