@@ -187,6 +187,10 @@ class DownloadStoreMixin:
         seed_time = _opt_int(idx.get("seed_time_minutes"))
         disco_time = _opt_int(idx.get("discography_seed_time_minutes"))
         min_seeders = _opt_int(idx.get("minimum_seeders"))
+        raw_pack_scan = idx.get("pack_scan")
+        pack_scan = str(raw_pack_scan or "off").lower()
+        if pack_scan not in ("off", "auto", "all"):
+            raise ValueError(f"Invalid pack_scan: {pack_scan!r}. Must be 'off', 'auto', or 'all'")
 
         with self._lock:
             self.conn.execute(
@@ -194,8 +198,8 @@ class DownloadStoreMixin:
                 INSERT INTO indexers (
                     id, name, indexer_type, host_url, api_key, categories,
                     enabled, priority, seed_ratio, seed_time_minutes,
-                    discography_seed_time_minutes, minimum_seeders, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    discography_seed_time_minutes, minimum_seeders, pack_scan, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     indexer_type = excluded.indexer_type,
@@ -208,11 +212,12 @@ class DownloadStoreMixin:
                     seed_time_minutes = excluded.seed_time_minutes,
                     discography_seed_time_minutes = excluded.discography_seed_time_minutes,
                     minimum_seeders = excluded.minimum_seeders,
+                    pack_scan = excluded.pack_scan,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
                     iid, name, indexer_type, host_url, api_key, categories, enabled, priority,
-                    seed_ratio, seed_time, disco_time, min_seeders,
+                    seed_ratio, seed_time, disco_time, min_seeders, pack_scan,
                 ),
             )
             self.conn.commit()
@@ -230,6 +235,7 @@ class DownloadStoreMixin:
             res = dict(row)
             res["enabled"] = bool(res.get("enabled", 1))
             res["priority"] = int(res.get("priority", 1))
+            res["pack_scan"] = str(res.get("pack_scan") or "off")
             return res
 
     def list_indexers(self, enabled_only: bool = False) -> list[dict[str, Any]]:
@@ -247,6 +253,7 @@ class DownloadStoreMixin:
         for r in rows:
             r["enabled"] = bool(r.get("enabled", 1))
             r["priority"] = int(r.get("priority", 1))
+            r["pack_scan"] = str(r.get("pack_scan") or "off")
         return rows
 
     def update_indexer(
@@ -256,6 +263,7 @@ class DownloadStoreMixin:
         allowed = {
             "name", "indexer_type", "host_url", "api_key", "categories", "enabled", "priority",
             "seed_ratio", "seed_time_minutes", "discography_seed_time_minutes", "minimum_seeders",
+            "pack_scan",
         }
         filtered: dict[str, Any] = {}
         for k, v in updates.items():
@@ -268,6 +276,11 @@ class DownloadStoreMixin:
                     filtered[k] = _opt_float(v)
                 elif k in ("seed_time_minutes", "discography_seed_time_minutes", "minimum_seeders"):
                     filtered[k] = _opt_int(v)
+                elif k == "pack_scan":
+                    val = str(v).lower()
+                    if val not in ("off", "auto", "all"):
+                        raise ValueError(f"Invalid pack_scan: {val!r}. Must be 'off', 'auto', or 'all'")
+                    filtered[k] = val
                 else:
                     filtered[k] = v
 

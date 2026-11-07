@@ -81,6 +81,7 @@ class MigrationsMixin:
                 (91, self._migration_v91),
                 (92, self._migration_v92),
                 (93, self._migration_v93),
+                (94, self._migration_v94),
             ]
 
             applied = 0
@@ -300,6 +301,56 @@ class MigrationsMixin:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_exclusions_scope_mbid ON exclusions(scope, mbid)"
+        )
+
+    def _migration_v94(self, cur: sqlite3.Cursor) -> None:
+        """v94: Add pack_scan column to indexers, pack_releases, pack_files, and pack_files_fts."""
+        cur.execute("PRAGMA table_info(indexers)")
+        if "pack_scan" not in {row[1] for row in cur.fetchall()}:
+            cur.execute("ALTER TABLE indexers ADD COLUMN pack_scan TEXT NOT NULL DEFAULT 'off'")
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pack_releases (
+                id TEXT PRIMARY KEY,
+                indexer_id TEXT NOT NULL REFERENCES indexers(id) ON DELETE CASCADE,
+                guid TEXT NOT NULL,
+                title TEXT NOT NULL,
+                download_url TEXT,
+                magnet_url TEXT,
+                info_hash TEXT,
+                size_bytes INTEGER,
+                seeders INTEGER,
+                published_at TEXT,
+                file_count INTEGER NOT NULL DEFAULT 0,
+                scan_status TEXT NOT NULL DEFAULT 'pending' CHECK (scan_status IN ('pending','scanned','failed','skipped')),
+                scan_error TEXT,
+                scanned_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_releases_indexer_guid ON pack_releases(indexer_id, guid)"
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_pack_releases_status ON pack_releases(scan_status)"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pack_files (
+                pack_id TEXT NOT NULL REFERENCES pack_releases(id) ON DELETE CASCADE,
+                file_index INTEGER NOT NULL,
+                path TEXT NOT NULL,
+                size_bytes INTEGER,
+                ext TEXT,
+                parsed_artist TEXT,
+                parsed_title TEXT,
+                PRIMARY KEY (pack_id, file_index)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS pack_files_fts USING fts5(search, pack_id UNINDEXED, file_index UNINDEXED, tokenize = 'unicode61 remove_diacritics 2')"
         )
 
     def _migration_v90(self, cur: sqlite3.Cursor) -> None:

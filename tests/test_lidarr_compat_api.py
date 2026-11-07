@@ -525,3 +525,55 @@ def test_validation_errors(client: TestClient, api_key: str):
     r = client.post("/api/v1/indexer", json=p_neg_ratio, headers=headers)
     assert r.status_code == 400
     assert r.json()[0]["propertyName"] == "seedCriteria.seedRatio"
+
+
+def test_prowlarr_update_keeps_pack_scan_auto(
+    client: TestClient, db: Database, api_key: str
+) -> None:
+    """Verify that a Prowlarr update (PUT /api/v1/indexer/{rowid}) does not overwrite pack_scan."""
+    headers = {"X-Api-Key": api_key}
+    indexer_payload: dict[str, Any] = {
+        "id": 0,
+        "name": "Prowlarr Pack Preserved",
+        "implementation": "Torznab",
+        "fields": [
+            {"name": "baseUrl", "value": "http://192.168.1.5:9696/2/"},
+            {"name": "apiPath", "value": "/api"},
+            {"name": "apiKey", "value": "prowlarr-api-key-test"},
+            {"name": "categories", "value": [3000, 3010]},
+        ],
+    }
+
+    create_resp = client.post(
+        "/api/v1/indexer?forceSave=true",
+        json=indexer_payload,
+        headers=headers,
+    )
+    assert create_resp.status_code == 200
+    created = create_resp.json()
+    rowid = created["id"]
+
+    indexer_row = db.get_indexer_by_rowid(rowid)
+    assert indexer_row is not None
+    db.update_indexer(indexer_row["id"], {"pack_scan": "auto"})
+
+    updated_internal = db.get_indexer(indexer_row["id"])
+    assert updated_internal is not None
+    assert updated_internal["pack_scan"] == "auto"
+
+    update_payload = dict(indexer_payload)
+    update_payload["id"] = rowid
+    update_payload["name"] = "Prowlarr Pack Preserved (Updated)"
+
+    put_resp = client.put(
+        f"/api/v1/indexer/{rowid}?forceSave=true",
+        json=update_payload,
+        headers=headers,
+    )
+    assert put_resp.status_code == 200
+
+    after_row = db.get_indexer(indexer_row["id"])
+    assert after_row is not None
+    assert after_row["name"] == "Prowlarr Pack Preserved (Updated)"
+    assert after_row["pack_scan"] == "auto"
+
