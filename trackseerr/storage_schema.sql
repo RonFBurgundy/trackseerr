@@ -801,6 +801,18 @@ CREATE TABLE health_item_alerts (
     PRIMARY KEY (event, ref)
 );
 
+CREATE TABLE exclusions (
+    id TEXT PRIMARY KEY,
+    scope TEXT NOT NULL CHECK (scope IN ('artist','album','track')),
+    mbid TEXT,
+    artist_name TEXT NOT NULL,
+    title TEXT,
+    match_key TEXT NOT NULL,
+    reason TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+);
+
 CREATE INDEX idx_blocklist_hash ON download_blocklist(info_hash);
 CREATE INDEX idx_blocklist_title ON download_blocklist(source_title);
 CREATE INDEX idx_blocklist_guid ON download_blocklist(release_guid);
@@ -867,6 +879,8 @@ CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_album ON library_tracks(has_file, a
 CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_date ON library_tracks(has_file, album_date, id);
 CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_size ON library_tracks(has_file, max_size_bytes, id);
 CREATE INDEX IF NOT EXISTS idx_lib_tracks_created_id ON library_tracks(created_at, id);
+CREATE UNIQUE INDEX idx_exclusions_scope_key ON exclusions(scope, match_key);
+CREATE INDEX idx_exclusions_scope_mbid ON exclusions(scope, mbid);
 CREATE VIRTUAL TABLE IF NOT EXISTS library_tracks_fts USING fts5(clean, raw, content='', contentless_delete=1, tokenize='trigram');
 CREATE TRIGGER IF NOT EXISTS trg_lib_tracks_ai AFTER INSERT ON library_tracks
 BEGIN

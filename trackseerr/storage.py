@@ -34,6 +34,7 @@ from trackseerr.track_alias_store import TrackAliasStoreMixin
 from trackseerr.fingerprint_store import FingerprintStoreMixin
 from trackseerr.slskd_challenge_store import SlskdChallengeStoreMixin
 from trackseerr.health_store import HealthStoreMixin
+from trackseerr.exclusion_store import ExclusionStoreMixin
 
 # Re-exported: callers import these from trackseerr.storage.
 from trackseerr.storage_common import (  # noqa: F401
@@ -95,6 +96,7 @@ class Database(
     SlskdChallengeStoreMixin,
     HealthStoreMixin,
     SearchLogStoreMixin,
+    ExclusionStoreMixin,
 ):
     """Thread-safe SQLite database wrapper with WAL mode, foreign keys, and migrations."""
     def __init__(self, db_path: Optional[Union[str, Path]] = None) -> None:
