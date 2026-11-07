@@ -455,6 +455,111 @@ class PlaylistStoreMixin:
             row = self.conn.execute("SELECT MAX(updated_at) FROM library_files").fetchone()
         return row[0] if row and row[0] else None
 
+    def _normalize_incoming_missing_tracks(
+        self,
+        missing_tracks: Optional[list[Union[Track, dict[str, Any]]]],
+    ) -> dict[tuple[str, str], tuple[str, str, str, str]]:
+        incoming: dict[tuple[str, str], tuple[str, str, str, str]] = {}
+        if not missing_tracks:
+            return incoming
+        for item in missing_tracks:
+            if hasattr(item, "title") and hasattr(item, "artist"):
+                title = getattr(item, "title", "")
+                artist = getattr(item, "artist", "")
+                album = getattr(item, "album", "") or ""
+                url = getattr(item, "url", "") or ""
+            elif isinstance(item, dict):
+                title = item.get("title", "")
+                artist = item.get("artist", "")
+                album = item.get("album", "") or ""
+                url = item.get("url", "") or ""
+            else:
+                continue
+            key = (str(title).strip().lower(), str(artist).strip().lower())
+            if key not in incoming:
+                incoming[key] = (str(title), str(artist), str(album), str(url))
+        return incoming
+
+    def _diff_missing_rows(
+        self,
+        p_id: str,
+        missing_tracks: Optional[list[Union[Track, dict[str, Any]]]],
+    ) -> None:
+        """Diffs and updates missing_tracks for playlist_id in place without dropping stable rows."""
+        incoming_items = self._normalize_incoming_missing_tracks(missing_tracks)
+
+        if not incoming_items:
+            # missing_tracks is None, empty, or contained no valid items -> delete all rows
+            self.conn.execute("DELETE FROM missing_tracks WHERE playlist_id = ?", (p_id,))
+            return
+
+        # Read existing rows
+        existing: dict[tuple[str, str], int] = {}
+        duplicate_ids_to_delete: list[int] = []
+        read_failed = False
+        try:
+            cur = self.conn.execute(
+                "SELECT id, title, artist FROM missing_tracks WHERE playlist_id = ? ORDER BY id ASC",
+                (p_id,),
+            )
+            for r in cur.fetchall():
+                key = (str(r["title"]).strip().lower(), str(r["artist"]).strip().lower())
+                row_id = int(r["id"])
+                if key not in existing:
+                    existing[key] = row_id
+                else:
+                    duplicate_ids_to_delete.append(row_id)
+        except sqlite3.Error as exc:
+            logger.warning("Could not read previous missing-track state for playlist %s: %s", p_id, exc)
+            read_failed = True
+
+        if read_failed:
+            # Fallback to delete-all + insert-all
+            self.conn.execute("DELETE FROM missing_tracks WHERE playlist_id = ?", (p_id,))
+            for title, artist, album, url in incoming_items.values():
+                self.conn.execute(
+                    """
+                    INSERT INTO missing_tracks (playlist_id, title, artist, album, url)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (p_id, title, artist, album, url),
+                )
+            return
+
+        # Delete old duplicates
+        if duplicate_ids_to_delete:
+            self.conn.executemany(
+                "DELETE FROM missing_tracks WHERE id = ?",
+                [(row_id,) for row_id in duplicate_ids_to_delete],
+            )
+
+        # Delete rows no longer missing
+        delete_ids = [
+            row_id for key, row_id in existing.items()
+            if key not in incoming_items
+        ]
+        if delete_ids:
+            self.conn.executemany(
+                "DELETE FROM missing_tracks WHERE id = ?",
+                [(row_id,) for row_id in delete_ids],
+            )
+
+        # Update existing rows or insert new ones
+        for key, (title, artist, album, url) in incoming_items.items():
+            if key in existing:
+                self.conn.execute(
+                    "UPDATE missing_tracks SET title = ?, artist = ?, album = ?, url = ? WHERE id = ?",
+                    (title, artist, album, url, existing[key]),
+                )
+            else:
+                self.conn.execute(
+                    """
+                    INSERT INTO missing_tracks (playlist_id, title, artist, album, url)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (p_id, title, artist, album, url),
+                )
+
     def record_sync_result(
         self,
         playlist_id: str,
@@ -475,58 +580,7 @@ class PlaylistStoreMixin:
                 """,
                 (str(status), stored_fingerprint, p_id),
             )
-            # Preserve existing lidarr_status across sync cycles
-            existing_lidarr_status: dict[tuple[str, str], str] = {}
-            existing_applied: dict[tuple[str, str], str] = {}
-            existing_retry: dict[tuple[str, str], tuple[int, Optional[str]]] = {}
-            try:
-                cur = self.conn.execute(
-                    "SELECT title, artist, lidarr_status, list_applied_at, attempts, next_attempt_at "
-                    "FROM missing_tracks WHERE playlist_id = ?",
-                    (p_id,),
-                )
-                for r in cur.fetchall():
-                    key = (str(r["title"]).strip().lower(), str(r["artist"]).strip().lower())
-                    existing_lidarr_status[key] = str(r["lidarr_status"] or "unmonitored")
-                    if r["list_applied_at"]:
-                        existing_applied[key] = str(r["list_applied_at"])
-                    existing_retry[key] = (int(r["attempts"] or 0), r["next_attempt_at"])
-            except sqlite3.Error as exc:
-                logger.warning("Could not read previous missing-track state for playlist %s: %s", p_id, exc)
-
-            self.conn.execute(
-                "DELETE FROM missing_tracks WHERE playlist_id = ?",
-                (p_id,),
-            )
-            if missing_tracks:
-                for item in missing_tracks:
-                    if hasattr(item, "title") and hasattr(item, "artist"):
-                        title = getattr(item, "title", "")
-                        artist = getattr(item, "artist", "")
-                        album = getattr(item, "album", "") or ""
-                        url = getattr(item, "url", "") or ""
-                    elif isinstance(item, dict):
-                        title = item.get("title", "")
-                        artist = item.get("artist", "")
-                        album = item.get("album", "") or ""
-                        url = item.get("url", "") or ""
-                    else:
-                        continue
-                    key = (str(title).strip().lower(), str(artist).strip().lower())
-                    l_status = existing_lidarr_status.get(key, "unmonitored")
-                    attempts, next_at = existing_retry.get(key, (0, None))
-                    self.conn.execute(
-                        """
-                        INSERT INTO missing_tracks (
-                            playlist_id, title, artist, album, url, lidarr_status, list_applied_at, attempts, next_attempt_at
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            p_id, str(title), str(artist), str(album), str(url), l_status,
-                            existing_applied.get(key), attempts, next_at,
-                        ),
-                    )
+            self._diff_missing_rows(p_id, missing_tracks)
             self.conn.commit()
 
     def get_missing_tracks(

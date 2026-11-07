@@ -280,6 +280,121 @@ class TestSyncResultsAndMissingTracks:
         mem_db.record_sync_result("p1", "success", [])
         assert len(mem_db.get_missing_tracks("p1")) == 0
 
+    def test_sync_result_keeps_missing_row_ids(self, mem_db):
+        mem_db.upsert_playlist("p1", "Rock")
+        tracks = [
+            Track(title="Song A", artist="Artist A", album="Album A"),
+            Track(title="Song B", artist="Artist B", album="Album B"),
+        ]
+        mem_db.record_sync_result("p1", "partial", tracks)
+        rows_1 = mem_db.get_missing_tracks("p1")
+        assert len(rows_1) == 2
+        id_map_1 = {r["title"]: (r["id"], r["created_at"]) for r in rows_1}
+
+        # Sync same tracks again
+        mem_db.record_sync_result("p1", "partial", tracks)
+        rows_2 = mem_db.get_missing_tracks("p1")
+        assert len(rows_2) == 2
+        id_map_2 = {r["title"]: (r["id"], r["created_at"]) for r in rows_2}
+
+        assert id_map_1 == id_map_2
+
+    def test_sync_result_adds_and_removes_by_key(self, mem_db):
+        mem_db.upsert_playlist("p1", "Rock")
+        tracks_initial = [
+            Track(title="Song A", artist="Artist A", album="Album A"),
+            Track(title="Song B", artist="Artist B", album="Album B"),
+        ]
+        mem_db.record_sync_result("p1", "partial", tracks_initial)
+        initial_rows = {r["title"]: r["id"] for r in mem_db.get_missing_tracks("p1")}
+
+        tracks_updated = [
+            Track(title="Song B", artist="Artist B", album="Album B"),
+            Track(title="Song C", artist="Artist C", album="Album C"),
+        ]
+        mem_db.record_sync_result("p1", "partial", tracks_updated)
+        updated_rows = {r["title"]: r["id"] for r in mem_db.get_missing_tracks("p1")}
+
+        assert "Song A" not in updated_rows
+        assert updated_rows["Song B"] == initial_rows["Song B"]
+        assert "Song C" in updated_rows
+        assert updated_rows["Song C"] != initial_rows["Song B"]
+
+    def test_sync_result_preserves_row_state(self, mem_db):
+        mem_db.upsert_playlist("p1", "Pop")
+        track_initial = [Track(title="Song A", artist="Artist A", album="Old Album", url="http://old")]
+        mem_db.record_sync_result("p1", "partial", track_initial)
+        initial_row = mem_db.get_missing_tracks("p1")[0]
+
+        # Mutate state directly via SQL
+        mem_db.conn.execute(
+            """
+            UPDATE missing_tracks
+            SET lidarr_status = 'grabbed', attempts = 3, artist_added_by_item = 1
+            WHERE id = ?
+            """,
+            (initial_row["id"],),
+        )
+        mem_db.conn.commit()
+
+        # Sync again with updated album and url
+        track_updated = [Track(title="Song A", artist="Artist A", album="New Album", url="http://new")]
+        mem_db.record_sync_result("p1", "partial", track_updated)
+
+        updated_row = mem_db.get_missing_tracks("p1")[0]
+        assert updated_row["id"] == initial_row["id"]
+        assert updated_row["lidarr_status"] == "grabbed"
+        assert updated_row["attempts"] == 3
+        assert updated_row["artist_added_by_item"] == 1
+        assert updated_row["album"] == "New Album"
+        assert updated_row["url"] == "http://new"
+
+    def test_sync_result_key_is_case_insensitive(self, mem_db):
+        mem_db.upsert_playlist("p1", "Hip Hop")
+        mem_db.record_sync_result("p1", "partial", [Track(title="Lean", artist="Weaver Beats", album="")])
+        initial_row = mem_db.get_missing_tracks("p1")[0]
+
+        mem_db.record_sync_result("p1", "partial", [Track(title="lean", artist="weaver beats", album="")])
+        updated_row = mem_db.get_missing_tracks("p1")[0]
+
+        assert updated_row["id"] == initial_row["id"]
+        assert updated_row["title"] == "lean"
+        assert updated_row["artist"] == "weaver beats"
+
+    def test_sync_result_collapses_duplicate_rows(self, mem_db):
+        mem_db.upsert_playlist("p1", "Indie")
+        # Insert two duplicate rows directly via SQL
+        mem_db.conn.execute(
+            "INSERT INTO missing_tracks (playlist_id, title, artist, album, url) VALUES (?, ?, ?, ?, ?)",
+            ("p1", "Duplicate Song", "Duplicate Artist", "Album 1", ""),
+        )
+        mem_db.conn.execute(
+            "INSERT INTO missing_tracks (playlist_id, title, artist, album, url) VALUES (?, ?, ?, ?, ?)",
+            ("p1", "Duplicate Song", "Duplicate Artist", "Album 2", ""),
+        )
+        mem_db.conn.commit()
+
+        existing = mem_db.get_missing_tracks("p1")
+        assert len(existing) == 2
+        lowest_id = min(r["id"] for r in existing)
+
+        # Sync that song
+        mem_db.record_sync_result(
+            "p1", "partial", [Track(title="Duplicate Song", artist="Duplicate Artist", album="Album Updated")]
+        )
+        remaining = mem_db.get_missing_tracks("p1")
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == lowest_id
+        assert remaining[0]["album"] == "Album Updated"
+
+    def test_sync_result_empty_clears_rows(self, mem_db):
+        mem_db.upsert_playlist("p1", "Jazz")
+        mem_db.record_sync_result("p1", "partial", [Track(title="Song A", artist="Artist A", album="")])
+        assert len(mem_db.get_missing_tracks("p1")) == 1
+
+        mem_db.record_sync_result("p1", "partial", [])
+        assert len(mem_db.get_missing_tracks("p1")) == 0
+
     def test_get_missing_tracks_all(self, mem_db):
         mem_db.upsert_playlist("p1", "P1")
         mem_db.upsert_playlist("p2", "P2")
