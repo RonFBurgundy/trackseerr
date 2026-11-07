@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional, Union
 
 from trackseerr.album_years import is_placeholder_date, plausible_year
+from trackseerr.exclusions import find_exclusion
 from trackseerr.library_monitoring import (
     normalize_secondary_types,
 )
@@ -62,6 +63,23 @@ class LibraryCatalogStoreMixin:
         normalized_secondary = normalize_secondary_types(raw_secondary)
         secondary_types = json.dumps(normalized_secondary) if normalized_secondary is not None else None
         created_at = d.get("created_at")
+
+        artist_name = None
+        if artist_id:
+            artist_row = self.get_library_artist(artist_id)
+            if artist_row:
+                artist_name = artist_row.get("name")
+        artist_name = artist_name or d.get("artist_name")
+
+        hit = find_exclusion(
+            self,
+            artist=artist_name,
+            album=title,
+            album_mbid=mb_release_group_id,
+        )
+        if hit is not None:
+            monitored = 0
+            preserve_monitoring = False
 
         with self._lock:
             is_new = self.conn.execute("SELECT 1 FROM library_albums WHERE id = ?", (album_id,)).fetchone() is None

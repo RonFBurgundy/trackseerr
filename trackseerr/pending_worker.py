@@ -11,6 +11,7 @@ from typing import Any, Optional
 
 from trackseerr import delay_gate
 from trackseerr.acquisition_coordinator import _extract_info_hash, acquisition_coordinator
+from trackseerr.exclusions import find_exclusion
 from trackseerr.item_history import TRIGGER_SYSTEM, TRIGGER_UPGRADE, GrabTrigger
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, retry_stuck_lidarr_requests, work_guard
 from trackseerr.storage import Database
@@ -69,6 +70,20 @@ def stale_reason(db: Database, row: dict[str, Any], now: datetime) -> Optional[s
     except (KeyError, TypeError, ValueError):
         pass  # unreadable timestamps: let the grab path decide
 
+    item_type = row.get("item_type") or "track"
+    artist = row.get("artist_name") or ""
+    album = row.get("album")
+    payload = row.get("payload") or {}
+    item_title = payload.get("item_title") or (album if item_type == "album" else row.get("title"))
+    hit = find_exclusion(
+        db,
+        artist=artist,
+        title=item_title if item_type == "track" else None,
+        album=album if item_type == "track" else item_title,
+    )
+    if hit is not None:
+        return f"excluded: {hit.describe()}"
+
     payload = row.get("payload") or {}
     request_id = row.get("request_id")
     if request_id:
@@ -121,6 +136,27 @@ def grab_pending(db: Database, row: dict[str, Any], *, count_failure: bool = Tru
         return {"success": False, "claimed_elsewhere": True, "message": "Pending release was already grabbed or removed"}
     payload = claimed.get("payload") or {}
     candidate = delay_gate.candidate_from_dict(payload.get("candidate") or {})
+
+    item_type = claimed.get("item_type") or "track"
+    artist = claimed.get("artist_name") or candidate.artist
+    album = claimed.get("album")
+    item_title = payload.get("item_title") or (album if item_type == "album" else (candidate.title or claimed.get("title")))
+    hit = find_exclusion(
+        db,
+        artist=artist,
+        title=item_title if item_type == "track" else None,
+        album=album if item_type == "track" else item_title,
+    )
+    if hit is not None:
+        logger.info(
+            "Dropped pending release %s ('%s' by '%s'): %s",
+            claimed["id"],
+            claimed.get("title"),
+            artist,
+            hit.describe(),
+        )
+        return {"success": False, "excluded": True, "message": hit.describe()}
+
     failed = False
     result: dict[str, Any] = {}
     try:

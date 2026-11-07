@@ -25,6 +25,7 @@ from trackseerr.clients.acquisition import (
 )
 from trackseerr.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
 from trackseerr.clients.acquisition.slskd import SlskdNotLoggedInError
+from trackseerr.exclusions import find_exclusion
 from trackseerr.indexer_status import indexer_status
 from trackseerr.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
@@ -1173,6 +1174,15 @@ class AcquisitionCoordinator:
         """
         if db is None:
             raise ValueError("Database instance must be provided to search_and_grab")
+        hit = find_exclusion(
+            db,
+            artist=artist,
+            title=title if item_type == "track" else None,
+            album=album if item_type == "track" else title,
+        )
+        if hit is not None:
+            logger.info("Search and grab skipped for '%s - %s': %s", artist, title, hit.describe())
+            return {"success": False, "excluded": True, "message": hit.describe()}
         try:
             with work_guard(db, MODE_NATIVE):
                 return self._search_and_grab(
