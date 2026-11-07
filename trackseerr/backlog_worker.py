@@ -229,8 +229,15 @@ class ReplacementSpec:
     require_better: bool = False
 
 
-def _missing_ref(missing_id: Optional[int]) -> Optional[str]:
-    return f"missing:{missing_id}" if missing_id is not None else None
+def _missing_ref(artist: Optional[str], title: Optional[str]) -> Optional[str]:
+    """Derive stable backoff ref from artist and title because missing_tracks ids change on every playlist re-sync."""
+    if not artist or not title:
+        return None
+    a = artist.strip().lower()
+    t = title.strip().lower()
+    if not a or not t:
+        return None
+    return f"missing:{a}|{t}"
 
 
 def _backoff_key(item: tuple) -> Optional[str]:
@@ -240,7 +247,7 @@ def _backoff_key(item: tuple) -> Optional[str]:
         return str(item[9])
     if item[4] is not None:
         return str(item[4])
-    return _missing_ref(item[5])
+    return _missing_ref(item[0], item[1]) if item[5] is not None else None
 
 
 def _search_trigger(
@@ -929,7 +936,7 @@ class WantedBacklogWorker:
         stats["items_checked"] += 1
         trigger = _search_trigger(None, min_score)
         if missing_id is not None and req_id is None and track_id is None and album_id is None:
-            trigger = dataclasses.replace(trigger, ref=_missing_ref(missing_id))
+            trigger = dataclasses.replace(trigger, ref=_missing_ref(artist, title))
         try:
             res = acquisition_coordinator.search_and_grab(
                 artist=artist,
