@@ -118,6 +118,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- An indexer address ending in `/api`, like the one Prowlarr copies for an indexer, now works. Before, TrackSeerr added a second `/api` and every search failed. The Add indexer form now shows the right example and says how to sync all your Prowlarr indexers instead.
 - Seeding rules now reach qBittorrent 5. qBittorrent 5 rejected the seed ratio and seed time TrackSeerr sets per torrent, so its own global seed settings applied instead. If you use per-indexer seeding rules with qBittorrent 5, torrents grabbed before this update still have the old limits.
 - A wrong SABnzbd API key now fails the connection test. Before, the test passed and downloads failed later.
 - Indexer errors are now shown as errors. Before, an indexer that answered "API limit reached", "wrong API key" or "slow down" looked like a search that found nothing, and nothing told you it was failing. Those searches now appear as failed in Activity → Searches and no longer count toward the "searched often with no luck" slowdown.
