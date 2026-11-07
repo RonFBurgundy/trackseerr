@@ -2,7 +2,7 @@
 
 import logging
 import uuid
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -36,6 +36,7 @@ class IndexerItem(ApiModel):
     seed_time_minutes: Optional[int] = None
     discography_seed_time_minutes: Optional[int] = None
     minimum_seeders: Optional[int] = None
+    pack_scan: Literal["off", "auto", "all"] = "off"
 
 
 class IndexerPayload(BaseModel):
@@ -52,6 +53,7 @@ class IndexerPayload(BaseModel):
     seed_time_minutes: Optional[int] = Field(default=None, ge=0)
     discography_seed_time_minutes: Optional[int] = Field(default=None, ge=0)
     minimum_seeders: Optional[int] = Field(default=None, ge=0)
+    pack_scan: Literal["off", "auto", "all"] = "off"
 
 
 class TestIndexerPayload(BaseModel):
@@ -60,6 +62,7 @@ class TestIndexerPayload(BaseModel):
     host_url: str
     api_key: Optional[str] = None
     categories: str = "3000,3010,3020,3030,3040"
+    pack_scan: Literal["off", "auto", "all"] = "off"
 
 
 class TestIndexerResponse(ApiModel):
@@ -128,6 +131,7 @@ def create_or_update_indexer(
         seed_time_minutes=payload.seed_time_minutes,
         discography_seed_time_minutes=payload.discography_seed_time_minutes,
         minimum_seeders=payload.minimum_seeders,
+        pack_scan=payload.pack_scan,
     )
 
     saved = db.create_indexer(config)

@@ -8785,6 +8785,12 @@ export interface components {
             /** Name */
             name: string;
             /**
+             * Pack Scan
+             * @default off
+             * @enum {string}
+             */
+            pack_scan: "off" | "auto" | "all";
+            /**
              * Priority
              * @default 1
              */
@@ -8825,6 +8831,12 @@ export interface components {
             minimum_seeders?: number | null;
             /** Name */
             name: string;
+            /**
+             * Pack Scan
+             * @default off
+             * @enum {string}
+             */
+            pack_scan: "off" | "auto" | "all";
             /**
              * Priority
              * @default 25
@@ -14281,6 +14293,12 @@ export interface components {
              * @default torznab
              */
             indexer_type: string;
+            /**
+             * Pack Scan
+             * @default off
+             * @enum {string}
+             */
+            pack_scan: "off" | "auto" | "all";
         };
         /** TestIndexerResponse */
         TestIndexerResponse: {

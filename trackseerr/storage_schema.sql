@@ -109,7 +109,7 @@ CREATE TABLE indexers (
                 priority INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            , seed_ratio REAL, seed_time_minutes INTEGER, discography_seed_time_minutes INTEGER, minimum_seeders INTEGER);
+            , seed_ratio REAL, seed_time_minutes INTEGER, discography_seed_time_minutes INTEGER, minimum_seeders INTEGER, pack_scan TEXT NOT NULL DEFAULT 'off');
 CREATE TABLE internal_nonces (nonce TEXT PRIMARY KEY, seen_at INTEGER NOT NULL);
 CREATE TABLE item_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -813,6 +813,35 @@ CREATE TABLE exclusions (
     created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 );
 
+CREATE TABLE pack_releases (
+    id TEXT PRIMARY KEY,
+    indexer_id TEXT NOT NULL REFERENCES indexers(id) ON DELETE CASCADE,
+    guid TEXT NOT NULL,
+    title TEXT NOT NULL,
+    download_url TEXT,
+    magnet_url TEXT,
+    info_hash TEXT,
+    size_bytes INTEGER,
+    seeders INTEGER,
+    published_at TEXT,
+    file_count INTEGER NOT NULL DEFAULT 0,
+    scan_status TEXT NOT NULL DEFAULT 'pending' CHECK (scan_status IN ('pending','scanned','failed','skipped')),
+    scan_error TEXT,
+    scanned_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+);
+
+CREATE TABLE pack_files (
+    pack_id TEXT NOT NULL REFERENCES pack_releases(id) ON DELETE CASCADE,
+    file_index INTEGER NOT NULL,
+    path TEXT NOT NULL,
+    size_bytes INTEGER,
+    ext TEXT,
+    parsed_artist TEXT,
+    parsed_title TEXT,
+    PRIMARY KEY (pack_id, file_index)
+);
+
 CREATE INDEX idx_blocklist_hash ON download_blocklist(info_hash);
 CREATE INDEX idx_blocklist_title ON download_blocklist(source_title);
 CREATE INDEX idx_blocklist_guid ON download_blocklist(release_guid);
@@ -881,6 +910,9 @@ CREATE INDEX IF NOT EXISTS idx_lib_tracks_hf_size ON library_tracks(has_file, ma
 CREATE INDEX IF NOT EXISTS idx_lib_tracks_created_id ON library_tracks(created_at, id);
 CREATE UNIQUE INDEX idx_exclusions_scope_key ON exclusions(scope, match_key);
 CREATE INDEX idx_exclusions_scope_mbid ON exclusions(scope, mbid);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pack_releases_indexer_guid ON pack_releases(indexer_id, guid);
+CREATE INDEX IF NOT EXISTS idx_pack_releases_status ON pack_releases(scan_status);
+CREATE VIRTUAL TABLE IF NOT EXISTS pack_files_fts USING fts5(search, pack_id UNINDEXED, file_index UNINDEXED, tokenize = 'unicode61 remove_diacritics 2');
 CREATE VIRTUAL TABLE IF NOT EXISTS library_tracks_fts USING fts5(clean, raw, content='', contentless_delete=1, tokenize='trigram');
 CREATE TRIGGER IF NOT EXISTS trg_lib_tracks_ai AFTER INSERT ON library_tracks
 BEGIN

@@ -267,6 +267,7 @@ class IndexerConfig:
     seed_time_minutes: Optional[int] = None
     discography_seed_time_minutes: Optional[int] = None
     minimum_seeders: Optional[int] = None
+    pack_scan: str = "off"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -274,6 +275,7 @@ class IndexerConfig:
             "seed_time_minutes": self.seed_time_minutes,
             "discography_seed_time_minutes": self.discography_seed_time_minutes,
             "minimum_seeders": self.minimum_seeders,
+            "pack_scan": self.pack_scan,
             "id": self.id,
             "name": self.name,
             "indexer_type": self.indexer_type,
