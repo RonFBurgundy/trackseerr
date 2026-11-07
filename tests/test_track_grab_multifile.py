@@ -401,3 +401,25 @@ def test_single_file_track_grab_unchanged(tmp_path: Path, db: Database):
     assert len(placed_files) == 1
     assert placed_files[0].read_bytes().endswith(b"SOULSEEK-SINGLE")
     assert db.get_library_file_for_track("trk-everything") is not None
+
+
+def test_track_grab_multifile_with_dangerous_file_rejects_whole_release(tmp_path: Path, db: Database):
+    """A release with a dangerous file must be rejected as a whole even if wanted song matches cleanly."""
+    music, staging, dl = _seed_bryan_adams(db, tmp_path)
+
+    _flac(dl / "01 (Everything I Do) I Do It For You.flac", b"FLAC-SONG-1")
+    bad_file = dl / "02 Malicious.mp3"
+    bad_file.write_bytes(b"<html>not an audio file</html>")
+
+    stats = _run_worker(db, dl, staging)
+    assert stats["failed"] == 1
+    assert stats["imported"] == 0
+
+    # Nothing imported to library (quarantined files are in .trackseerr-quarantine)
+    assert not any(p for p in music.rglob("*") if ".trackseerr-quarantine" not in p.parts)
+
+    # Download marked failed
+    row = db.get_active_download("dl-1")
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert "Security check failed" in (row.get("error_message") or "")
+

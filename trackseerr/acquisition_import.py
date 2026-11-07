@@ -268,6 +268,7 @@ class _ImportJob:
     should_keep_seeding: bool = False
     duplicate_owned_title: Optional[str] = None
     duplicate_owned_track_id: Optional[str] = None
+    selected_track_match: Optional[tuple[Path, dict[str, Any]]] = None
 
 
 _LEADING_TRACK_DISC_RE = re.compile(
@@ -388,31 +389,26 @@ def _file_quality_key(
     return (allowed_rank, tier_rank, 0 if is_lossless else 1, -size, str(path))
 
 
-def _resolve_job_wanted_title(job: _ImportJob) -> Optional[str]:
-    """Resolves catalog track and returns wanted song title for the import job."""
+def _resolve_job_wanted_track_and_title(
+    job: _ImportJob,
+) -> tuple[Optional[dict[str, Any]], Optional[str]]:
+    """Resolves catalog track and returns (wanted_track, wanted_title) for the import job without mutating job."""
     db = job.db
     resolved_track = None
     if db:
         resolved_track = _resolve_wanted_track(db, job.item, job.req)
-        if resolved_track:
-            job.item["track_id"] = str(resolved_track["id"])
-            if not job.target_album and resolved_track.get("album_id"):
-                job.target_album = db.get_library_album(str(resolved_track["album_id"]))
-            if resolved_track not in job.expected_tracks:
-                job.expected_tracks.append(resolved_track)
-                job.remaining_expected_tracks.append(resolved_track)
 
     if resolved_track and resolved_track.get("title"):
-        return resolved_track["title"]
+        return resolved_track, str(resolved_track["title"])
     if job.item.get("track_id") and db:
         trk = db.get_library_track(str(job.item["track_id"]))
         if trk and trk.get("title"):
-            return trk["title"]
+            return trk, str(trk["title"])
     if job.req and job.req.get("title"):
-        return job.req["title"]
+        return resolved_track, str(job.req["title"])
     if job.item.get("title"):
-        return job.item["title"]
-    return None
+        return resolved_track, str(job.item["title"])
+    return resolved_track, None
 
 
 def _match_files_for_track(
@@ -486,7 +482,7 @@ def _select_files_for_track(job: _ImportJob) -> list[Path]:
     if not job.audio_files:
         return []
 
-    wanted_title = _resolve_job_wanted_title(job)
+    wanted_track, wanted_title = _resolve_job_wanted_track_and_title(job)
     if not wanted_title:
         return job.audio_files
 
@@ -494,6 +490,8 @@ def _select_files_for_track(job: _ImportJob) -> list[Path]:
     candidate_pool = _match_files_for_track(job.audio_files, wanted_title, artist)
 
     if not candidate_pool:
+        if len(job.audio_files) <= 1:
+            return job.audio_files
         job.held_files = [str(f) for f in job.audio_files]
         job.held_msg = f'No file in the download matches "{wanted_title}"'
         if job.db:
@@ -514,6 +512,13 @@ def _select_files_for_track(job: _ImportJob) -> list[Path]:
     skipped = [f for f in job.audio_files if f != best_file]
     if skipped:
         _record_skipped_files(job, skipped)
+
+    if wanted_track:
+        job.selected_track_match = (best_file, wanted_track)
+        if not job.item.get("track_id"):
+            job.item["track_id"] = str(wanted_track["id"])
+        if not job.target_album and wanted_track.get("album_id") and job.db:
+            job.target_album = job.db.get_library_album(str(wanted_track["album_id"]))
 
     return [best_file]
 
@@ -606,11 +611,10 @@ class ImportPipelineMixin(ImportCatalogMixin):
         effective_type = (job.req.get("item_type") if job.req else None) or job.item.get("item_type") or "track"
 
         if effective_type == "track":
-            if len(job.audio_files) > 1:
-                selected = self._select_files_for_track(job)
-                if not selected:
-                    return False
-                job.audio_files = selected
+            selected = self._select_files_for_track(job)
+            if not selected:
+                return False
+            job.audio_files = selected
         elif effective_type == "album":
             selected = self._select_files_for_album(job)
             job.audio_files = selected
@@ -704,9 +708,9 @@ class ImportPipelineMixin(ImportCatalogMixin):
 
         if not self._locate_audio_files(db, ctx, job, stats):
             return
-        if not self._filter_download_files(db, ctx, job, stats):
-            return
         if not self._security_gate(db, ctx, job, stats):
+            return
+        if not self._filter_download_files(db, ctx, job, stats):
             return
         if not self._bitrate_gate(db, ctx, job, stats):
             return
@@ -1005,10 +1009,6 @@ class ImportPipelineMixin(ImportCatalogMixin):
         job.last_metadata = {}
 
         # Check if item has album_id or matches an existing album in catalog
-        if job.item.get("item_type") == "track" and not job.item.get("track_id"):
-            resolved = _resolve_wanted_track(db, job.item, job.req)
-            if resolved:
-                job.item["track_id"] = str(resolved["id"])
         job.target_album, job.expected_tracks = resolve_download_expected_tracks(db, job.item, job.req)
 
         job.remaining_expected_tracks = list(job.expected_tracks)
@@ -1071,7 +1071,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
         An unmatched file stays unmatched: it goes through the owned-elsewhere / hold rules, never onto the wanted row.
         """
         wanted_id = str(job.item.get("track_id") or "")
-        if not wanted_id or (matched is not None and str(matched.get("id") or "") == wanted_id):
+        if not wanted_id or matched is None or str(matched.get("id") or "") == wanted_id:
             return matched, strength
         file_title = _effective_file_title(metadata)
         for t in job.remaining_expected_tracks:
@@ -1260,13 +1260,43 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 if not job.duplicate_owned_track_id and owned.get("id"):
                     job.duplicate_owned_track_id = str(owned["id"])
                 return
-            matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
+
+            if job.selected_track_match:
+                sel_path, sel_track = job.selected_track_match
+                if af.resolve() == sel_path.resolve():
+                    matched_expected_track = sel_track
+                    if self._existing_file_blocks_placement(
+                        db, job, af, metadata, matched_expected_track
+                    ):
+                        return
+                    if matched_expected_track in job.remaining_expected_tracks:
+                        job.remaining_expected_tracks.remove(matched_expected_track)
+                    metadata["title"] = matched_expected_track["title"]
+                    metadata["track_number"] = int(matched_expected_track.get("track_number") or 1)
+                    metadata["disc_number"] = int(matched_expected_track.get("disc_number") or 1)
+                    matched_album = (
+                        db.get_library_album(str(matched_expected_track["album_id"]))
+                        if matched_expected_track.get("album_id")
+                        and (not job.target_album or str(matched_expected_track["album_id"]) != str(job.target_album.get("id")))
+                        else job.target_album
+                    )
+                    if matched_album:
+                        _apply_catalog_album(
+                            metadata,
+                            matched_album,
+                            db.get_library_artist(matched_album["artist_id"]) if matched_album.get("artist_id") else None,
+                            ctx.media_settings,
+                            db=db,
+                        )
+
             if matched_expected_track is None:
-                logger.warning(
-                    "Holding unmatched file %s for download %s (manual import required)", af, job.download_id
-                )
-                job.held_files.append(str(af))
-                return
+                matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
+                if matched_expected_track is None:
+                    logger.warning(
+                        "Holding unmatched file %s for download %s (manual import required)", af, job.download_id
+                    )
+                    job.held_files.append(str(af))
+                    return
 
         # Disc 1 of a multi-disc release must use the multi-disc format only when owned files span multiple discs.
         known_discs: list[int] = [1]
