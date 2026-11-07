@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FolderInput, ListFilter, Search } from 'lucide-react';
+import { Ban, FolderInput, ListFilter, Search } from 'lucide-react';
 import type { IndexFetcher, ListSortDir, WantedCutoffRecord, WantedListName, WantedRecord } from '@/types/activity';
 import { getWantedCutoff, getWantedIndex, getWantedMissing, searchWanted } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
@@ -7,6 +7,7 @@ import { pagedFetcher, useVirtualPagedList } from '@/hooks/useVirtualPagedList';
 import { useGroupIndex } from '@/hooks/useGroupIndex';
 import { useListSelection } from '@/hooks/useListSelection';
 import { ConfirmDangerButton, TapeDeckButton, type OverflowMenuItem } from '@/components/ui';
+import { ExcludeConfirm } from '@/components/library/ExcludeConfirm';
 import { ManualImportModal } from '@/components/manualImport';
 import { ManualSearchModal } from '@/components/manualSearch';
 import type { ManualSearchTarget } from '@/types/manualSearch';
@@ -43,6 +44,12 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
   const [busy, setBusy] = useState<boolean>(false);
   const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
   const [searchTarget, setSearchTarget] = useState<ManualSearchTarget | null>(null);
+  const [excludeTarget, setExcludeTarget] = useState<{
+    scope: 'track' | 'album';
+    name: string;
+    id: string | number;
+    payload: { library_track_id?: string; library_album_id?: string };
+  } | null>(null);
   const { selected, setSelected, clear } = useListSelection();
 
   const list = useVirtualPagedList<WantedRow>(isCutoff ? fetchCutoff : fetchMissing, {
@@ -149,6 +156,20 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
             }),
         });
       }
+      items.push({
+        key: 'exclude',
+        label: 'Exclude…',
+        icon: <Ban className="h-3.5 w-3.5" />,
+        onSelect: () => {
+          const isAlbum = r.item_type === 'album';
+          const scope = isAlbum ? 'album' : 'track';
+          const name = (isAlbum ? r.album : r.title) || r.title || r.album || 'item';
+          const payload = isAlbum
+            ? { library_album_id: String(r.album_id ?? r.id) }
+            : { library_track_id: String(r.id) };
+          setExcludeTarget({ scope, name, id: r.id, payload });
+        },
+      });
       return items;
     },
     []
@@ -244,6 +265,20 @@ export const WantedPanel: React.FC<WantedPanelProps> = ({ list: listName, onToas
           void list.refresh();
         }}
       />
+      {excludeTarget && (
+        <ExcludeConfirm
+          isOpen
+          scope={excludeTarget.scope}
+          name={excludeTarget.name}
+          payload={excludeTarget.payload}
+          onClose={() => setExcludeTarget(null)}
+          onSuccess={() => {
+            list.removeItems(new Set([excludeTarget.id]));
+            setExcludeTarget(null);
+          }}
+          onToast={onToast}
+        />
+      )}
     </ListPanel>
   );
 };

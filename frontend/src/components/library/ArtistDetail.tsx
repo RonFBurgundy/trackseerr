@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import {
+  Ban,
   CheckSquare,
   Disc,
   ExternalLink,
@@ -31,6 +32,7 @@ import { DetailHeaderBar, PageFrame } from '@/components/layout';
 
 import { ArtistAlbumCard } from './ArtistAlbumCard';
 import { ItemOriginCaption } from './ItemOriginCaption';
+import { ExcludeConfirm } from './ExcludeConfirm';
 import { AlbumBulkBar } from './AlbumBulkBar';
 import { DiscographyFilter } from './DiscographyFilter';
 import { ArtistRestOfDiscography } from './ArtistRestOfDiscography';
@@ -157,6 +159,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
 }) => {
   const detail = useArtistDetail(artistId, onToast, onChanged);
   const { artist, loading, refreshing, patchAlbumMonitored, patchArtistMonitored, patchArtistTags } = detail;
+  const [excludeOpen, setExcludeOpen] = useState<boolean>(false);
   const [tab, setTab] = useState<DiscographyTab>('studio');
   const filter = useDiscographyFilter(artistId);
   const { filterAlbums } = filter;
@@ -339,6 +342,14 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
       label: 'Retag files…',
       icon: <Tag className="h-3.5 w-3.5" />,
       onSelect: onRetagFiles,
+    });
+  }
+  if (isAdmin && !lidarrMode) {
+    artistToolItems.push({
+      key: 'exclude',
+      label: 'Exclude artist…',
+      icon: <Ban className="h-3.5 w-3.5" />,
+      onSelect: () => setExcludeOpen(true),
     });
   }
 
@@ -613,6 +624,21 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
           this artist will be replaced.
         </p>
       </ConfirmDialog>
+      {artist && (
+        <ExcludeConfirm
+          isOpen={excludeOpen}
+          scope="artist"
+          name={artist.name}
+          payload={{ library_artist_id: String(artist.id) }}
+          onClose={() => setExcludeOpen(false)}
+          onSuccess={() => {
+            patchArtistMonitored(false);
+            onChanged();
+            void detail.refreshDiscography();
+          }}
+          onToast={onToast}
+        />
+      )}
     </div>
     </PageFrame>
   );

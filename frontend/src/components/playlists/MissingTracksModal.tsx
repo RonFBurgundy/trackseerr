@@ -1,12 +1,14 @@
 import React, { useCallback, useEffect, useId, useState } from 'react';
 import {
   ArrowLeft,
+  Ban,
   Check,
   History,
   Loader2,
   Search,
 } from 'lucide-react';
 import { ObsidianModal, PageLoader, TapeDeckButton } from '@/components/ui';
+import { ExcludeConfirm } from '@/components/library/ExcludeConfirm';
 import type { MissingTrack, MediaTrackHit } from '@/services/missingService';
 import { errorMessage } from '@/services/apiClient';
 
@@ -19,6 +21,10 @@ export interface MissingTracksModalProps {
   onMatch: (track: MissingTrack, hit: MediaTrackHit) => Promise<void>;
   onOpenOverrides?: () => void;
   overridesCount?: number;
+  isAdmin?: boolean;
+  lidarrMode?: boolean;
+  onRefresh?: () => void;
+  onToast?: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
 function formatDuration(ms?: number | null): string {
@@ -38,8 +44,13 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
   onMatch,
   onOpenOverrides,
   overridesCount = 0,
+  isAdmin = false,
+  lidarrMode = false,
+  onRefresh,
+  onToast,
 }) => {
   const searchInputId = useId();
+  const [excludeTrack, setExcludeTrack] = useState<MissingTrack | null>(null);
   const [matchingTrack, setMatchingTrack] = useState<MissingTrack | null>(null);
   const [query, setQuery] = useState<string>('');
   const [results, setResults] = useState<MediaTrackHit[]>([]);
@@ -307,7 +318,18 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
                         )}
                       </div>
 
-                      <div className="shrink-0">
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        {isAdmin && !lidarrMode && (
+                          <TapeDeckButton
+                            size="sm"
+                            onClick={() => setExcludeTrack(track)}
+                            icon={<Ban className="h-3.5 w-3.5" />}
+                            title={`Exclude ${track.title}`}
+                            aria-label={`Exclude ${track.title}`}
+                          >
+                            Exclude song…
+                          </TapeDeckButton>
+                        )}
                         <TapeDeckButton
                           size="sm"
                           variant="amber"
@@ -327,6 +349,20 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
           </div>
         )}
       </div>
+      {excludeTrack && (
+        <ExcludeConfirm
+          isOpen
+          scope="track"
+          name={excludeTrack.title}
+          payload={{ missing_track_id: excludeTrack.id }}
+          onClose={() => setExcludeTrack(null)}
+          onSuccess={() => {
+            setExcludeTrack(null);
+            onRefresh?.();
+          }}
+          onToast={onToast ?? (() => {})}
+        />
+      )}
     </ObsidianModal>
   );
 };

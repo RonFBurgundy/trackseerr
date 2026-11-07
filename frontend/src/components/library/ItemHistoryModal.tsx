@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { Ban } from 'lucide-react';
 import type { ItemHistoryEntity } from '@/types/itemHistory';
 import { ObsidianModal, TapeDeckButton } from '@/components/ui';
 import { ItemHistoryTimeline } from './ItemHistoryTimeline';
 import { RejectCurrentButton } from './RejectCurrentButton';
+import { ExcludeConfirm } from './ExcludeConfirm';
 
 export interface ItemHistoryModalProps {
   isOpen: boolean;
@@ -27,8 +29,10 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
   onToast,
 }) => {
   const [reloadKey, setReloadKey] = useState<number>(0);
+  const [excludeOpen, setExcludeOpen] = useState<boolean>(false);
   const rejectEntity = entity === 'album' || entity === 'track' ? entity : null;
   return (
+    <>
     <ObsidianModal
       isOpen={isOpen}
       onClose={onClose}
@@ -44,6 +48,15 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
               onDone={() => setReloadKey((k) => k + 1)}
             />
           )}
+          {canReject && entity === 'track' && onToast && (
+            <TapeDeckButton
+              size="sm"
+              icon={<Ban className="h-3.5 w-3.5" />}
+              onClick={() => setExcludeOpen(true)}
+            >
+              Exclude track…
+            </TapeDeckButton>
+          )}
           <TapeDeckButton size="sm" onClick={onClose}>
             Close
           </TapeDeckButton>
@@ -52,5 +65,17 @@ export const ItemHistoryModal: React.FC<ItemHistoryModalProps> = ({
     >
       {isOpen && <ItemHistoryTimeline key={reloadKey} entity={entity} entityId={entityId} />}
     </ObsidianModal>
+    {canReject && entity === 'track' && onToast && (
+      <ExcludeConfirm
+        isOpen={excludeOpen}
+        scope="track"
+        name={title}
+        payload={{ library_track_id: entityId }}
+        onClose={() => setExcludeOpen(false)}
+        onSuccess={() => setReloadKey((k) => k + 1)}
+        onToast={onToast}
+      />
+    )}
+    </>
   );
 };

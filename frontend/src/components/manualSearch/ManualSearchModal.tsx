@@ -7,6 +7,7 @@ import { ItemHistoryTimeline } from '@/components/library/ItemHistoryTimeline';
 import { RejectCurrentButton } from '@/components/library/RejectCurrentButton';
 import { historyRelativeTime } from '@/components/library/itemHistoryFormat';
 import { formatBytes } from '@/components/lists';
+import { checkExclusion } from '@/services/exclusionsService';
 
 export interface ManualSearchModalProps {
   /** Null closes the modal. Pass a stable object (state); a new object restarts the search. */
@@ -242,6 +243,7 @@ export const ManualSearchModal: React.FC<ManualSearchModalProps> = ({ target, on
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [tab, setTab] = useState<'releases' | 'history'>('releases');
   const [historyKey, setHistoryKey] = useState<number>(0);
+  const [exclusionReason, setExclusionReason] = useState<string | null>(null);
   const uid = useId();
   const sortId = `${uid}-sort`;
   const what = target ? target.title || target.album || '' : '';
@@ -257,6 +259,34 @@ export const ManualSearchModal: React.FC<ManualSearchModalProps> = ({ target, on
 
   useEffect(() => {
     setTab('releases');
+  }, [target]);
+
+  useEffect(() => {
+    if (!target) {
+      setExclusionReason(null);
+      return;
+    }
+    const ac = new AbortController();
+    setExclusionReason(null);
+    checkExclusion(
+      {
+        artist: target.artist,
+        album: target.album ?? undefined,
+        title: target.title ?? undefined,
+      },
+      ac.signal
+    )
+      .then((res) => {
+        if (res.excluded) {
+          setExclusionReason(res.reason || 'This item is excluded');
+        } else {
+          setExclusionReason(null);
+        }
+      })
+      .catch(() => {
+        // Ignored; exclusion check failures do not block manual search
+      });
+    return () => ac.abort();
   }, [target]);
 
   const toggle = (id: string): void => setExpandedId((cur) => (cur === id ? null : id));
@@ -303,6 +333,17 @@ export const ManualSearchModal: React.FC<ManualSearchModalProps> = ({ target, on
             ? `Last automatic search: ${historyRelativeTime(search.lastSearch.at)} \u2014 ${search.lastSearch.message}`
             : 'No automatic search recorded'}
         </p>
+        {exclusionReason && (
+          <div
+            role="status"
+            className="flex items-center gap-2 p-2.5 rounded-[3px] border border-[#e5a00d]/40 bg-[#e5a00d]/10 text-xs font-mono text-[#e5a00d]"
+          >
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            <span className="break-words">
+              {exclusionReason}. You can still grab a release by hand.
+            </span>
+          </div>
+        )}
         {activeTab === 'history' && historyEntity !== null && historyId !== null ? (
           <ItemHistoryTimeline key={`${historyEntity}:${historyId}:${historyKey}`} entity={historyEntity} entityId={historyId} />
         ) : (
