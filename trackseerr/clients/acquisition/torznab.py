@@ -1,6 +1,10 @@
 """Torznab / Newznab XML Indexer Client."""
 
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import logging
+import threading
+import time
 import xml.etree.ElementTree as ET
 from typing import Any, Optional
 from urllib.parse import quote
@@ -13,6 +17,117 @@ from trackseerr.quality import parse_release_title
 from trackseerr.security import is_safe_service_url
 
 logger = logging.getLogger(__name__)
+
+
+class IndexerError(RuntimeError):
+    """Base exception for Torznab / Newznab indexer failures."""
+
+    def __init__(self, message: str = "", code: Optional[int] = None) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class IndexerAuthError(IndexerError):
+    """Raised when authentication with the indexer fails (HTTP 401/403 or code 100-102)."""
+
+
+class IndexerRateLimited(IndexerError):
+    """Raised when indexer rate limits or API request quotas are exceeded."""
+
+    def __init__(
+        self,
+        message: str = "",
+        code: Optional[int] = None,
+        retry_after: Optional[float] = None,
+    ) -> None:
+        super().__init__(message, code=code)
+        self.retry_after = retry_after
+
+
+class IndexerUnavailable(IndexerError):
+    """Raised when indexer is unreachable, returns 5xx, invalid XML, or generic errors."""
+
+
+class IndexerUnsupported(IndexerError):
+    """Raised internally when indexer does not support music search (code 202/203)."""
+
+
+_SEARCH_MODE: dict[str, tuple[str, float]] = {}
+_SEARCH_MODE_LOCK = threading.Lock()
+_SEARCH_MODE_TTL: float = 86400.0  # 24 hours in seconds
+
+
+def reset_search_mode_cache() -> None:
+    """Clears the search mode capabilities cache."""
+    with _SEARCH_MODE_LOCK:
+        _SEARCH_MODE.clear()
+
+
+def _parse_retry_after(header_val: Optional[str]) -> Optional[float]:
+    """Parses Retry-After header as seconds (numeric or HTTP date)."""
+    if not header_val:
+        return None
+    val_str = header_val.strip()
+    try:
+        val = float(val_str)
+        return int(val) if val.is_integer() else val
+    except ValueError:
+        pass
+    try:
+        dt = parsedate_to_datetime(val_str)
+        now = datetime.now(timezone.utc)
+        return max(0.0, (dt - now).total_seconds())
+    except (ValueError, TypeError):
+        return None
+
+
+def _raise_for_status(resp: httpx.Response) -> None:
+    """Raises appropriate IndexerError for non-200 HTTP response codes."""
+    if resp.status_code == 200:
+        return
+    if resp.status_code == 429:
+        retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+        raise IndexerRateLimited("HTTP 429", code=429, retry_after=retry_after)
+    if resp.status_code in (401, 403):
+        raise IndexerAuthError(f"HTTP {resp.status_code}", code=resp.status_code)
+    raise IndexerUnavailable(f"HTTP {resp.status_code}", code=resp.status_code)
+
+
+def _raise_for_error_reply(root: ET.Element) -> None:
+    """Raises typed IndexerError if root is an <error> element."""
+    tag = root.tag.split("}")[-1].lower()
+    if tag != "error":
+        return
+    code_raw = root.get("code")
+    code: Optional[int] = None
+    if code_raw is not None:
+        try:
+            code = int(code_raw)
+        except (ValueError, TypeError):
+            pass
+    description = root.get("description", "")
+    msg = f"Indexer error {code}: {description}"
+    if code in (100, 101, 102):
+        raise IndexerAuthError(msg, code=code)
+    if code in (500, 501):
+        raise IndexerRateLimited(msg, code=code, retry_after=None)
+    if code in (202, 203):
+        raise IndexerUnsupported(msg, code=code)
+    raise IndexerUnavailable(msg, code=code)
+
+
+def _extract_error_description(xml_text: str) -> Optional[str]:
+    """Returns description if xml_text is an <error> element, else None."""
+    if "<error" not in xml_text:
+        return None
+    try:
+        root = ET.fromstring(xml_text)
+        tag = root.tag.split("}")[-1].lower()
+        if tag == "error":
+            return root.get("description") or f"Indexer error {root.get('code', 'unknown')}"
+    except ET.ParseError:
+        pass
+    return None
 
 
 class TorznabDriver(AcquisitionDriver):
@@ -51,11 +166,17 @@ class TorznabDriver(AcquisitionDriver):
         try:
             with httpx.Client(timeout=5.0) as client:
                 resp = client.get(url)
+                err_desc = _extract_error_description(resp.text)
+                if err_desc:
+                    return False, err_desc
                 if resp.status_code == 200 and ("<caps" in resp.text or "<rss" in resp.text):
                     return True, f"{self.indexer_type.capitalize()} Indexer Online"
                 # Fallback: test music search
                 search_url = self._api_url(t="music", q="test")
                 s_resp = client.get(search_url)
+                s_err_desc = _extract_error_description(s_resp.text)
+                if s_err_desc:
+                    return False, s_err_desc
                 if s_resp.status_code == 200 and "<rss" in s_resp.text:
                     return True, f"{self.indexer_type.capitalize()} Indexer Online"
                 return False, f"HTTP {resp.status_code}: {resp.text[:120]}"
@@ -152,6 +273,79 @@ class TorznabDriver(AcquisitionDriver):
             extra={"raw_title": item_title},
         )
 
+    def _get_search_mode(self) -> str:
+        now = time.monotonic()
+        with _SEARCH_MODE_LOCK:
+            if self.host_url in _SEARCH_MODE:
+                mode, ts = _SEARCH_MODE[self.host_url]
+                if now - ts < _SEARCH_MODE_TTL:
+                    return mode
+
+        url = self._api_url(t="caps")
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.get(url)
+            if resp.status_code != 200:
+                logger.debug("Caps probe HTTP %d; defaulting to music", resp.status_code)
+                return "music"
+            root = ET.fromstring(resp.text)
+            tag = root.tag.split("}")[-1].lower()
+            if tag == "error":
+                logger.debug("Caps probe returned error reply; defaulting to music")
+                return "music"
+            if tag != "caps":
+                logger.debug("Caps probe returned non-caps XML <%s>; defaulting to music", tag)
+                return "music"
+
+            searching = root.find("searching")
+            music_search = searching.find("music-search") if searching is not None else None
+            if music_search is not None and music_search.get("available", "").lower() == "yes":
+                mode = "music"
+            else:
+                mode = "search"
+
+            with _SEARCH_MODE_LOCK:
+                _SEARCH_MODE[self.host_url] = (mode, time.monotonic())
+            return mode
+        except (httpx.HTTPError, httpx.TimeoutException, ET.ParseError) as e:
+            logger.debug("Caps probe failed (%s); defaulting to music", e)
+            return "music"
+
+    def _query(
+        self,
+        t: str,
+        q: str,
+        artist: str = "",
+        album: Optional[str] = None,
+    ) -> list[AcquisitionSearchResult]:
+        url = self._api_url(t=t, q=q, cat=self.categories)
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.get(url)
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            raise IndexerUnavailable(str(e)) from e
+
+        _raise_for_status(resp)
+
+        try:
+            root = ET.fromstring(resp.text)
+        except ET.ParseError as e:
+            raise IndexerUnavailable("Unreadable reply from indexer") from e
+
+        _raise_for_error_reply(root)
+
+        channel = root.find("channel")
+        if channel is None:
+            return []
+
+        results: list[AcquisitionSearchResult] = []
+        for item in channel.findall("item"):
+            res = self._parse_item(item, default_artist=artist, default_album=album)
+            if res is not None:
+                results.append(res)
+
+        return results
+
     def search(
         self,
         artist: str,
@@ -170,33 +364,16 @@ class TorznabDriver(AcquisitionDriver):
             query_parts.append(album.strip())
         query = " ".join(query_parts)
 
-        url = self._api_url(t="music", q=query, cat=self.categories)
-        try:
-            with httpx.Client(timeout=self.timeout) as client:
-                resp = client.get(url)
-                if resp.status_code != 200:
-                    logger.warning("Torznab search failed (HTTP %d): %s", resp.status_code, resp.text[:100])
-                    return []
-                xml_text = resp.text
+        mode = self._get_search_mode()
+        if mode == "music":
+            try:
+                return self._query(t="music", q=query, artist=artist, album=album)
+            except IndexerUnsupported:
+                with _SEARCH_MODE_LOCK:
+                    _SEARCH_MODE[self.host_url] = ("search", time.monotonic())
+                return self._query(t="search", q=query, artist=artist, album=album)
 
-            root = ET.fromstring(xml_text)
-            channel = root.find("channel")
-            if channel is None:
-                return []
-
-            results: list[AcquisitionSearchResult] = []
-            for item in channel.findall("item"):
-                res = self._parse_item(item, default_artist=artist, default_album=album)
-                if res is not None:
-                    results.append(res)
-
-            return results
-        except (httpx.HTTPError, httpx.TimeoutException, ET.ParseError, ValueError) as e:
-            logger.error("Error parsing Torznab search results: %s", e)
-            return []
-        except Exception as e:
-            logger.error("Unexpected error in Torznab search: %s", e)
-            return []
+        return self._query(t="search", q=query, artist=artist, album=album)
 
     def fetch_recent(self, limit: int = 100) -> list[AcquisitionSearchResult]:
         """Polls recent indexer releases without search queries."""
@@ -219,6 +396,12 @@ class TorznabDriver(AcquisitionDriver):
 
             try:
                 root = ET.fromstring(xml_text)
+                tag = root.tag.split("}")[-1].lower()
+                if tag == "error":
+                    code = root.get("code")
+                    desc = root.get("description", "")
+                    logger.warning("Torznab fetch_recent error reply: code=%s description=%s", code, desc)
+                    return []
                 channel = root.find("channel")
                 if channel is None:
                     return []
@@ -264,3 +447,14 @@ class TorznabDriver(AcquisitionDriver):
     def cancel(self, download_id: str) -> bool:
         """Torznab is an indexer; cannot cancel transfers."""
         return True
+
+
+__all__ = [
+    "IndexerAuthError",
+    "IndexerError",
+    "IndexerRateLimited",
+    "IndexerUnavailable",
+    "IndexerUnsupported",
+    "TorznabDriver",
+    "reset_search_mode_cache",
+]
