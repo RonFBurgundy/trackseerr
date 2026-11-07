@@ -119,6 +119,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- When a search for one song downloads a whole single or album, TrackSeerr now imports only that song, once, in the best format your quality profile allows, onto the song already in your library. Before, it could import every file in the download as new, wrongly named songs, and files that ended up with the same name could overwrite each other. Other files are left in the download folder, and a download with no matching file goes to manual import.
+- An album download that has each song in two formats (for example FLAC and MP3) imports only the better copy of each song.
+- Turning an album's monitoring on or off now updates its open track list straight away.
 - Artists, albums and songs with names in Japanese, Korean, Chinese, Cyrillic and other non-Latin scripts can now be excluded. Before, excluding them silently failed.
 - Excluded artists, albums and songs now look excluded: the monitor switch turns red with a ban sign and can't be switched on, and hovering it says why. Their menu offers **Remove exclusion** instead of **Exclude**. Monitoring an excluded item, including with bulk edit, is refused with a message instead of silently doing nothing.
 - A qBittorrent category folder set as a plain name (like `music`) is now read as a folder inside qBittorrent's default save folder. Before, the Health card showed a false "folder not found" error for it.
