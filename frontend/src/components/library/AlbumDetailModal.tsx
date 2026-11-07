@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BookmarkPlus, Disc, ExternalLink, FileText, FolderInput, ListFilter, Loader2, Search, Tag, User } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
@@ -52,7 +52,21 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
   onToast,
   onOpenAlbum,
 }) => {
-  const { tracks, loading, error, patchMonitored, reload } = useAlbumTracks(album ? album.id : null);
+  const { tracks, loading, error, patchMonitored, patchAllMonitored, reload } = useAlbumTracks(album ? album.id : null);
+  const prevAlbumMonitoredRef = useRef<boolean | undefined | null>(null);
+  useEffect(() => {
+    if (prevAlbumMonitoredRef.current === null) {
+      prevAlbumMonitoredRef.current = album?.monitored;
+      return;
+    }
+    if (prevAlbumMonitoredRef.current !== album?.monitored) {
+      prevAlbumMonitoredRef.current = album?.monitored;
+      if (album && typeof album.monitored === 'boolean') {
+        patchAllMonitored(album.monitored);
+        void reload();
+      }
+    }
+  }, [album, patchAllMonitored, reload]);
   const mbSubmit = useMbSubmit();
   const lidarrSearch = useLidarrSearch(onToast);
   const [searchTarget, setSearchTarget] = useState<ManualSearchTarget | null>(null);
