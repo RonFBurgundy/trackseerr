@@ -176,19 +176,24 @@ docker stop slskd-it
 
 Finding on slskd 0.26.1: there is no `/api/v0/version`; the driver probes the authenticated `GET /api/v0/application`.
 
-## qBittorrent (`tests/integration/test_qbittorrent_contract.py`)
+## Download clients (qBittorrent and SABnzbd)
 
-Opt-in: skipped unless `QBIT_IT_URL` is set. The tests log in, read the version and the download roots; they never add torrents.
+The integration compose stack includes throwaway qBittorrent and SABnzbd services that never touch the internet (no external peers, no Usenet servers).
 
+### Services and Ports
+- **qBittorrent**: `lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls486` on `127.0.0.1:18080`. Seeded with test-only credentials `admin` / `trackseerr-it`, DHT/PeX/LSD disabled, and no listening port forwarding.
+- **SABnzbd**: `lscr.io/linuxserver/sabnzbd:5.1.3-ls280` on `127.0.0.1:18085`. Seeded with test-only API key `a5ef0acebccb7d5f1a894d9ed1b96e98`, host whitelist enabled, wizard skipped, and category `trackseerr` mapped under `/downloads`.
+
+### Coverage
+- **`tests/integration/test_qbittorrent_contract.py`**: Validates connection and authentication (success and failure), reads download roots, adds a test magnet (random 40-hex infohash, no trackers), asserts non-terminal status within 15 seconds, confirms category assignment to `trackseerr`, exercises `set_share_limits`, and verifies complete removal on `cancel()`.
+- **`tests/integration/test_sabnzbd_contract.py`**: Validates API key authentication (success and failure), reads download roots including category paths, submits an unfetchable NZB URL to verify failure mapping and non-empty error messages within 60 seconds, and cleans up queue/history.
+
+### Running
 ```bash
-docker run -d --rm --name qbit-it -e WEBUI_PORT=8080 lscr.io/linuxserver/qbittorrent:latest
-docker logs qbit-it 2>&1 | grep -i password      # temporary admin password
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' qbit-it
-QBIT_IT_URL=http://<container-ip>:8080 QBIT_IT_USER=admin QBIT_IT_PASSWORD=<pw> \
-  pytest tests/integration/test_qbittorrent_contract.py
+docker compose -f docker-compose.integration.yml up -d qbittorrent sabnzbd
+RUN_INTEGRATION=1 docker run --rm --network host --memory 2g --user 1000:1000 \
+  -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e RUN_INTEGRATION=1 \
+  -v "$PWD":/app -w /app -e PYTHONPATH=/app trackseerr:test \
+  pytest tests/integration/test_qbittorrent_contract.py tests/integration/test_sabnzbd_contract.py -q -p no:cacheprovider -p no:xdist
+docker compose -f docker-compose.integration.yml down -v
 ```
-
-Connect to the container IP on port 8080, not a remapped host port: qBittorrent validates the Host header's port and
-answers `401 Unauthorized` (log: "Invalid Host header, port mismatch") on a mismatch, which looks like a wrong password.
-qBittorrent 5 answers a good login with `204` and an empty body plus a `QBT_SID_<port>` cookie; repeated failures get the
-IP banned (`403`).
