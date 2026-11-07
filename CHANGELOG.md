@@ -119,6 +119,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Artists, albums and songs with names in Japanese, Korean, Chinese, Cyrillic and other non-Latin scripts can now be excluded. Before, excluding them silently failed.
+- Excluded artists, albums and songs now look excluded: the monitor switch turns red with a ban sign and can't be switched on, and hovering it says why. Their menu offers **Remove exclusion** instead of **Exclude**. Monitoring an excluded item, including with bulk edit, is refused with a message instead of silently doing nothing.
 - A qBittorrent category folder set as a plain name (like `music`) is now read as a folder inside qBittorrent's default save folder. Before, the Health card showed a false "folder not found" error for it.
 - The container starts again. A new release of a library TrackSeerr uses (deezer-python 8) dropped a module TrackSeerr needs, and images built after it crashed on boot with "No module named 'httpx'". Images now include it directly, and a broken image can no longer be published.
 - An indexer address ending in `/api`, like the one Prowlarr copies for an indexer, now works. Before, TrackSeerr added a second `/api` and every search failed. The Add indexer form now shows the right example and says how to sync all your Prowlarr indexers instead.
