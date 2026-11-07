@@ -66,7 +66,7 @@ TrackSeerr asks each client where it saves files. If TrackSeerr cannot see that 
 
 Add indexers in **Settings > Media Management > Indexers**. TrackSeerr supports Torznab (torrents) and Newznab (Usenet). Prowlarr, Jackett, and NZBHydra2 all provide these.
 
-For a Prowlarr indexer, the address looks like `http://prowlarr:9696/1/api`. Copy the API key from Prowlarr.
+For a single Prowlarr indexer, the address is the indexer's Torznab or Newznab feed without the trailing `/api`, such as `http://prowlarr:9696/1`. Copy the API key from Prowlarr. To bring in all your Prowlarr indexers at once, use [Sync indexers from Prowlarr](#sync-indexers-from-prowlarr) instead.
 
 Torrent indexers have seeding rules. Leave a field empty to use the global value.
 
@@ -85,9 +85,11 @@ You can sync indexers from Prowlarr automatically. TrackSeerr provides a Lidarr-
 
 1. In Prowlarr, open **Settings > Apps** and click **Add**.
 2. Choose **Lidarr**.
-3. Set **Lidarr Server** to your TrackSeerr core URL, such as `http://trackseerr:5250`. You must use the core URL. The public gateway does not allow indexer sync routes.
-4. Set **API Key** to your TrackSeerr API key. You can find it in **Settings > General > Security**.
-5. Test the connection and save.
+3. Set **Prowlarr Server** to the address TrackSeerr uses to reach Prowlarr, such as `http://prowlarr:9696`.
+4. Set **Lidarr Server** to your TrackSeerr core address: `http://trackseerr:5250` for the single container, or `http://trackseerr-core:5251` for the two-container setup. You must use the core. The public Requests container does not allow indexer sync.
+5. Set **API Key** to your TrackSeerr API key. You can find it in **Settings > General > Security**.
+6. Leave **Sync Level** on **Full Sync**. Prowlarr only sends indexers that have music categories (3000 and up).
+7. Test the connection and save, then click **Sync App Indexers** on the Apps page.
 
 Prowlarr will now add, update, and remove indexers in TrackSeerr. Any seed rules set on indexers in Prowlarr land as per-indexer seed rules in TrackSeerr.
 
