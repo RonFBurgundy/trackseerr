@@ -68,7 +68,7 @@ export const TactileSwitch: React.FC<TactileSwitchProps> = ({
             className={`pointer-events-none inline-block h-4 w-5 transform rounded-[2px] border ${
               isDanger
                 ? 'border-red-800/60 bg-gradient-to-b from-[#2a1414] to-[#1c0d0d] shadow-[0_1px_3px_rgba(0,0,0,0.5)] translate-x-0'
-                : 'border-[#383838] bg-gradient-to-b from-[#2a1414] to-[#1c1c1c] shadow-[0_1px_3px_rgba(0,0,0,0.5)]'
+                : 'border-[#383838] bg-gradient-to-b from-[#2a2a2a] to-[#1c1c1c] shadow-[0_1px_3px_rgba(0,0,0,0.5)]'
             } transition-transform duration-100 ease-in-out ${
               !isDanger && checked
                 ? 'translate-x-5 border-[#e5a00d]/80 bg-gradient-to-b from-[#e5a00d] to-[#c78605] shadow-[0_0_6px_rgba(229,160,13,0.5)]'
