@@ -40,9 +40,9 @@ class ExclusionCreate(BaseModel):
     title: str | None = None
     mbid: str | None = None
     reason: str | None = Field(default=None, max_length=500)
-    library_artist_id: int | None = None
-    library_album_id: int | None = None
-    library_track_id: int | None = None
+    library_artist_id: str | None = None
+    library_album_id: str | None = None
+    library_track_id: str | None = None
     missing_track_id: int | None = None
 
     @model_validator(mode="after")

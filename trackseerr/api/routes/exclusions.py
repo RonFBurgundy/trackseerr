@@ -137,7 +137,7 @@ def _unmonitor_track(db: Database, track_id: str) -> int:
 
 def _find_artist_id(
     db: Database,
-    ref_id: int | None,
+    ref_id: str | None,
     mbid: str | None,
     artist_name: str,
 ) -> str | None:
@@ -153,7 +153,7 @@ def _find_artist_id(
 
 def _find_album_id(
     db: Database,
-    ref_id: int | None,
+    ref_id: str | None,
     mbid: str | None,
     artist_name: str,
     title: str | None,

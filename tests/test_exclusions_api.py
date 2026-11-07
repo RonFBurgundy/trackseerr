@@ -2,6 +2,7 @@
 
 from collections.abc import Generator
 from pathlib import Path
+import uuid
 
 import pytest
 from fastapi.testclient import TestClient
@@ -101,15 +102,20 @@ def test_create_from_library_artist_unmonitors_artist_and_albums(db: Database, c
     client = _client(db, config)
     headers = _headers(db, config, admin=True)
 
-    db.upsert_library_artist({"id": "101", "name": "Pink Floyd", "monitored": True, "foreign_artist_id": "mbid-pf"})
-    db.upsert_library_album({"id": "201", "artist_id": "101", "title": "The Wall", "monitored": True})
-    db.upsert_library_album({"id": "202", "artist_id": "101", "title": "Animals", "monitored": True})
-    db.upsert_library_track({"id": "301", "album_id": "201", "artist_id": "101", "title": "Hey You", "monitored": True})
-    db.upsert_library_track({"id": "302", "album_id": "201", "artist_id": "101", "title": "Mother", "monitored": True})
-    db.upsert_library_track({"id": "303", "album_id": "202", "artist_id": "101", "title": "Dogs", "monitored": True})
-    db.upsert_library_track({"id": "304", "album_id": "202", "artist_id": "101", "title": "Pigs", "monitored": True})
+    art_id = str(uuid.uuid4())
+    alb_id_1 = str(uuid.uuid4())
+    alb_id_2 = str(uuid.uuid4())
+    trk_ids = [str(uuid.uuid4()) for _ in range(4)]
 
-    res = client.post("/api/exclusions", json={"library_artist_id": 101}, headers=headers)
+    db.upsert_library_artist({"id": art_id, "name": "Pink Floyd", "monitored": True, "foreign_artist_id": "mbid-pf"})
+    db.upsert_library_album({"id": alb_id_1, "artist_id": art_id, "title": "The Wall", "monitored": True})
+    db.upsert_library_album({"id": alb_id_2, "artist_id": art_id, "title": "Animals", "monitored": True})
+    db.upsert_library_track({"id": trk_ids[0], "album_id": alb_id_1, "artist_id": art_id, "title": "Hey You", "monitored": True})
+    db.upsert_library_track({"id": trk_ids[1], "album_id": alb_id_1, "artist_id": art_id, "title": "Mother", "monitored": True})
+    db.upsert_library_track({"id": trk_ids[2], "album_id": alb_id_2, "artist_id": art_id, "title": "Dogs", "monitored": True})
+    db.upsert_library_track({"id": trk_ids[3], "album_id": alb_id_2, "artist_id": art_id, "title": "Pigs", "monitored": True})
+
+    res = client.post("/api/exclusions", json={"library_artist_id": art_id}, headers=headers)
     assert res.status_code == 201
     data = res.json()
     assert data["unmonitored"] == 7
@@ -117,25 +123,27 @@ def test_create_from_library_artist_unmonitors_artist_and_albums(db: Database, c
     assert data["item"]["artist_name"] == "Pink Floyd"
     assert data["item"]["mbid"] == "mbid-pf"
 
-    assert db.get_library_artist("101")["monitored"] is False
-    assert db.get_library_album("201")["monitored"] is False
-    assert db.get_library_album("202")["monitored"] is False
-    assert db.get_library_track("301")["monitored"] is False
-    assert db.get_library_track("302")["monitored"] is False
-    assert db.get_library_track("303")["monitored"] is False
-    assert db.get_library_track("304")["monitored"] is False
+    assert db.get_library_artist(art_id)["monitored"] is False
+    assert db.get_library_album(alb_id_1)["monitored"] is False
+    assert db.get_library_album(alb_id_2)["monitored"] is False
+    for tid in trk_ids:
+        assert db.get_library_track(tid)["monitored"] is False
 
 
 def test_create_from_library_album_unmonitors_album_tracks(db: Database, config: Config) -> None:
     client = _client(db, config)
     headers = _headers(db, config, admin=True)
 
-    db.upsert_library_artist({"id": "102", "name": "Pink Floyd", "monitored": True})
-    db.upsert_library_album({"id": "203", "artist_id": "102", "title": "Meddle", "monitored": True, "foreign_album_id": "mbid-meddle"})
-    db.upsert_library_track({"id": "305", "album_id": "203", "artist_id": "102", "title": "One of These Days", "monitored": True})
-    db.upsert_library_track({"id": "306", "album_id": "203", "artist_id": "102", "title": "Echoes", "monitored": True})
+    art_id = str(uuid.uuid4())
+    alb_id = str(uuid.uuid4())
+    trk_ids = [str(uuid.uuid4()) for _ in range(2)]
 
-    res = client.post("/api/exclusions", json={"library_album_id": 203}, headers=headers)
+    db.upsert_library_artist({"id": art_id, "name": "Pink Floyd", "monitored": True})
+    db.upsert_library_album({"id": alb_id, "artist_id": art_id, "title": "Meddle", "monitored": True, "foreign_album_id": "mbid-meddle"})
+    db.upsert_library_track({"id": trk_ids[0], "album_id": alb_id, "artist_id": art_id, "title": "One of These Days", "monitored": True})
+    db.upsert_library_track({"id": trk_ids[1], "album_id": alb_id, "artist_id": art_id, "title": "Echoes", "monitored": True})
+
+    res = client.post("/api/exclusions", json={"library_album_id": alb_id}, headers=headers)
     assert res.status_code == 201
     data = res.json()
     assert data["unmonitored"] == 3
@@ -144,21 +152,25 @@ def test_create_from_library_album_unmonitors_album_tracks(db: Database, config:
     assert data["item"]["title"] == "Meddle"
     assert data["item"]["mbid"] == "mbid-meddle"
 
-    assert db.get_library_artist("102")["monitored"] is True
-    assert db.get_library_album("203")["monitored"] is False
-    assert db.get_library_track("305")["monitored"] is False
-    assert db.get_library_track("306")["monitored"] is False
+    assert db.get_library_artist(art_id)["monitored"] is True
+    assert db.get_library_album(alb_id)["monitored"] is False
+    assert db.get_library_track(trk_ids[0])["monitored"] is False
+    assert db.get_library_track(trk_ids[1])["monitored"] is False
 
 
 def test_create_from_library_track_unmonitors_track(db: Database, config: Config) -> None:
     client = _client(db, config)
     headers = _headers(db, config, admin=True)
 
-    db.upsert_library_artist({"id": "103", "name": "Pink Floyd", "monitored": True})
-    db.upsert_library_album({"id": "204", "artist_id": "103", "title": "Wish You Were Here", "monitored": True})
-    db.upsert_library_track({"id": "307", "album_id": "204", "artist_id": "103", "title": "Shine On", "monitored": True, "mb_recording_id": "rec-shine"})
+    art_id = str(uuid.uuid4())
+    alb_id = str(uuid.uuid4())
+    trk_id = str(uuid.uuid4())
 
-    res = client.post("/api/exclusions", json={"library_track_id": 307}, headers=headers)
+    db.upsert_library_artist({"id": art_id, "name": "Pink Floyd", "monitored": True})
+    db.upsert_library_album({"id": alb_id, "artist_id": art_id, "title": "Wish You Were Here", "monitored": True})
+    db.upsert_library_track({"id": trk_id, "album_id": alb_id, "artist_id": art_id, "title": "Shine On", "monitored": True, "mb_recording_id": "rec-shine"})
+
+    res = client.post("/api/exclusions", json={"library_track_id": trk_id}, headers=headers)
     assert res.status_code == 201
     data = res.json()
     assert data["unmonitored"] == 1
@@ -167,9 +179,9 @@ def test_create_from_library_track_unmonitors_track(db: Database, config: Config
     assert data["item"]["title"] == "Shine On"
     assert data["item"]["mbid"] == "rec-shine"
 
-    assert db.get_library_artist("103")["monitored"] is True
-    assert db.get_library_album("204")["monitored"] is True
-    assert db.get_library_track("307")["monitored"] is False
+    assert db.get_library_artist(art_id)["monitored"] is True
+    assert db.get_library_album(alb_id)["monitored"] is True
+    assert db.get_library_track(trk_id)["monitored"] is False
 
 
 def test_create_from_missing_track_marks_applied(db: Database, config: Config) -> None:
@@ -202,9 +214,9 @@ def test_create_unknown_ref_404(db: Database, config: Config) -> None:
     client = _client(db, config)
     headers = _headers(db, config, admin=True)
 
-    assert client.post("/api/exclusions", json={"library_artist_id": 999999}, headers=headers).status_code == 404
-    assert client.post("/api/exclusions", json={"library_album_id": 999999}, headers=headers).status_code == 404
-    assert client.post("/api/exclusions", json={"library_track_id": 999999}, headers=headers).status_code == 404
+    assert client.post("/api/exclusions", json={"library_artist_id": str(uuid.uuid4())}, headers=headers).status_code == 404
+    assert client.post("/api/exclusions", json={"library_album_id": str(uuid.uuid4())}, headers=headers).status_code == 404
+    assert client.post("/api/exclusions", json={"library_track_id": str(uuid.uuid4())}, headers=headers).status_code == 404
     assert client.post("/api/exclusions", json={"missing_track_id": 999999}, headers=headers).status_code == 404
 
 
@@ -228,10 +240,12 @@ def test_create_requires_names_or_one_ref_422(db: Database, config: Config) -> N
     client = _client(db, config)
     headers = _headers(db, config, admin=True)
 
+    uid1 = str(uuid.uuid4())
+    uid2 = str(uuid.uuid4())
     assert client.post("/api/exclusions", json={}, headers=headers).status_code == 422
-    assert client.post("/api/exclusions", json={"library_artist_id": 1, "library_album_id": 2}, headers=headers).status_code == 422
-    assert client.post("/api/exclusions", json={"artist_name": "Radiohead", "library_artist_id": 1}, headers=headers).status_code == 422
-    assert client.post("/api/exclusions", json={"title": "Song", "library_track_id": 1}, headers=headers).status_code == 422
+    assert client.post("/api/exclusions", json={"library_artist_id": uid1, "library_album_id": uid2}, headers=headers).status_code == 422
+    assert client.post("/api/exclusions", json={"artist_name": "Radiohead", "library_artist_id": uid1}, headers=headers).status_code == 422
+    assert client.post("/api/exclusions", json={"title": "Song", "library_track_id": uid1}, headers=headers).status_code == 422
     assert client.post("/api/exclusions", json={"artist_name": "Radiohead"}, headers=headers).status_code == 422
 
 
@@ -257,15 +271,16 @@ def test_delete_does_not_remonitor(db: Database, config: Config) -> None:
     client = _client(db, config)
     headers = _headers(db, config, admin=True)
 
-    db.upsert_library_artist({"id": "105", "name": "Nirvana", "monitored": True})
-    res = client.post("/api/exclusions", json={"library_artist_id": 105}, headers=headers)
+    art_id = str(uuid.uuid4())
+    db.upsert_library_artist({"id": art_id, "name": "Nirvana", "monitored": True})
+    res = client.post("/api/exclusions", json={"library_artist_id": art_id}, headers=headers)
     assert res.status_code == 201
     excl_id = res.json()["item"]["id"]
-    assert db.get_library_artist("105")["monitored"] is False
+    assert db.get_library_artist(art_id)["monitored"] is False
 
     del_res = client.delete(f"/api/exclusions/{excl_id}", headers=headers)
     assert del_res.status_code == 204
-    assert db.get_library_artist("105")["monitored"] is False
+    assert db.get_library_artist(art_id)["monitored"] is False
 
 
 def test_check_endpoint(db: Database, config: Config) -> None:
@@ -379,3 +394,40 @@ def test_requests_tier_blocked(db: Database, config: Config) -> None:
     assert client.post("/api/exclusions", json={"scope": "artist", "artist_name": "Test"}, headers=headers).status_code in (403, 404)
     assert client.get("/api/exclusions/check?artist=Test", headers=headers).status_code in (403, 404)
     assert client.delete("/api/exclusions/excl-1", headers=headers).status_code in (403, 404)
+
+
+def test_create_from_library_ids_accepts_uuid_strings(db: Database, config: Config) -> None:
+    client = _client(db, config)
+    headers = _headers(db, config, admin=True)
+
+    art_id = str(uuid.uuid4())
+    alb_id = str(uuid.uuid4())
+    trk_id = str(uuid.uuid4())
+
+    db.upsert_library_artist({"id": art_id, "name": "Radiohead", "monitored": True})
+    db.upsert_library_album({"id": alb_id, "artist_id": art_id, "title": "OK Computer", "monitored": True})
+    db.upsert_library_track({"id": trk_id, "album_id": alb_id, "artist_id": art_id, "title": "Airbag", "monitored": True})
+
+    # 1. library_artist_id with UUID string
+    res_art = client.post("/api/exclusions", json={"library_artist_id": art_id}, headers=headers)
+    assert res_art.status_code == 201
+    assert res_art.json()["item"]["scope"] == "artist"
+    assert res_art.json()["item"]["artist_name"] == "Radiohead"
+
+    # Reset exclusion for same artist before doing album/track checks
+    client.delete(f"/api/exclusions/{res_art.json()['item']['id']}", headers=headers)
+
+    # 2. library_album_id with UUID string
+    res_alb = client.post("/api/exclusions", json={"library_album_id": alb_id}, headers=headers)
+    assert res_alb.status_code == 201
+    assert res_alb.json()["item"]["scope"] == "album"
+    assert res_alb.json()["item"]["title"] == "OK Computer"
+
+    client.delete(f"/api/exclusions/{res_alb.json()['item']['id']}", headers=headers)
+
+    # 3. library_track_id with UUID string
+    res_trk = client.post("/api/exclusions", json={"library_track_id": trk_id}, headers=headers)
+    assert res_trk.status_code == 201
+    assert res_trk.json()["item"]["scope"] == "track"
+    assert res_trk.json()["item"]["title"] == "Airbag"
+

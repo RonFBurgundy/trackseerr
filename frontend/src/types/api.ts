@@ -8097,11 +8097,11 @@ export interface components {
             /** Artist Name */
             artist_name?: string | null;
             /** Library Album Id */
-            library_album_id?: number | null;
+            library_album_id?: string | null;
             /** Library Artist Id */
-            library_artist_id?: number | null;
+            library_artist_id?: string | null;
             /** Library Track Id */
-            library_track_id?: number | null;
+            library_track_id?: string | null;
             /** Mbid */
             mbid?: string | null;
             /** Missing Track Id */
