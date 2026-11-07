@@ -87,6 +87,8 @@ Migrating from all-in-one: edit your existing TrackSeerr container, set ROLE to 
 
   <Config Name="Sync Interval (Seconds)" Target="SECONDS_TO_WAIT" Default="14400" Mode="" Description="Duration in seconds between automated background sync cycles (default 14400 = 4 hours)." Type="Variable" Display="advanced" Required="false" Mask="false">14400</Config>
 
+  <Config Name="Timezone" Target="TZ" Default="Etc/UTC" Mode="" Description="Container timezone (e.g. America/New_York)." Type="Variable" Display="advanced" Required="false" Mask="false">Etc/UTC</Config>
+
   <Config Name="User ID (PUID)" Target="PUID" Default="99" Mode="" Description="Unraid nobody user ID for file permission compatibility." Type="Variable" Display="advanced" Required="true" Mask="false">99</Config>
 
   <Config Name="Group ID (PGID)" Target="PGID" Default="100" Mode="" Description="Unraid users group ID for file permission compatibility." Type="Variable" Display="advanced" Required="true" Mask="false">100</Config>

@@ -504,3 +504,128 @@ def jellyfin_target():
     finally:
         if started_here:
             subprocess.run(["docker", "compose", "-f", str(COMPOSE_FILE), "down", "-v"], capture_output=True, timeout=120)
+
+
+# --------------------------------------------------------------------------- qBittorrent
+
+QBIT_DEFAULT_URL = "http://127.0.0.1:18080"
+# TEST-ONLY credentials for the throwaway container. Not secrets.
+QBIT_DEFAULT_USER = "admin"
+QBIT_DEFAULT_PASSWORD = "trackseerr-it"
+
+
+def _qbit_reachable(url: str, user: str, password: str) -> bool:
+    try:
+        from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
+
+        ok, _msg = QbittorrentDriver(url, user, password).test_connection()
+        return ok
+    except (httpx.HTTPError, RuntimeError, ValueError):
+        return False
+
+
+def _wait_qbit_ready(url: str, user: str, password: str, seconds: float = 180.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if _qbit_reachable(url, user, password):
+            return True
+        time.sleep(2.0)
+    return False
+
+
+@pytest.fixture(scope="session")
+def qbit_target():
+    """``(url, user, password)`` of a ready qBittorrent; starts the compose stack when none is running."""
+    url = os.environ.get("QBIT_IT_URL")
+    if url:
+        user = os.environ.get("QBIT_IT_USER", QBIT_DEFAULT_USER)
+        password = os.environ.get("QBIT_IT_PASSWORD", "")
+        if not _wait_qbit_ready(url.rstrip("/"), user, password, 60.0):
+            pytest.skip(f"qBittorrent at {url} did not answer test_connection")
+        yield url.rstrip("/"), user, password
+        return
+    if _qbit_reachable(QBIT_DEFAULT_URL, QBIT_DEFAULT_USER, QBIT_DEFAULT_PASSWORD):
+        yield QBIT_DEFAULT_URL, QBIT_DEFAULT_USER, QBIT_DEFAULT_PASSWORD
+        return
+    if shutil.which("docker") is None:
+        pytest.skip(
+            "no qBittorrent reachable and no docker CLI: run `docker compose -f docker-compose.integration.yml up -d qbittorrent`"
+        )
+    started = subprocess.run(
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "qbittorrent"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if started.returncode != 0:
+        pytest.skip(f"docker compose up failed: {started.stderr.strip()[-300:]}")
+    try:
+        if not _wait_qbit_ready(QBIT_DEFAULT_URL, QBIT_DEFAULT_USER, QBIT_DEFAULT_PASSWORD):
+            pytest.skip("the integration qBittorrent did not become ready within 180s")
+        yield QBIT_DEFAULT_URL, QBIT_DEFAULT_USER, QBIT_DEFAULT_PASSWORD
+    finally:
+        subprocess.run(["docker", "compose", "-f", str(COMPOSE_FILE), "down", "-v"], check=False, capture_output=True, timeout=120)
+
+
+# --------------------------------------------------------------------------- SABnzbd
+
+SAB_DEFAULT_URL = "http://127.0.0.1:18085"
+# TEST-ONLY credentials for the throwaway container. Not secrets.
+SAB_DEFAULT_API_KEY = "a5ef0acebccb7d5f1a894d9ed1b96e98"
+
+
+def _sab_reachable(url: str, key: str) -> bool:
+    try:
+        from trackseerr.clients.acquisition.sabnzbd import SabnzbdDriver
+
+        ok, _msg = SabnzbdDriver(url, api_key=key).test_connection()
+        return ok
+    except (httpx.HTTPError, RuntimeError, ValueError):
+        return False
+
+
+def _wait_sab_ready(url: str, key: str, seconds: float = 180.0) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if _sab_reachable(url, key):
+            return True
+        time.sleep(2.0)
+    return False
+
+
+@pytest.fixture(scope="session")
+def sab_target():
+    """``(url, api_key)`` of a ready SABnzbd; starts the compose stack when none is running."""
+    url = os.environ.get("SAB_IT_URL")
+    key = os.environ.get("SAB_IT_API_KEY")
+    if url:
+        if not key:
+            pytest.skip("SAB_IT_URL is set but SAB_IT_API_KEY is not")
+        if not _wait_sab_ready(url.rstrip("/"), key, 60.0):
+            pytest.skip(f"SABnzbd at {url} did not answer test_connection")
+        yield url.rstrip("/"), key
+        return
+    if _sab_reachable(SAB_DEFAULT_URL, SAB_DEFAULT_API_KEY):
+        yield SAB_DEFAULT_URL, SAB_DEFAULT_API_KEY
+        return
+    if shutil.which("docker") is None:
+        pytest.skip(
+            "no SABnzbd reachable and no docker CLI: run `docker compose -f docker-compose.integration.yml up -d sabnzbd`"
+        )
+    started = subprocess.run(
+        ["docker", "compose", "-f", str(COMPOSE_FILE), "up", "-d", "sabnzbd"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=600,
+    )
+    if started.returncode != 0:
+        pytest.skip(f"docker compose up failed: {started.stderr.strip()[-300:]}")
+    try:
+        if not _wait_sab_ready(SAB_DEFAULT_URL, SAB_DEFAULT_API_KEY):
+            pytest.skip("the integration SABnzbd did not become ready within 180s")
+        yield SAB_DEFAULT_URL, SAB_DEFAULT_API_KEY
+    finally:
+        subprocess.run(["docker", "compose", "-f", str(COMPOSE_FILE), "down", "-v"], check=False, capture_output=True, timeout=120)
+
