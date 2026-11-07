@@ -117,8 +117,7 @@ heading becomes the version and date.
 
 ### Fixed
 
-- Songs missing from your synced playlists are now searched less often when they keep coming up empty, the same as other wanted songs. Before, the scheduled search skipped them in the back-off and searched them every hour.
-
+- Songs missing from your synced playlists are now searched less often when they keep coming up empty, the same as other wanted songs, and the count carries over when a playlist re-syncs. Before, they were searched every hour.
 - The search box in the navigation menu now finds every settings card, not just the older ones: Health and its alert thresholds, software updates and the changelog, backups, log settings, web push and delivery preferences, Soulseek tuning, fingerprinting, compilation naming and more. Each notification event can be found by name (for example "Only lower quality found"), and pages can be found by what's on them, such as "chat challenge" for Needs review. A few results that landed on the wrong spot now go to the right one.
 - A wanted song you already own under a slightly different title is no longer downloaded over and over. Before, "Blue Dress - 2006 Remaster" kept being downloaded and thrown away because the library has it as "Blue Dress / Interlude #3", and "The Same Situation" because the library has "Same Situation". The song now counts as owned and stops being searched. This also works when one side has no length (MusicBrainz lists none for some tracks, and song requests have none), as long as the download was matched to the song you own.
 - Songs requested from a playlist now import into the right album when the playlist names a special edition (for example "BEYONCÉ [Platinum Edition]" lands on "BEYONCÉ"). Before, these downloads waited in the Queue for a manual import. A file whose length is clearly different from the song (such as a live recording of a studio track) is no longer matched by title alone.
