@@ -25,6 +25,7 @@ from trackseerr.clients.acquisition import (
 )
 from trackseerr.clients.acquisition.base import AcquisitionRetryableError, AcquisitionUnavailableError
 from trackseerr.clients.acquisition.slskd import SlskdNotLoggedInError
+from trackseerr.indexer_status import indexer_status
 from trackseerr.item_history import GrabTrigger, emit, emit_named, trigger_kwargs
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
@@ -636,6 +637,67 @@ def _mark_tier_missed(key: tuple[str, str]) -> None:
         _BANNED_TIER_MISSES[norm_key] = time.monotonic() + _BANNED_TIER_MISS_TTL
 
 
+def _search_single_indexer(
+    db: Database,
+    idx_cfg: dict[str, Any],
+    artist: str,
+    title: Optional[str],
+    album: Optional[str],
+    context: Optional[SearchContext],
+    errors: Optional[list[dict[str, str]]],
+) -> list[AcquisitionSearchResult]:
+    idx_id = str(idx_cfg.get("id"))
+    idx_name = idx_cfg.get("name", "unknown")
+    idx_type = idx_cfg.get("indexer_type")
+
+    until = indexer_status.paused_until(idx_id)
+    if until is not None:
+        logger.debug(
+            "Indexer '%s' (%s) is paused until %s UTC; skipping search",
+            idx_name,
+            idx_id,
+            f"{until:%H:%M}",
+        )
+        if errors is not None:
+            errors.append(
+                {
+                    "source": idx_name,
+                    "error": f"Paused until {until:%H:%M} UTC after repeated failures",
+                }
+            )
+        return []
+
+    started = time.monotonic()
+    try:
+        driver = get_indexer_driver(idx_cfg)
+        started = time.monotonic()
+        res = driver.search(artist=artist, title=title, album=album)
+        indexer_status.record_success(idx_id)
+        _log_source_search(idx_name, idx_type, artist, title, album, res, started)
+        _record_search(db, context, idx_name, idx_type, artist, title, album, len(res or []), started)
+        if res:
+            priority = _indexer_priority(idx_cfg)
+            min_seeders = idx_cfg.get("minimum_seeders")
+            cfg_id = idx_cfg.get("id")
+            for r in res:
+                if isinstance(r.extra, dict) or r.extra is None:
+                    extra = dict(r.extra or {})
+                    extra.setdefault("indexer_id", cfg_id)
+                    extra.setdefault("indexer_name", idx_name)
+                    extra.setdefault("indexer_priority", priority)
+                    extra.setdefault("indexer_minimum_seeders", min_seeders)
+                    r.extra = extra
+            return res
+        return []
+    except Exception as e:
+        indexer_status.record_failure(idx_id, e)
+        logger.warning("Error searching indexer '%s': %s", idx_name, redact_text(str(e)))
+        _record_search(db, context, idx_name, idx_type, artist, title, album, 0, started, redact_text(str(e)))
+        if errors is not None:
+            errors.append({"source": str(idx_name), "error": redact_text(str(e))})
+        return []
+
+
 def _search_indexers(
     db: Database,
     artist: str,
@@ -652,30 +714,17 @@ def _search_indexers(
 
     results: list[AcquisitionSearchResult] = []
     for idx_cfg in indexers:
-        idx_name = idx_cfg.get("name", "unknown")
-        idx_type = idx_cfg.get("indexer_type")
-        started = time.monotonic()
-        try:
-            driver = get_indexer_driver(idx_cfg)
-            started = time.monotonic()
-            res = driver.search(artist=artist, title=title, album=album)
-            _log_source_search(idx_name, idx_type, artist, title, album, res, started)
-            _record_search(db, context, idx_name, idx_type, artist, title, album, len(res or []), started)
-            if res:
-                for r in res:
-                    if isinstance(r.extra, dict) or r.extra is None:
-                        extra = dict(r.extra or {})
-                        extra.setdefault("indexer_id", idx_cfg.get("id"))
-                        extra.setdefault("indexer_name", idx_name)
-                        extra.setdefault("indexer_priority", _indexer_priority(idx_cfg))
-                        extra.setdefault("indexer_minimum_seeders", idx_cfg.get("minimum_seeders"))
-                        r.extra = extra
-                results.extend(res)
-        except Exception as e:
-            logger.warning("Error searching indexer '%s' (%s): %s", idx_name, idx_cfg.get("host_url"), e)
-            _record_search(db, context, idx_name, idx_type, artist, title, album, 0, started, redact_text(str(e)))
-            if errors is not None:
-                errors.append({"source": str(idx_name), "error": redact_text(str(e))})
+        res = _search_single_indexer(
+            db=db,
+            idx_cfg=idx_cfg,
+            artist=artist,
+            title=title,
+            album=album,
+            context=context,
+            errors=errors,
+        )
+        if res:
+            results.extend(res)
     return results
 
 

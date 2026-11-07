@@ -56,6 +56,14 @@ from trackseerr.models import (
     RequestStatus,
 )
 from trackseerr.storage import Database
+from trackseerr.indexer_status import indexer_status
+
+
+@pytest.fixture(autouse=True)
+def _reset_indexer_backoff_state():
+    indexer_status.reset()
+    yield
+    indexer_status.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -331,6 +339,110 @@ def test_search_indexers_records_indexer_error(test_db):
     newznab_row = next(r for r in rows if r["source_name"] == "NZBGeek Newznab")
     assert newznab_row["error"] is None
     assert newznab_row["result_count"] == 1
+
+
+def test_paused_indexer_is_skipped(test_db):
+    """Verifies that an indexer paused after repeated failures is skipped without calling driver.search,
+    while non-paused indexers are still searched.
+    """
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-torznab",
+            name="Prowlarr Torznab",
+            indexer_type="torznab",
+            host_url="http://prowlarr:9696",
+            api_key="key1",
+            enabled=True,
+        )
+    )
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-newznab",
+            name="NZBGeek Newznab",
+            indexer_type="newznab",
+            host_url="http://nzbgeek.info",
+            api_key="key2",
+            enabled=True,
+        )
+    )
+
+    indexer_status.record_failure("idx-torznab", RuntimeError("error 1"))
+    indexer_status.record_failure("idx-torznab", RuntimeError("error 2"))
+    assert indexer_status.paused_until("idx-torznab") is not None
+
+    newznab_res = [
+        AcquisitionSearchResult(
+            download_id="n1",
+            title="Radiohead - Karma Police (1997) [MP3 320]",
+            artist="Radiohead",
+            item_type="track",
+            source="newznab",
+            protocol="usenet",
+        )
+    ]
+
+    mock_torznab_driver = MagicMock()
+    mock_newznab_driver = MagicMock()
+    mock_newznab_driver.search.return_value = newznab_res
+
+    def mock_get_indexer_driver(cfg):
+        return mock_torznab_driver if cfg.get("indexer_type") == "torznab" else mock_newznab_driver
+
+    coordinator = AcquisitionCoordinator()
+    errors: list[dict[str, str]] = []
+
+    with patch(
+        "trackseerr.acquisition_coordinator.get_indexer_driver",
+        side_effect=mock_get_indexer_driver,
+    ):
+        results = coordinator.search_all_indexers("Radiohead", "Karma Police", db=test_db, errors=errors)
+
+    mock_torznab_driver.search.assert_not_called()
+    mock_newznab_driver.search.assert_called_once()
+
+    assert len(results) == 1
+    assert results[0].title == "Radiohead - Karma Police (1997) [MP3 320]"
+
+    assert len(errors) == 1
+    assert errors[0]["source"] == "Prowlarr Torznab"
+    assert "Paused until" in errors[0]["error"]
+    assert "UTC after repeated failures" in errors[0]["error"]
+
+    rows, _ = test_db.list_search_log(1, 50)
+    torznab_rows = [r for r in rows if r["source_name"] == "Prowlarr Torznab"]
+    assert len(torznab_rows) == 0
+
+
+def test_success_clears_pause_state(test_db):
+    """Verifies that a successful search records success and clears any failure state in indexer_status."""
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-torznab",
+            name="Prowlarr Torznab",
+            indexer_type="torznab",
+            host_url="http://prowlarr:9696",
+            api_key="key1",
+            enabled=True,
+        )
+    )
+
+    # Record 1 failure (first failure does not pause)
+    indexer_status.record_failure("idx-torznab", RuntimeError("temporary network hiccup"))
+    state = indexer_status.snapshot("idx-torznab")
+    assert state is not None
+    assert state.failures == 1
+
+    mock_driver = MagicMock()
+    mock_driver.search.return_value = []
+
+    coordinator = AcquisitionCoordinator()
+    with patch(
+        "trackseerr.acquisition_coordinator.get_indexer_driver",
+        return_value=mock_driver,
+    ):
+        coordinator.search_all_indexers("Radiohead", "Karma Police", db=test_db)
+
+    assert indexer_status.snapshot("idx-torznab") is None
 
 
 def _result(title):
