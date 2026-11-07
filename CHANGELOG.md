@@ -117,6 +117,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Seeding rules now reach qBittorrent 5. qBittorrent 5 rejected the seed ratio and seed time TrackSeerr sets per torrent, so its own global seed settings applied instead. If you use per-indexer seeding rules with qBittorrent 5, torrents grabbed before this update still have the old limits.
+- A wrong SABnzbd API key now fails the connection test. Before, the test passed and downloads failed later.
 - Indexer errors are now shown as errors. Before, an indexer that answered "API limit reached", "wrong API key" or "slow down" looked like a search that found nothing, and nothing told you it was failing. Those searches now appear as failed in Activity → Searches and no longer count toward the "searched often with no luck" slowdown.
 - Indexers that have no music search are now searched with a general search instead of returning nothing. TrackSeerr checks what each indexer supports once a day.
 - The Unraid templates for the single container and the Core container now have a Timezone setting, like the Requests container.
