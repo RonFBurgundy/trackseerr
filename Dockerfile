@@ -19,6 +19,7 @@ RUN apt-get update && \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY trackseerr ./trackseerr
+RUN python -c "import trackseerr.api.app, trackseerr.cli"
 COPY pyproject.toml README.md CHANGELOG.md ./
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
