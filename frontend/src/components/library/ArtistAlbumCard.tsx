@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Ban, Bookmark, BookmarkPlus, ChevronDown, Disc, FolderInput, History, Info, Loader2, Search, Sliders } from 'lucide-react';
+import { Ban, Bookmark, BookmarkPlus, ChevronDown, Disc, FolderInput, History, Info, ListFilter, Loader2, Search, Sliders } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
+import type { ManualSearchTarget } from '@/types/manualSearch';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
 import { textMatches } from '@/hooks/useDiscographyFilter';
 import { useLidarrSearch } from '@/hooks/useLidarrSearch';
@@ -11,8 +12,10 @@ import {
   MachinedCard,
   OverflowMenu,
   SelectionCheckbox,
+  TapeDeckButton,
   type OverflowMenuItem,
 } from '@/components/ui';
+import { ManualSearchModal } from '@/components/manualSearch';
 import { AlbumTrackList } from './AlbumTrackList';
 import { ItemHistoryModal } from './ItemHistoryModal';
 import { ExcludeConfirm } from './ExcludeConfirm';
@@ -104,6 +107,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   const [excludeOpen, setExcludeOpen] = useState<boolean>(false);
   const [removeConfirmOpen, setRemoveConfirmOpen] = useState<boolean>(false);
   const [removeBusy, setRemoveBusy] = useState<boolean>(false);
+  const [searchTarget, setSearchTarget] = useState<ManualSearchTarget | null>(null);
   const toggleExpanded = (): void => setExpanded((v) => !v);
 
   const isExcludedWithArtist = Boolean(
@@ -164,6 +168,20 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
     icon: <Info className="h-3.5 w-3.5" />,
     onSelect: () => onOpenAlbum(album),
   });
+  if (isAdmin && !lidarrMode) {
+    menuItems.push({
+      key: 'manual-search',
+      label: 'Manual search…',
+      icon: <ListFilter className="h-3.5 w-3.5" />,
+      onSelect: () =>
+        setSearchTarget({
+          artist: album.artist_name || 'Unknown Artist',
+          album: album.title,
+          itemType: 'album',
+          albumId: album.id,
+        }),
+    });
+  }
   menuItems.push({
     key: 'history',
     label: 'History',
@@ -322,6 +340,28 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
             onToast={onToast}
             albumMonitored={album.monitored === true}
             artistExcluded={artistExcluded || album.excluded === true}
+            renderRowAction={
+              isAdmin && !lidarrMode
+                ? (t) => (
+                    <TapeDeckButton
+                      size="sm"
+                      onClick={() =>
+                        setSearchTarget({
+                          artist: album.artist_name || 'Unknown Artist',
+                          album: album.title,
+                          title: t.title,
+                          itemType: 'track',
+                          albumId: album.id,
+                          trackId: t.id,
+                        })
+                      }
+                      icon={<ListFilter className="h-3.5 w-3.5" />}
+                      aria-label={`Manual search for ${t.title ?? 'track'}`}
+                      title="Manual search for this track"
+                    />
+                  )
+                : undefined
+            }
             onToggleMonitored={(id, cur) => void handleTrackToggle(id, cur)}
             onRefresh={() => {
               void reload();
@@ -359,6 +399,12 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
           Allow &ldquo;{album.title}&rdquo; again? It stays unmonitored until you monitor it.
         </p>
       </ConfirmDialog>
+      <ManualSearchModal
+        target={searchTarget}
+        onClose={() => setSearchTarget(null)}
+        onToast={onToast}
+        onGrabbed={() => void reload()}
+      />
     </MachinedCard>
   );
 };
