@@ -6,6 +6,7 @@ This page covers TrackSeerr's own library manager. If Lidarr manages your librar
 - [Scanning](#scanning)
 - [Adding artists](#adding-artists)
 - [Monitoring](#monitoring)
+- [Excluding artists, albums and songs](#excluding-artists-albums-and-songs)
 - [Wanted](#wanted)
 - [Calendar](#calendar)
 - [Importing files by hand](#importing-files-by-hand)
@@ -69,6 +70,32 @@ When you add an artist, you pick one of these options:
 | None | Nothing. |
 
 The defaults are set in **Settings > Media Management > Root Folders & Naming**. There are two: one for artists found by a library scan, and one for artists you add by hand. Both start at **Existing tracks**, so a first scan never starts a flood of downloads.
+
+## Excluding artists, albums and songs
+
+Unmonitoring stops TrackSeerr from searching for something today, but a playlist sync, an import list, a user request or a new-release check can bring it back. To stop something for good, exclude it.
+
+An excluded artist, album or song is never:
+
+- requested, by you, your users, playlists or import lists
+- added or monitored by a discography refresh or a new-release check
+- searched for or grabbed automatically, by the Wanted search, RSS sync or a delayed release
+
+To exclude something, open its menu and choose **Exclude**:
+
+- an artist: **Artist tools > Exclude artist…** on the artist page
+- an album: the album's **⋯** menu
+- a song: open the song's history from the album's track list, then **Exclude track…**
+- a wanted item: its **⋯** menu on the Wanted page
+- a playlist song TrackSeerr could not find: **Exclude song…** in the playlist's missing songs
+
+You can add a reason. Excluding something also unmonitors it in your library. Excluding an artist also covers songs credited to them together with other artists, such as "A & B" or "A feat. B".
+
+Excluded songs and albums are matched by their MusicBrainz ID when TrackSeerr knows it, and otherwise by artist and title, ignoring case, accents and a leading "The".
+
+**Activity > Exclusions** lists everything you excluded. Remove an entry there to allow it again. Removing an exclusion does not monitor anything again; monitor the item yourself if you want it.
+
+You can still search for and grab an excluded item by hand with **Manual search**. TrackSeerr shows a warning first.
 
 ## Wanted
 
