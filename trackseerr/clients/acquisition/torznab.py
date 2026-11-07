@@ -141,7 +141,10 @@ class TorznabDriver(AcquisitionDriver):
         indexer_type: str = "torznab",
         timeout: float = 10.0,
     ) -> None:
-        self.host_url = host_url.rstrip("/")
+        url = host_url.rstrip("/")
+        if url.lower().endswith("/api"):
+            url = url[:-4].rstrip("/")
+        self.host_url = url
         self.api_key = (api_key or "").strip()
         self.categories = categories
         self.indexer_type = indexer_type

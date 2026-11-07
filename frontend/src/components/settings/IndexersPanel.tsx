@@ -144,9 +144,12 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
               required
               value={url}
               onChange={(e) => draft.setUrl(e.target.value)}
-              placeholder="http://prowlarr:9696/1/api"
+              placeholder="http://prowlarr:9696/1"
               className={compactInputClass}
             />
+            <p className="text-[10px] font-mono text-neutral-500 mt-1">
+              The indexer's Torznab or Newznab address. To add all your Prowlarr indexers at once, add TrackSeerr as a Lidarr app in Prowlarr instead.
+            </p>
           </div>
           <div>
             <label htmlFor="indexer-api-key" className={compactLabelClass}>API Key</label>

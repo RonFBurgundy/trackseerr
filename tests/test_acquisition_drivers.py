@@ -1112,6 +1112,28 @@ TORZNAB_RESULTS_XML = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+@pytest.mark.parametrize(
+    "raw_url",
+    [
+        "http://p:9696/1",
+        "http://p:9696/1/",
+        "http://p:9696/1/api",
+        "http://p:9696/1/api/",
+        "http://p:9696/1/API",
+    ],
+)
+def test_torznab_strips_trailing_api_suffix(raw_url):
+    indexer = TorznabDriver(raw_url, api_key="testkey")
+    url = indexer._api_url(t="caps")
+    assert url.startswith("http://p:9696/1/api?")
+
+
+def test_torznab_keeps_api_inside_path():
+    indexer = TorznabDriver("http://p/api/v2/feed", api_key="testkey")
+    url = indexer._api_url(t="caps")
+    assert url.startswith("http://p/api/v2/feed/api?")
+
+
 def test_torznab_test_connection_success():
     indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
     mock_resp = MagicMock()
