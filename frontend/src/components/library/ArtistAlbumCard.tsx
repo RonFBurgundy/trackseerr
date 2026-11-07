@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useId, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Ban, Bookmark, BookmarkPlus, ChevronDown, Disc, FolderInput, History, Info, Loader2, Search, Sliders } from 'lucide-react';
 import type { AlbumItem } from '@/types/models';
 import { useAlbumTracks } from '@/hooks/useAlbumTracks';
@@ -63,7 +63,22 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
     if (trackFilter !== undefined) setExpanded(true);
   }, [trackFilter]);
   const tracksId = useId();
-  const { tracks, loading, error, patchMonitored, reload } = useAlbumTracks(expanded ? album.id : null);
+  const { tracks, loading, error, patchMonitored, patchAllMonitored, reload } = useAlbumTracks(expanded ? album.id : null);
+
+  const prevAlbumMonitoredRef = useRef<boolean | undefined | null>(null);
+  useEffect(() => {
+    if (prevAlbumMonitoredRef.current === null) {
+      prevAlbumMonitoredRef.current = album.monitored;
+      return;
+    }
+    if (prevAlbumMonitoredRef.current !== album.monitored) {
+      prevAlbumMonitoredRef.current = album.monitored;
+      if (expanded && typeof album.monitored === 'boolean') {
+        patchAllMonitored(album.monitored);
+        void reload();
+      }
+    }
+  }, [album.monitored, expanded, patchAllMonitored, reload]);
   // Narrow to the matching tracks when the filter matched through them; fall back to all if the lookup was broader.
   const shownTracks = useMemo(() => {
     if (trackFilter === undefined) return tracks;

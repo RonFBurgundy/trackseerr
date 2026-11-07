@@ -9,6 +9,8 @@ export interface UseAlbumTracksReturn {
   error: string | null;
   /** Applies a monitored change to the loaded rows after the server accepted it. */
   patchMonitored: (trackId: number | string, monitored: boolean) => void;
+  /** Applies a monitored change across all loaded rows (skipping excluded tracks). */
+  patchAllMonitored: (monitored: boolean) => void;
   reload: () => Promise<void>;
 }
 
@@ -50,9 +52,15 @@ export function useAlbumTracks(albumId: number | string | null): UseAlbumTracksR
     setTracks((prev) => prev.map((t) => (t.id === trackId ? { ...t, monitored } : t)));
   }, []);
 
+  const patchAllMonitored = useCallback((monitored: boolean): void => {
+    setTracks((prev) =>
+      prev.map((t) => (t.excluded ? t : { ...t, monitored }))
+    );
+  }, []);
+
   const reload = useCallback(async (): Promise<void> => {
     setReloadToken((v) => v + 1);
   }, []);
 
-  return { tracks, loading, error, patchMonitored, reload };
+  return { tracks, loading, error, patchMonitored, patchAllMonitored, reload };
 }
