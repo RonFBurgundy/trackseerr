@@ -46,14 +46,14 @@ def test_recent_search_stats_groups_by_item(test_db):
 
 def test_recent_search_stats_keys_missing_trigger_ref(test_db):
     for _ in range(3):
-        _rec(test_db, trigger_ref="missing:7")
+        _rec(test_db, trigger_ref="missing:artist a|track a")
     for _ in range(2):
         _rec(test_db, trigger_ref="issue-abc")
 
     stats = test_db.recent_search_stats(days=14)
-    assert set(stats.keys()) == {"missing:7"}
-    assert stats["missing:7"][0] == 3
-    assert isinstance(stats["missing:7"][1], str)
+    assert set(stats.keys()) == {"missing:artist a|track a"}
+    assert stats["missing:artist a|track a"][0] == 3
+    assert isinstance(stats["missing:artist a|track a"][1], str)
 
 
 def test_recent_search_stats_ignores_old_rows(test_db):
