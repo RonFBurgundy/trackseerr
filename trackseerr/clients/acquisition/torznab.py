@@ -284,6 +284,7 @@ class TorznabDriver(AcquisitionDriver):
         bitrate = None
         fmt = None
         magnet_url = None
+        info_hash = None
         categories: list[int | str] = []
 
         for cat_elem in item.findall("category"):
@@ -309,6 +310,8 @@ class TorznabDriver(AcquisitionDriver):
                     fmt = attr_val.lower()
                 elif attr_name == "magneturl":
                     magnet_url = attr_val
+                elif attr_name == "infohash" and attr_val.strip():
+                    info_hash = attr_val.strip().lower()
 
         # Video filter: drop item if category is 3020 or in 2000-2999 / 5000-5999,
         # or if the title matches video regex.
@@ -343,6 +346,10 @@ class TorznabDriver(AcquisitionDriver):
             if not album:
                 album = parsed.album
 
+        extra: dict[str, Any] = {"raw_title": item_title, "categories": categories}
+        if info_hash:
+            extra["info_hash"] = info_hash
+
         return AcquisitionSearchResult(
             download_id=guid or link or item_title,
             title=item_title,
@@ -358,7 +365,7 @@ class TorznabDriver(AcquisitionDriver):
             download_url=download_url,
             magnet_url=magnet_url,
             source=self.indexer_type,
-            extra={"raw_title": item_title, "categories": categories},
+            extra=extra,
         )
 
     def _get_search_mode(self) -> str:

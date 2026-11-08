@@ -431,3 +431,91 @@ def test_cancel_finished_torrent_leaves_client_alone(app_and_client, test_db, te
     assert resp.status_code == 200
     mock_factory.return_value.cancel.assert_not_called()
     assert test_db.get_active_download("dl-seed-1")["hidden_from_queue"] is True
+
+
+def test_remove_one_song_of_shared_pack_deselects_files_only(
+    app_and_client, test_db, test_config, seeded_users
+):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="client-qb-pack",
+            name="QB",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qb:8080",
+        )
+    )
+    test_db.create_active_download(
+        {
+            "id": "dl-song-1",
+            "title": "Song 1",
+            "artist": "Artist",
+            "client_id": "client-qb-pack",
+            "download_hash": "packhash123",
+            "status": DownloadStatus.DOWNLOADING.value,
+            "selected_files": [{"file_index": 3, "path": "s1.flac"}],
+        }
+    )
+    test_db.create_active_download(
+        {
+            "id": "dl-song-2",
+            "title": "Song 2",
+            "artist": "Artist",
+            "client_id": "client-qb-pack",
+            "download_hash": "packhash123",
+            "status": DownloadStatus.DOWNLOADING.value,
+            "selected_files": [{"file_index": 7, "path": "s2.flac"}],
+        }
+    )
+
+    mock_driver = MagicMock()
+    mock_driver.deselect_files.return_value = True
+    mock_driver.cancel.return_value = True
+
+    with patch("trackseerr.api.routes.queue.get_acquisition_driver", return_value=mock_driver):
+        resp = client.delete("/api/queue/dl-song-1", headers=admin_headers)
+
+    assert resp.status_code == 200
+    mock_driver.cancel.assert_not_called()
+    mock_driver.deselect_files.assert_called_once_with("packhash123", [3])
+    assert test_db.get_active_download("dl-song-1") is None
+    assert test_db.get_active_download("dl-song-2") is not None
+
+
+def test_remove_last_song_cancels_torrent(
+    app_and_client, test_db, test_config, seeded_users
+):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="client-qb-pack2",
+            name="QB",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qb:8080",
+        )
+    )
+    test_db.create_active_download(
+        {
+            "id": "dl-last-song",
+            "title": "Last Song",
+            "artist": "Artist",
+            "client_id": "client-qb-pack2",
+            "download_hash": "packhash456",
+            "status": DownloadStatus.DOWNLOADING.value,
+            "selected_files": [{"file_index": 7, "path": "s2.flac"}],
+        }
+    )
+
+    mock_driver = MagicMock()
+    mock_driver.deselect_files.return_value = True
+    mock_driver.cancel.return_value = True
+
+    with patch("trackseerr.api.routes.queue.get_acquisition_driver", return_value=mock_driver):
+        resp = client.delete("/api/queue/dl-last-song", headers=admin_headers)
+
+    assert resp.status_code == 200
+    mock_driver.cancel.assert_called_once_with("packhash456")
+    mock_driver.deselect_files.assert_not_called()
+    assert test_db.get_active_download("dl-last-song") is None
