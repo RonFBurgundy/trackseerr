@@ -12614,6 +12614,10 @@ export interface components {
             seed_time_target_minutes?: number | null;
             /** Seeding Seconds */
             seeding_seconds?: number | null;
+            /** Selected Files */
+            selected_files?: {
+                [key: string]: unknown;
+            }[] | null;
             /**
              * Size Bytes
              * @default 0

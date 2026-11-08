@@ -57,6 +57,7 @@ class QueueItemResponse(ApiModel):
     seeding_seconds: Optional[int] = None
     cleanup_attempts: int = 0
     cleanup_error: Optional[str] = None
+    selected_files: Optional[list[dict[str, Any]]] = None
 
 
 @router.get("", response_model=list[QueueItemResponse], summary="List active download queue")

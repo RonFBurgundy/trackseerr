@@ -32,6 +32,7 @@ from trackseerr.item_history import TRIGGER_MANUAL, GrabTrigger, _iso
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
 from trackseerr.clients.acquisition import get_acquisition_driver
+from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
 from trackseerr.seed_rules import apply_seed_rules_at_grab
 from trackseerr.models import (
     AcquisitionSearchResult,
