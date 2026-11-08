@@ -60,6 +60,34 @@ function blocklistNote(release: SearchRelease): string | null {
   return `${reason}${indexer}${when}`;
 }
 
+interface ReleasePackMeta {
+  pack_title: string;
+  pack_file_count: number;
+  file_paths: string[];
+}
+
+function parsePackMeta(extra: unknown): ReleasePackMeta | null {
+  if (!extra || typeof extra !== 'object') return null;
+  const obj = extra as Record<string, unknown>;
+  if (typeof obj.pack_title !== 'string' || !obj.pack_title.trim()) return null;
+  const pack_title = obj.pack_title;
+  const count = typeof obj.pack_file_count === 'number' ? obj.pack_file_count : 1;
+  const file_paths = Array.isArray(obj.file_paths)
+    ? obj.file_paths.filter((p): p is string => typeof p === 'string')
+    : [];
+  return {
+    pack_title,
+    pack_file_count: count,
+    file_paths,
+  };
+}
+
+function pathBasename(path: string): string {
+  const normalized = path.replace(/\\/g, '/');
+  const parts = normalized.split('/').filter(Boolean);
+  return parts.length > 0 ? parts[parts.length - 1] : path;
+}
+
 const BADGE =
   'px-1 py-px rounded-[2px] text-[10px] uppercase border flex-shrink-0 font-mono';
 
@@ -120,6 +148,7 @@ const StatusIcon: React.FC<{ release: SearchRelease }> = ({ release }) => {
 
 const ReleaseRow = React.memo<ReleaseRowProps>(({ release: r, expanded, busy, grabbed, onToggle, onGrab }) => {
   const isTorrent = r.protocol === 'torrent';
+  const packMeta = parsePackMeta(r.extra);
   const detailId = `release-detail-${r.id}`;
   const breakdown = r.breakdown ? Object.entries(r.breakdown) : [];
   const grabButton = grabbed ? (
@@ -144,6 +173,10 @@ const ReleaseRow = React.memo<ReleaseRowProps>(({ release: r, expanded, busy, gr
       onConfirm={() => onGrab(r)}
     />
   );
+
+  const packTooltip = packMeta
+    ? `${packMeta.pack_title} — ${pathBasename(packMeta.file_paths[0] || '')}, 1 of ${packMeta.pack_file_count} files`
+    : undefined;
 
   return (
     <li className={`border-b border-[#181818] ${r.is_acceptable ? '' : 'opacity-60'}`}>
@@ -176,6 +209,14 @@ const ReleaseRow = React.memo<ReleaseRowProps>(({ release: r, expanded, busy, gr
           <span className="px-1 py-px rounded-[2px] text-[10px] uppercase bg-[#1a1a1a] border border-[#2a2a2a] text-neutral-300 flex-shrink-0">
             {r.protocol}
           </span>
+          {packMeta && (
+            <span
+              className={`${BADGE} bg-[#1a1a1a] border-[#2a2a2a] text-neutral-300`}
+              title={packTooltip}
+            >
+              In pack
+            </span>
+          )}
           <ReleaseBadges release={r} />
         </div>
         <span className="hidden sm:block text-xs font-mono text-neutral-300 truncate" title={r.parsed_quality}>
@@ -201,6 +242,11 @@ const ReleaseRow = React.memo<ReleaseRowProps>(({ release: r, expanded, busy, gr
       </div>
       {expanded && (
         <div id={detailId} className="px-3 pb-3 pt-1 bg-[#0d0d0d] text-xs font-mono space-y-2">
+          {packMeta && (
+            <p className="text-neutral-300">
+              Pack: {packMeta.pack_title} ({packMeta.pack_file_count} files). Only this song is downloaded.
+            </p>
+          )}
           {blocklistNote(r) && <p className="text-[#ef4444]/90 break-words">{blocklistNote(r)}</p>}
           {r.indexer_priority != null && (
             <p className="text-neutral-400">Indexer priority: {r.indexer_priority}</p>

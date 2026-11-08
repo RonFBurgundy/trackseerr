@@ -17,7 +17,7 @@ export interface IndexersPanelProps {
 
 export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, reload, onToast }) => {
   const draft = useIndexerDraft();
-  const { editingId, name, url, apiKey, indexerType, seeding, priority, enabled } = draft;
+  const { editingId, name, url, apiKey, indexerType, seeding, packScan, priority, enabled } = draft;
   const editing = indexers.find((i) => i.id === editingId) ?? null;
   const showSeeding = indexerType === 'torznab';
   const [isSaving, setIsSaving] = useState<boolean>(false);
@@ -41,6 +41,7 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
         categories: editing ? editing.categories : undefined,
         enabled,
         priority,
+        ...(showSeeding ? { pack_scan: packScan } : {}),
         ...seedPayload,
       });
       const wasEditing = editing !== null;
@@ -96,6 +97,11 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
                   <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-neutral-300">
                     P{idx.priority}
                   </span>
+                  {idx.pack_scan !== 'off' && (
+                    <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-[#e5a00d]">
+                      Packs
+                    </span>
+                  )}
                   {!idx.enabled && (
                     <span className="px-1.5 py-0.5 rounded-[2px] bg-[#1a1a1a] text-[10px] font-mono uppercase text-neutral-500">
                       Disabled
@@ -176,12 +182,31 @@ export const IndexersPanel: React.FC<IndexersPanelProps> = ({ indexers, media, r
           </div>
           <TactileSwitch id="indexer-enabled" name="enabled" label="Enabled" checked={enabled} onChange={draft.setEnabled} />
           {showSeeding && (
-            <IndexerSeedingFields
-              value={seeding}
-              onChange={draft.setSeedingField}
-              globalSeedRatio={media?.seed_ratio_limit}
-              globalSeedTimeMinutes={media?.seed_time_limit_minutes}
-            />
+            <>
+              <IndexerSeedingFields
+                value={seeding}
+                onChange={draft.setSeedingField}
+                globalSeedRatio={media?.seed_ratio_limit}
+                globalSeedTimeMinutes={media?.seed_time_limit_minutes}
+              />
+              <div>
+                <label htmlFor="indexer-pack-scan" className={compactLabelClass}>Index packs</label>
+                <select
+                  id="indexer-pack-scan"
+                  name="pack-scan"
+                  value={packScan}
+                  onChange={(e) => draft.setPackScan(e.target.value as IndexerItem['pack_scan'])}
+                  className={compactInputClass}
+                >
+                  <option value="off">Off</option>
+                  <option value="auto">Packs only (recommended)</option>
+                  <option value="all">Every torrent</option>
+                </select>
+                <p className="text-[10px] font-mono text-neutral-500 mt-1">
+                  TrackSeerr reads the file list inside pack and pool torrents from this indexer, so songs buried in them can be found and downloaded on their own. Needs qBittorrent.
+                </p>
+              </div>
+            </>
           )}
           <ActionBar align="end" className="pt-2">
             {editing && (
