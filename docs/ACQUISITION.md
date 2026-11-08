@@ -7,6 +7,7 @@ TrackSeerr can find and download music on its own, or pass the work to Lidarr. T
 - [Download clients](#download-clients)
 - [Indexers](#indexers)
 - [Sync indexers from Prowlarr](#sync-indexers-from-prowlarr)
+- [Songs inside packs and pools](#songs-inside-packs-and-pools)
 - [Quality and profiles](#quality-and-profiles)
 - [How searching works](#how-searching-works)
 - [How importing works](#how-importing-works)
@@ -92,6 +93,24 @@ You can sync indexers from Prowlarr automatically. TrackSeerr provides a Lidarr-
 7. Test the connection and save, then click **Sync App Indexers** on the Apps page.
 
 Prowlarr will now add, update, and remove indexers in TrackSeerr. Any seed rules set on indexers in Prowlarr land as per-indexer seed rules in TrackSeerr.
+
+## Songs inside packs and pools
+
+Some torrent sites carry most singles inside large packs: DJ pools, chart packs, "VA" collections. The pack's name never mentions the song, so a normal search can't find it. TrackSeerr can look inside these packs for you.
+
+Turn it on per indexer: open the indexer in **Settings > Media Management > Indexers** and set **Index packs**:
+
+- **Off**: the default.
+- **Packs only**: recommended. TrackSeerr looks inside releases whose name looks like a pack, pool, chart, compilation or "VA" release.
+- **Every torrent**: looks inside every torrent from that indexer. Use this only for an indexer that is mostly packs.
+
+How it works:
+
+1. When TrackSeerr checks the indexer's newest releases (every 15 minutes) it notes the packs. The **Pack Index** task (Settings > System > Tasks) then downloads each pack's small .torrent file and reads its list of songs. Once a day it also looks back through older releases. Only the .torrent file is downloaded, never the music.
+2. Searches, automatic and manual, also look in this list. A song found inside a pack shows **In pack** in Manual search, with the pack's name.
+3. When TrackSeerr grabs a song from a pack, qBittorrent downloads only that song, not the whole pack. Your indexer's seeding rules still apply to what was downloaded.
+
+Downloading part of a torrent needs **qBittorrent**. Packs are skipped when your torrent client is Transmission or Deluge. Packs whose torrent link is only a magnet link can't be read in advance and are skipped. TrackSeerr keeps the list for 90 days.
 
 ## Quality and profiles
 

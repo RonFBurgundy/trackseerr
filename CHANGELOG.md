@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Songs inside torrent packs and pools can now be found and downloaded on their own. Turn on **Index packs** for a torrent indexer and TrackSeerr reads the song lists inside its pack, pool, chart and "VA" torrents (only the small .torrent file is downloaded). Searches then find songs buried in those packs, Manual search marks them **In pack**, and qBittorrent downloads just that song instead of the whole pack. Needs qBittorrent. See "Songs inside packs and pools" in the Acquisition guide.
 - Exclusions: exclude an artist, album or song and TrackSeerr will never request, add, monitor or automatically search for it again, including from playlists, import lists, user requests and new-release checks. Use **Exclude** in the artist, album, song, Wanted and playlist missing-song menus, with an optional reason. Excluding also unmonitors it. **Activity → Exclusions** lists everything excluded and lets you remove entries. Manual search still works, with a warning. See the Library guide.
 - An indexer that keeps failing is paused for longer each time, from 1 minute up to a day, so it is not hammered or locked out. One failure never pauses it. TrackSeerr waits as long as the indexer asks when it says to slow down, and at least an hour when it reports its daily API limit. A paused indexer shows on the Health card and in admin alerts, and searches resume on their own when the pause ends.
 - Wanted songs and albums that keep coming up empty are searched less often by the scheduled search: after 8 searches in two weeks at most every 6 hours, after 16 every 12 hours, and after 24 once a day. This cuts repeated Soulseek searches sharply. "Search now", searching again after a failed download, and new-release checks are not affected. System events show how many items each search round skipped.
@@ -120,6 +121,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Torrent and Usenet searches no longer return music videos (720p/1080p, x264, DVDRip and similar releases or video categories).
 - When a search for one song downloads a whole single or album, TrackSeerr now imports only that song, once, in the best format your quality profile allows, onto the song already in your library. Before, it could import every file in the download as new, wrongly named songs, and files that ended up with the same name could overwrite each other. Other files are left in the download folder, and a download with no matching file goes to manual import.
 - An album download that has each song in two formats (for example FLAC and MP3) imports only the better copy of each song.
 - Turning an album's monitoring on or off now updates its open track list straight away.
