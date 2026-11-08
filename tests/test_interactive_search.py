@@ -1189,3 +1189,209 @@ def test_manual_grab_never_sends_key_to_other_host(app_and_client, test_db, test
     assert "apikey" not in download_arg.download_url
     assert download_arg.download_url == "http://evil.example/x?link=abc"
 
+
+# ---------------------------------------------------------------------------
+# Manual Search Fallback Tests
+# ---------------------------------------------------------------------------
+
+def test_manual_search_also_searches_album(app_and_client, test_db, test_config, seeded_users):
+    """Track search with album 'BEYONCÉ' != title 'XO' -> second call with title=None, album='BEYONCÉ'."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    track_cand = AcquisitionSearchResult(
+        download_id="idx-track-1",
+        title="Beyonce - XO [FLAC]",
+        artist="Beyoncé",
+        album="BEYONCÉ",
+        protocol="slskd",
+        item_type="track",
+        size_bytes=30 * 1024 * 1024,
+    )
+    album_cand = AcquisitionSearchResult(
+        download_id="idx-album-1",
+        title="Beyonce - BEYONCE (2013) [FLAC]",
+        artist="Beyoncé",
+        album="BEYONCÉ",
+        protocol="usenet",
+        item_type="album",
+        size_bytes=400 * 1024 * 1024,
+    )
+
+    def fake_search_all_indexers(*args, **kwargs):
+        if kwargs.get("title") == "XO":
+            return [track_cand]
+        if kwargs.get("title") is None and kwargs.get("album") == "BEYONCÉ":
+            return [album_cand]
+        return []
+
+    with patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        side_effect=fake_search_all_indexers,
+    ) as mock_search:
+        resp = client.post(
+            "/api/acquisition/search",
+            headers=admin_headers,
+            json={"artist": "Beyoncé", "title": "XO", "album": "BEYONCÉ", "item_type": "track"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert mock_search.call_count == 2
+    # Verify second call args
+    second_call = mock_search.call_args_list[1]
+    assert second_call.kwargs.get("title") is None
+    assert second_call.kwargs.get("album") == "BEYONCÉ"
+    # Result appears in the response
+    returned_ids = [r["id"] for r in data["results"]]
+    assert "idx-track-1" in returned_ids
+    assert "idx-album-1" in returned_ids
+
+
+def test_manual_search_skips_album_when_same_as_title(app_and_client, test_db, test_config, seeded_users):
+    """Album == title -> one call only."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    cand = AcquisitionSearchResult(
+        download_id="idx-1",
+        title="Daft Punk - Discovery [FLAC]",
+        artist="Daft Punk",
+        album="Discovery",
+        protocol="slskd",
+        item_type="track",
+        size_bytes=40 * 1024 * 1024,
+    )
+
+    with patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        return_value=[cand],
+    ) as mock_search:
+        resp = client.post(
+            "/api/acquisition/search",
+            headers=admin_headers,
+            json={"artist": "Daft Punk", "title": "Discovery", "album": "Discovery", "item_type": "track"},
+        )
+
+    assert resp.status_code == 200
+    assert mock_search.call_count == 1
+
+
+def test_manual_search_uses_banned_term_tier_when_no_soulseek_results(app_and_client, test_db, test_config, seeded_users):
+    """First call returns only a usenet result -> _banned_term_tier called, its slskd result appears."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    usenet_cand = AcquisitionSearchResult(
+        download_id="idx-usenet-1",
+        title="Beyonce - XO [FLAC]",
+        artist="Beyoncé",
+        album="BEYONCÉ",
+        protocol="usenet",
+        item_type="track",
+        size_bytes=30 * 1024 * 1024,
+    )
+    slskd_cand = AcquisitionSearchResult(
+        download_id="idx-slskd-1",
+        title="Beyonce - XO (Single) [FLAC]",
+        artist="Beyoncé",
+        album="BEYONCÉ",
+        protocol="slskd",
+        item_type="track",
+        size_bytes=30 * 1024 * 1024,
+    )
+
+    with patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        return_value=[usenet_cand],
+    ), patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator._banned_term_tier",
+        return_value=[slskd_cand],
+    ) as mock_banned:
+        resp = client.post(
+            "/api/acquisition/search",
+            headers=admin_headers,
+            json={"artist": "Beyoncé", "title": "XO", "album": "BEYONCÉ", "item_type": "track"},
+        )
+
+    assert resp.status_code == 200
+    mock_banned.assert_called_once()
+    assert mock_banned.call_args.kwargs.get("start_rung") == 2
+    data = resp.json()
+    returned_ids = [r["id"] for r in data["results"]]
+    assert "idx-usenet-1" in returned_ids
+    assert "idx-slskd-1" in returned_ids
+
+
+def test_manual_search_skips_banned_tier_when_soulseek_answered(app_and_client, test_db, test_config, seeded_users):
+    """Soulseek answered in search -> _banned_term_tier is skipped."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    slskd_cand = AcquisitionSearchResult(
+        download_id="idx-slskd-1",
+        title="Beyonce - XO [FLAC]",
+        artist="Beyoncé",
+        album="BEYONCÉ",
+        protocol="slskd",
+        item_type="track",
+        size_bytes=30 * 1024 * 1024,
+    )
+
+    with patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        return_value=[slskd_cand],
+    ), patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator._banned_term_tier",
+    ) as mock_banned:
+        resp = client.post(
+            "/api/acquisition/search",
+            headers=admin_headers,
+            json={"artist": "Beyoncé", "title": "XO", "album": "BEYONCÉ", "item_type": "track"},
+        )
+
+    assert resp.status_code == 200
+    mock_banned.assert_not_called()
+
+
+def test_manual_search_dedupes_results(app_and_client, test_db, test_config, seeded_users):
+    """The same download_id from both calls appears once."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    dup_cand1 = AcquisitionSearchResult(
+        download_id="dup-1",
+        title="Beyonce - XO [FLAC 16bit]",
+        artist="Beyoncé",
+        album="BEYONCÉ",
+        protocol="slskd",
+        item_type="track",
+        size_bytes=30 * 1024 * 1024,
+    )
+    dup_cand2 = AcquisitionSearchResult(
+        download_id="dup-1",
+        title="Beyonce - XO [FLAC 16bit]",
+        artist="Beyoncé",
+        album="BEYONCÉ",
+        protocol="slskd",
+        item_type="track",
+        size_bytes=30 * 1024 * 1024,
+    )
+
+    # First search (track) and second search (album) both return dup-1
+    with patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        side_effect=[[dup_cand1], [dup_cand2]],
+    ):
+        resp = client.post(
+            "/api/acquisition/search",
+            headers=admin_headers,
+            json={"artist": "Beyoncé", "title": "XO", "album": "BEYONCÉ", "item_type": "track"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    returned_ids = [r["id"] for r in data["results"]]
+    assert returned_ids.count("dup-1") == 1
+
+
