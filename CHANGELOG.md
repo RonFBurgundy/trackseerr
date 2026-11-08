@@ -121,6 +121,10 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Grabbing a second song from a pack that is already in qBittorrent now adds that song to the existing torrent instead of failing. Removing one of those songs from the Queue only stops that song's file, and seed cleanup waits until every song in the torrent has finished. Manual search no longer marks the other songs in a pack as "Already downloading".
+- TrackSeerr never changes or removes a torrent that is in qBittorrent under another app's category.
+- A bad .torrent file from an indexer now fails just that release instead of pausing all torrent downloads for 5 minutes. Magnet links that use the short (base32) hash format are now tracked correctly, and qBittorrent 5's "stopped" states are understood.
+- Usenet downloads that SABnzbd can never finish (password-protected, over its size limit, or paused as a duplicate), or that were deleted in SABnzbd, are now marked failed and searched again instead of waiting in the Queue forever.
 - Torrent grabs work when qBittorrent runs behind a VPN. TrackSeerr now downloads the .torrent file itself and hands the file to qBittorrent, the way Sonarr, Radarr and Lidarr do, instead of giving qBittorrent a Prowlarr link it might not be able to reach. Magnet links are passed on as before.
 - Torrent downloads work again with newer qBittorrent versions. qBittorrent 5 replies "accepted, still fetching" when a torrent is added, and TrackSeerr treated that as a failure, so every torrent grab failed and a song grabbed from a pack left a stopped torrent behind.
 - Automatic searches no longer download unrelated releases from usenet or torrent indexers. Some indexers return loose matches for short song titles (for example "17" or "U R"), and the first acceptable one was grabbed. A result now has to name the artist and the song or its album.
