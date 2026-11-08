@@ -807,6 +807,99 @@ def test_in_queue_release_flagged(app_and_client, test_db, test_config, seeded_u
     assert _search_one(client, headers, other).json()["results"][0]["in_queue"] is False
 
 
+def test_pack_song_not_flagged_in_queue_when_other_file_queued(
+    app_and_client, test_db, test_config, seeded_users
+):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _make_indexer(test_db, "idx-ok", "Good Indexer")
+    info_hash = "abcdef0123456789abcdef0123456789abcdef01"
+    cand = AcquisitionSearchResult(
+        download_id="pack-rel-1",
+        title="Radiohead - Song 2 [FLAC] (in pack: Best Hits)",
+        artist="Radiohead",
+        item_type="track",
+        size_bytes=30 * 1024 * 1024,
+        source="torznab",
+        magnet_url=f"magnet:?xt=urn:btih:{info_hash}&dn=Best+Hits",
+        extra={
+            "file_indices": [2],
+            "info_hash": info_hash,
+        },
+    )
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="c1",
+            name="qbit",
+            driver_type="qbittorrent",
+            host_url="http://127.0.0.1:8080",
+            enabled=True,
+            priority=1,
+        )
+    )
+    test_db.create_active_download(
+        {
+            "id": "dl-pack-song-1",
+            "client_id": "c1",
+            "title": "Radiohead - Song 1 [FLAC] (in pack: Best Hits)",
+            "artist": "Radiohead",
+            "download_hash": info_hash,
+            "status": "downloading",
+            "selected_files": [{"file_index": 1, "path": "01 - Song 1.flac"}],
+        }
+    )
+    item = _search_one(client, headers, cand).json()["results"][0]
+    assert item["in_queue"] is False
+    assert "Already downloading" not in item.get("rejection_reasons", [])
+
+
+def test_pack_song_flagged_in_queue_when_same_file_queued(
+    app_and_client, test_db, test_config, seeded_users
+):
+    _, client = app_and_client
+    headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _make_indexer(test_db, "idx-ok", "Good Indexer")
+    info_hash = "abcdef0123456789abcdef0123456789abcdef01"
+    cand = AcquisitionSearchResult(
+        download_id="pack-rel-1",
+        title="Radiohead - Song 2 [FLAC] (in pack: Best Hits)",
+        artist="Radiohead",
+        item_type="track",
+        size_bytes=30 * 1024 * 1024,
+        source="torznab",
+        magnet_url=f"magnet:?xt=urn:btih:{info_hash}&dn=Best+Hits",
+        extra={
+            "file_indices": [2],
+            "info_hash": info_hash,
+        },
+    )
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="c1",
+            name="qbit",
+            driver_type="qbittorrent",
+            host_url="http://127.0.0.1:8080",
+            enabled=True,
+            priority=1,
+        )
+    )
+    test_db.create_active_download(
+        {
+            "id": "dl-pack-song-2",
+            "client_id": "c1",
+            "title": "Radiohead - Song 2 [FLAC] (in pack: Best Hits)",
+            "artist": "Radiohead",
+            "download_hash": info_hash,
+            "status": "downloading",
+            "selected_files": [{"file_index": 2, "path": "02 - Song 2.flac"}],
+        }
+    )
+    item = _search_one(client, headers, cand).json()["results"][0]
+    assert item["in_queue"] is True
+    assert item["is_acceptable"] is False
+    assert item["rejection_reasons"][0] == "Already downloading"
+
+
 def test_pending_release_has_pending_until(app_and_client, test_db, test_config, seeded_users):
     _, client = app_and_client
     headers = _auth_headers(seeded_users["admin"], test_db, test_config)

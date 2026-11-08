@@ -205,7 +205,22 @@ def _blocklist_reason(entry: dict[str, Any]) -> str:
 def _release_flags(db: Database, r: AcquisitionSearchResult) -> tuple[bool, Optional[str]]:
     """(already in the download queue, delay-profile hold ``release_at`` or None) for a candidate."""
     try:
-        in_queue = db.find_active_download_by_release(r.title, _extract_info_hash(r)) is not None
+        if r.extra and "file_indices" in r.extra:
+            info_hash = _extract_info_hash(r)
+            if info_hash:
+                target_indices = set(r.extra["file_indices"])
+                unfinished = db.list_unfinished_downloads_by_hash(info_hash)
+                in_queue = any(
+                    any(
+                        isinstance(f, dict) and f.get("file_index") in target_indices
+                        for f in (row.get("selected_files") or [])
+                    )
+                    for row in unfinished
+                )
+            else:
+                in_queue = db.find_active_download_by_release(r.title, None) is not None
+        else:
+            in_queue = db.find_active_download_by_release(r.title, _extract_info_hash(r)) is not None
         pending = db.find_pending_release(r.title)
     except sqlite3.Error as e:
         logger.warning("Could not look up queue/pending state for '%s': %s", r.title, redact_text(str(e)))

@@ -156,6 +156,52 @@ class SeedOutcome:
 
 
 
+def _seed_goal_unmet(
+    rule_source: Optional[str],
+    seed_ratio_limit: Any,
+    seed_time_limit_minutes: Any,
+    import_mode: str | None,
+    status_dict: Optional[dict[str, Any]],
+    target_lookup: str,
+) -> bool:
+    """True when configured ratio/time limits require the transfer to keep seeding."""
+    if rule_source == "indexer":
+        ratio_t = float(seed_ratio_limit or 0.0)
+        time_t = int(seed_time_limit_minutes or 0)
+        if ratio_t > 0 or time_t > 0:
+            if status_dict is None:
+                logger.info("Keeping transfer %s: seeding status unavailable (indexer seed rule)", target_lookup)
+                return True
+            cur_ratio = float(status_dict.get("ratio") or 0.0)
+            cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
+            ratio_met = ratio_t > 0 and cur_ratio >= ratio_t
+            time_met = time_t > 0 and cur_seeding_sec >= time_t * 60
+            if not (ratio_met or time_met):
+                return True
+    elif preserves_source(import_mode) and (seed_ratio_limit is not None or seed_time_limit_minutes is not None):
+        if status_dict is None:
+            logger.info("Keeping transfer %s: seeding status unavailable", target_lookup)
+            return True
+        cur_ratio = float(status_dict.get("ratio") or 0.0)
+        cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
+        ratio_met = seed_ratio_limit is not None and cur_ratio >= float(seed_ratio_limit)
+        time_met = seed_time_limit_minutes is not None and cur_seeding_sec >= int(seed_time_limit_minutes) * 60
+        if not (ratio_met or time_met):
+            return True
+    return False
+
+
+def _has_unfinished_downloads(db: Any, target_lookup: str, exclude_id: Optional[str]) -> bool:
+    """True when another download row is still using this client torrent (never remove on doubt)."""
+    if db is None or not hasattr(db, "list_unfinished_downloads_by_hash"):
+        return False
+    try:
+        return bool(db.list_unfinished_downloads_by_hash(target_lookup, exclude_id=exclude_id))
+    except sqlite3.Error as exc:
+        logger.warning("Error checking unfinished downloads for %s: %s", target_lookup, exc)
+        return True
+
+
 def evaluate_seed_cleanup(
     driver: Any,
     target_lookup: str,
@@ -181,29 +227,10 @@ def evaluate_seed_cleanup(
         seed_ratio_limit = download.get("seed_ratio_target")  # type: ignore[union-attr]
         seed_time_limit_minutes = download.get("seed_time_target_minutes")  # type: ignore[union-attr]
     keep = SeedOutcome(DownloadStatus.COMPLETED.value, note="seed goal not met")
-    if rule_source == "indexer":
-        ratio_t = float(seed_ratio_limit or 0.0)
-        time_t = int(seed_time_limit_minutes or 0)
-        if ratio_t > 0 or time_t > 0:  # 0/None never counts as met on its own, nor as a requirement
-            if status_dict is None:
-                logger.info("Keeping transfer %s: seeding status unavailable (indexer seed rule)", target_lookup)
-                return keep
-            cur_ratio = float(status_dict.get("ratio") or 0.0)
-            cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
-            ratio_met = ratio_t > 0 and cur_ratio >= ratio_t
-            time_met = time_t > 0 and cur_seeding_sec >= time_t * 60
-            if not (ratio_met or time_met):
-                return keep
-    elif preserves_source(import_mode) and (seed_ratio_limit is not None or seed_time_limit_minutes is not None):
-        if status_dict is None:
-            logger.info("Keeping transfer %s: seeding status unavailable", target_lookup)
-            return keep
-        cur_ratio = float(status_dict.get("ratio") or 0.0)
-        cur_seeding_sec = int(status_dict.get("seeding_time_seconds") or 0)
-        ratio_met = seed_ratio_limit is not None and cur_ratio >= float(seed_ratio_limit)
-        time_met = seed_time_limit_minutes is not None and cur_seeding_sec >= int(seed_time_limit_minutes) * 60
-        if not (ratio_met or time_met):
-            return keep
+    if _seed_goal_unmet(
+        rule_source, seed_ratio_limit, seed_time_limit_minutes, import_mode, status_dict, target_lookup
+    ):
+        return keep
 
     delete_files = False
     note = "removed"
@@ -215,6 +242,11 @@ def evaluate_seed_cleanup(
         else:
             note = f"removed, files kept: {reason}"
             logger.info("Not deleting files for %s: %s", target_lookup, reason)
+
+    if _has_unfinished_downloads(db, target_lookup, (download or {}).get("id")):
+        logger.info("Keeping torrent %s: another song in it is still downloading", target_lookup)
+        return keep
+
     try:
         done = driver.cleanup_completed(target_lookup, delete_files=delete_files)
     except Exception as ex:  # noqa: BLE001 - driver errors span HTTP, auth and parsing; the cause is logged and surfaced

@@ -486,6 +486,40 @@ class DownloadStoreMixin:
             ).fetchone()
             return self._map_active_download(row) if row else None
 
+    def list_unfinished_downloads_by_hash(
+        self, download_hash: str, exclude_id: Optional[str] = None
+    ) -> list[dict[str, Any]]:
+        """Downloads sharing this torrent hash whose status is neither 'imported' nor 'failed'."""
+        if not download_hash:
+            return []
+        with self._lock:
+            if exclude_id:
+                cur = self.conn.execute(
+                    """
+                    SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
+                    FROM active_downloads d
+                    LEFT JOIN download_clients c ON d.client_id = c.id
+                    WHERE lower(d.download_hash) = ?
+                      AND lower(d.status) NOT IN ('imported', 'failed')
+                      AND d.id != ?
+                    ORDER BY d.created_at DESC
+                    """,
+                    (str(download_hash).lower(), str(exclude_id)),
+                )
+            else:
+                cur = self.conn.execute(
+                    """
+                    SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
+                    FROM active_downloads d
+                    LEFT JOIN download_clients c ON d.client_id = c.id
+                    WHERE lower(d.download_hash) = ?
+                      AND lower(d.status) NOT IN ('imported', 'failed')
+                    ORDER BY d.created_at DESC
+                    """,
+                    (str(download_hash).lower(),),
+                )
+            return [self._map_active_download(r) for r in cur.fetchall()]
+
     def history_has_hash(self, download_hash: str) -> bool:
         """True when ``download_history`` knows a release with this torrent hash (import history match)."""
         with self._lock:

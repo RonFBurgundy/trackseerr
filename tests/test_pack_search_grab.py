@@ -860,3 +860,159 @@ def test_cleanup_partial_torrent_targets_torrent_only() -> None:
         assert "torrents/delete" in url
         assert kwargs["data"]["hashes"] == "hashpartial123"
         assert kwargs["data"]["deleteFiles"] == "true"
+
+
+def test_list_unfinished_downloads_by_hash_excludes_finished_and_self(db: Database) -> None:
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-test-store",
+            name="TestClient",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://localhost:8080",
+        )
+    )
+    db.create_active_download({
+        "id": "dl-1",
+        "client_id": "c-test-store",
+        "title": "Song 1",
+        "artist": "Artist",
+        "download_hash": "packhash123",
+        "status": "downloading",
+        "selected_files": [{"file_index": 0, "path": "s1.flac"}],
+    })
+    db.create_active_download({
+        "id": "dl-2",
+        "client_id": "c-test-store",
+        "title": "Song 2",
+        "artist": "Artist",
+        "download_hash": "packhash123",
+        "status": "imported",
+        "selected_files": [{"file_index": 1, "path": "s2.flac"}],
+    })
+    db.create_active_download({
+        "id": "dl-3",
+        "client_id": "c-test-store",
+        "title": "Song 3",
+        "artist": "Artist",
+        "download_hash": "packhash123",
+        "status": "failed",
+        "selected_files": [{"file_index": 2, "path": "s3.flac"}],
+    })
+    db.create_active_download({
+        "id": "dl-4",
+        "client_id": "c-test-store",
+        "title": "Song 4",
+        "artist": "Artist",
+        "download_hash": "packhash123",
+        "status": "queued",
+        "selected_files": [{"file_index": 3, "path": "s4.flac"}],
+    })
+    db.create_active_download({
+        "id": "dl-other",
+        "client_id": "c-test-store",
+        "title": "Other",
+        "artist": "Artist",
+        "download_hash": "otherhash999",
+        "status": "downloading",
+        "selected_files": [{"file_index": 0, "path": "other.flac"}],
+    })
+
+    results = db.list_unfinished_downloads_by_hash("PACKHASH123")
+    ids = [r["id"] for r in results]
+    assert set(ids) == {"dl-1", "dl-4"}
+    assert all(isinstance(r["selected_files"], list) for r in results)
+
+    results_excluded = db.list_unfinished_downloads_by_hash("packhash123", exclude_id="dl-1")
+    assert [r["id"] for r in results_excluded] == ["dl-4"]
+
+
+def test_seed_cleanup_keeps_shared_torrent_while_other_song_downloads(db: Database) -> None:
+    from trackseerr.seed_safety import evaluate_seed_cleanup
+
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-test-safety",
+            name="TestClient",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://localhost:8080",
+        )
+    )
+    db.create_active_download({
+        "id": "dl-seed",
+        "client_id": "c-test-safety",
+        "title": "Song 1",
+        "artist": "Artist",
+        "download_hash": "packhash123",
+        "status": "completed",
+    })
+    db.create_active_download({
+        "id": "dl-active",
+        "client_id": "c-test-safety",
+        "title": "Song 2",
+        "artist": "Artist",
+        "download_hash": "packhash123",
+        "status": "downloading",
+    })
+
+    driver = MagicMock()
+    driver.cleanup_completed.return_value = True
+
+    outcome = evaluate_seed_cleanup(
+        driver=driver,
+        target_lookup="packhash123",
+        media_settings={"seed_complete_action": "remove"},
+        import_mode="copy",
+        status_dict=None,
+        download=db.get_active_download("dl-seed"),
+        db=db,
+    )
+
+    driver.cleanup_completed.assert_not_called()
+    assert outcome.status == DownloadStatus.COMPLETED.value
+    assert outcome.removed is False
+
+
+def test_seed_cleanup_removes_when_no_other_song_pending(db: Database) -> None:
+    from trackseerr.seed_safety import evaluate_seed_cleanup
+
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-test-safety2",
+            name="TestClient",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://localhost:8080",
+        )
+    )
+    db.create_active_download({
+        "id": "dl-seed",
+        "client_id": "c-test-safety2",
+        "title": "Song 1",
+        "artist": "Artist",
+        "download_hash": "packhash123",
+        "status": "completed",
+    })
+    db.create_active_download({
+        "id": "dl-finished",
+        "client_id": "c-test-safety2",
+        "title": "Song 2",
+        "artist": "Artist",
+        "download_hash": "packhash123",
+        "status": "imported",
+    })
+
+    driver = MagicMock()
+    driver.cleanup_completed.return_value = True
+
+    outcome = evaluate_seed_cleanup(
+        driver=driver,
+        target_lookup="packhash123",
+        media_settings={"seed_complete_action": "remove"},
+        import_mode="copy",
+        status_dict=None,
+        download=db.get_active_download("dl-seed"),
+        db=db,
+    )
+
+    driver.cleanup_completed.assert_called_once_with("packhash123", delete_files=False)
+    assert outcome.status == DownloadStatus.IMPORTED.value
+    assert outcome.removed is True

@@ -1,6 +1,7 @@
 """qBittorrent WebAPI v2 Acquisition Driver."""
 
 import base64
+import binascii
 import logging
 import ntpath
 from pathlib import Path
@@ -29,7 +30,8 @@ def _btih_to_hex(value: str) -> str:
     if len(cleaned) == 32:
         try:
             return base64.b32decode(cleaned.upper()).hex().lower()
-        except Exception:
+        except (binascii.Error, ValueError) as exc:
+            logger.debug("Ignoring malformed base32 info hash: %s", type(exc).__name__)
             return cleaned.lower()
     return cleaned.lower()
 
@@ -209,7 +211,7 @@ class QbittorrentDriver(AcquisitionDriver):
                 if isinstance(data, list) and data:
                     return data[0]
             return None
-        except Exception as exc:
+        except (httpx.HTTPError, ValueError) as exc:
             logger.debug(
                 "Failed to query existing torrent info for %s: %s",
                 torrent_hash,

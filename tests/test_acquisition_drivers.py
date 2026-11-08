@@ -1174,6 +1174,13 @@ def test_btih_base32_converted_to_hex():
         assert res_hash == expected_hex
 
 
+def test_btih_malformed_base32_falls_back():
+    from trackseerr.clients.acquisition.qbittorrent import _btih_to_hex
+
+    malformed = "11111111111111111111111111111111"
+    assert _btih_to_hex(malformed) == malformed
+
+
 def test_torznab_parses_infohash_attr():
     import xml.etree.ElementTree as ET
     indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")

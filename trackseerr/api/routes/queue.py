@@ -108,7 +108,21 @@ def cancel_download(
             try:
                 driver = get_acquisition_driver(client_cfg)
                 target_hash = item.get("download_hash") or download_id
-                driver.cancel(target_hash)
+                others = (
+                    db.list_unfinished_downloads_by_hash(target_hash, exclude_id=download_id)
+                    if hasattr(db, "list_unfinished_downloads_by_hash")
+                    else []
+                )
+                if others:
+                    selected_files = item.get("selected_files")
+                    if selected_files and hasattr(driver, "deselect_files"):
+                        file_indices = [
+                            f["file_index"] for f in selected_files if isinstance(f, dict) and "file_index" in f
+                        ]
+                        driver.deselect_files(target_hash, file_indices)
+                    logger.info("Not cancelling shared torrent %s: another download is still active", target_hash)
+                else:
+                    driver.cancel(target_hash)
             except Exception as e:
                 logger.warning("Could not signal cancel to download client %s: %s", client_id, e)
 
