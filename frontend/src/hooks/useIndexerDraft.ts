@@ -61,6 +61,7 @@ export interface IndexerDraft {
   apiKey: string;
   indexerType: IndexerItem['indexer_type'];
   seeding: SeedingDraft;
+  packScan: IndexerItem['pack_scan'];
   priority: number;
   enabled: boolean;
   setName: (v: string) => void;
@@ -68,6 +69,7 @@ export interface IndexerDraft {
   setApiKey: (v: string) => void;
   setPriority: (v: number) => void;
   setEnabled: (v: boolean) => void;
+  setPackScan: (v: IndexerItem['pack_scan']) => void;
   setSeedingField: (field: SeedingDraftField, value: string) => void;
   startEdit: (indexer: IndexerItem) => void;
   reset: () => void;
@@ -81,6 +83,7 @@ export function useIndexerDraft(): IndexerDraft {
   const [apiKey, setApiKey] = useState<string>('');
   const [indexerType, setIndexerType] = useState<IndexerItem['indexer_type']>('torznab');
   const [seeding, setSeeding] = useState<SeedingDraft>(EMPTY_SEEDING_DRAFT);
+  const [packScan, setPackScan] = useState<IndexerItem['pack_scan']>('off');
   const [priority, setPriority] = useState<number>(DEFAULT_INDEXER_PRIORITY);
   const [enabled, setEnabled] = useState<boolean>(true);
 
@@ -94,6 +97,7 @@ export function useIndexerDraft(): IndexerDraft {
     setUrl(indexer.host_url);
     setApiKey('');
     setIndexerType(indexer.indexer_type);
+    setPackScan(indexer.pack_scan);
     setPriority(indexer.priority);
     setEnabled(indexer.enabled);
     setSeeding({
@@ -111,9 +115,10 @@ export function useIndexerDraft(): IndexerDraft {
     setApiKey('');
     setIndexerType('torznab');
     setSeeding(EMPTY_SEEDING_DRAFT);
+    setPackScan('off');
     setPriority(DEFAULT_INDEXER_PRIORITY);
     setEnabled(true);
   }, []);
 
-  return { editingId, name, url, apiKey, indexerType, seeding, priority, enabled, setName, setUrl, setApiKey, setPriority, setEnabled, setSeedingField, startEdit, reset };
+  return { editingId, name, url, apiKey, indexerType, seeding, packScan, priority, enabled, setName, setUrl, setApiKey, setPriority, setEnabled, setPackScan, setSeedingField, startEdit, reset };
 }

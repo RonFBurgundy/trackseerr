@@ -102,6 +102,7 @@ export interface IndexerPayload {
   seed_time_minutes?: number | null;
   discography_seed_time_minutes?: number | null;
   minimum_seeders?: number | null;
+  pack_scan?: IndexerItem['pack_scan'];
 }
 
 /** POST /api/settings/indexers/test body. */

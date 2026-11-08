@@ -115,6 +115,7 @@ const SETTINGS: readonly SettingDef[] = [
   { label: 'Minimum seeders', section: 'media-management', leaf: 'indexers', keywords: 'seed rules seeders torrent' },
   { label: 'Seed time (minutes)', section: 'media-management', leaf: 'indexers', anchor: 'Seed time', keywords: 'seed rules seeding duration torrent' },
   { label: 'Discography seed time (minutes)', section: 'media-management', leaf: 'indexers', anchor: 'Discography seed time', keywords: 'seed rules seeding discography' },
+  { label: 'Index packs', section: 'media-management', leaf: 'indexers', elementId: 'indexer-pack-scan', keywords: 'index packs torznab torrent pool va chart file list qbittorrent' },
   // Import lists
   { label: 'Add import list', section: 'media-management', leaf: 'import-lists', anchor: 'Add list', keywords: 'import list spotify lastfm listenbrainz playlist sync auto add artists' },
   { label: 'Import iTunes / Apple Music library', section: 'media-management', leaf: 'import-lists', anchor: 'Import iTunes', keywords: 'itunes apple music xml import library playlist tracks' },
