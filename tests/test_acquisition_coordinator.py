@@ -484,12 +484,12 @@ def test_search_with_fallback_uses_slskd_path_for_artist():
     assert out == [slskd]
 
 
-def test_search_with_fallback_rung1_unfiltered():
+def test_search_with_fallback_rung1_drops_unrelated_release():
     odd = _result("Totally Unrelated Name")
-    with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[odd]) as m:
+    with patch.object(AcquisitionCoordinator, "search_all_indexers", side_effect=[[odd], [], []]) as m:
         out = AcquisitionCoordinator().search_with_fallback(_MP_ARTIST, _MP_TITLE, None, MagicMock())
-    assert out == [odd]
-    assert m.call_count == 1
+    assert out == []
+    assert m.call_count >= 2
 
 
 def _slskd_file(stem, folder="ALEX - AKUMA (2019)", item_type="track"):
@@ -517,12 +517,93 @@ def test_search_with_fallback_rung1_all_wrong_slskd_falls_through():
     assert m.call_count == 2
 
 
-def test_search_with_fallback_rung1_keeps_torrent_results():
-    torrent = _result("Totally Unrelated Name")
+def test_search_with_fallback_rung1_keeps_relevant_torrent():
+    torrent = _result("ALEX - AKUMA [FLAC]")
     wrong = _slskd_file("01 - 05 - Danger City")
     with patch.object(AcquisitionCoordinator, "search_all_indexers", return_value=[torrent, wrong]):
         out = AcquisitionCoordinator().search_with_fallback("ALEX", "AKUMA", "AKUMA", MagicMock())
     assert out == [torrent]
+
+
+@pytest.mark.parametrize(
+    "artist,title,album,grabbed",
+    [
+        (
+            "The xx",
+            "All on Me",
+            "Coexist",
+            "Haydn The Creation Part II Scene II Part III nmr 16. The Creation, Hob. XXI 2 Part III, XX",
+        ),
+        (
+            "The xx",
+            "17",
+            "I See You",
+            "The.xx-On.Hold.Jamie.xx.Remix-[24BIT]-[WEBFLAC]-[2017]-TDS",
+        ),
+        (
+            "LAV.ISH",
+            "U R",
+            "U R",
+            "Ransom And Harry Fraud-Lavish Misery-24BIT-WEB-FLAC-2024-TiMES",
+        ),
+        (
+            "Metric",
+            'Romanticize the Dive (From the Netflix Series "Nobody Wants This" Season 3)',
+            'Romanticize the Dive (From the Netflix Series "Nobody Wants This" Season 3)',
+            "Erase This Earth-Horrors Unearthed-EP-24BIT-WEB-FLAC-2026-MOONBLOOD",
+        ),
+    ],
+)
+def test_rung1_rejects_live_wrong_grabs(artist, title, album, grabbed):
+    res = AcquisitionSearchResult(
+        download_id="d1",
+        title=grabbed,
+        artist=artist,
+        protocol="usenet",
+        source="newznab",
+        item_type="album",
+    )
+    assert AcquisitionCoordinator()._relevant([res], 1, artist, title, album) == []
+
+
+def test_rung1_keeps_album_release_for_track_request():
+    res = AcquisitionSearchResult(
+        download_id="xx-album",
+        title="The xx - Coexist (2012) [FLAC]",
+        artist="The xx",
+        protocol="usenet",
+        source="newznab",
+        item_type="album",
+    )
+    kept = AcquisitionCoordinator()._relevant([res], 1, "The xx", "All on Me", "Coexist")
+    assert kept == [res]
+
+
+def test_rung1_keeps_single_release_named_after_track():
+    res = AcquisitionSearchResult(
+        download_id="bryan-1",
+        title="Bryan Adams - (Everything I Do) I Do It For You (1991) (CDM) [FLAC] [MP3]",
+        artist="Bryan Adams",
+        protocol="usenet",
+        source="newznab",
+        item_type="album",
+    )
+    kept = AcquisitionCoordinator()._relevant([res], 1, "Bryan Adams", "(Everything I Do) I Do It For You", None)
+    assert kept == [res]
+
+
+def test_rung1_keeps_pack_file_result():
+    res = AcquisitionSearchResult(
+        download_id="coolio-1",
+        title="Coolio Feat. L.V. - Gangsta's Paradise [MP3] (in pack: VA -Top Disco 70'S 80'S 90'S)",
+        artist="Coolio",
+        protocol="torrent",
+        source="torznab",
+        item_type="track",
+        extra={"pack_id": "pack-1"},
+    )
+    kept = AcquisitionCoordinator()._relevant([res], 1, "Coolio", "Gangsta's Paradise", None)
+    assert kept == [res]
 
 
 def test_search_with_fallback_album_request_does_not_filter_slskd_rung1():

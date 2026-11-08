@@ -970,6 +970,21 @@ class AcquisitionCoordinator:
         """True for a Soulseek single-file result, whose title is the file name rather than a release name."""
         return result.protocol == "slskd" and result.item_type == "track"
 
+    @staticmethod
+    def _release_names_item(
+        result: AcquisitionSearchResult,
+        artist: str,
+        title: Optional[str],
+        album: Optional[str],
+    ) -> bool:
+        """True if a usenet/torrent candidate names the artist and either the track title or the album."""
+        text = AcquisitionCoordinator._candidate_text(result)
+        if matches_request(text, artist, title, album):
+            return True
+        if album and matches_request(text, artist, None, album):
+            return True
+        return False
+
     def _relevant(
         self,
         results: list[AcquisitionSearchResult],
@@ -978,14 +993,15 @@ class AcquisitionCoordinator:
         title: Optional[str],
         album: Optional[str],
     ) -> list[AcquisitionSearchResult]:
-        """Relevance filter for one rung. Rung 1 only filters Soulseek files of a track request; later rungs filter all."""
+        """Relevance filter for one rung. Rung 1 requires usenet/torrent results to name the artist and the title or album, and filters Soulseek files by track name; later rungs filter all."""
         if number == 1 and not title:
             return results
         kept = []
         for r in results:
             slskd_file = self._is_slskd_file(r)
             if number == 1 and not slskd_file:
-                kept.append(r)
+                if self._release_names_item(r, artist, title, album):
+                    kept.append(r)
                 continue
             if not matches_request(
                 self._candidate_text(r),
@@ -1054,7 +1070,7 @@ class AcquisitionCoordinator:
     ) -> list[AcquisitionSearchResult]:
         """Searches with the raw query, then simpler rungs, returning the first non-empty result list.
 
-        Rung 1 is unfiltered except Soulseek files of a track request (matched by file name); later rungs keep only results that pass ``matches_request``
+        Rung 1 requires usenet/torrent results to name the artist and the title or album (and Soulseek files of a track request matched by file name); later rungs keep only results that pass ``matches_request``
         against the ORIGINAL title/album so a loose query cannot grab the wrong release.
         """
         if _artist_banned(artist):
