@@ -20,7 +20,7 @@ TORZNAB_RESULTS_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <title>Pink Floyd - The Dark Side of the Moon (1973) [FLAC]</title>
       <guid>http://prowlarr:9696/1/details/101</guid>
       <size>280000000</size>
-      <category>3020</category>
+      <category>3040</category>
       <enclosure url="magnet:?xt=urn:btih:fedcba9876543210fedcba9876543210fedcba98&amp;dn=Pink+Floyd" length="280000000" type="application/x-bittorrent" />
       <torznab:attr name="seeders" value="25" />
       <torznab:attr name="peers" value="30" />

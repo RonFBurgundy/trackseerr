@@ -183,6 +183,16 @@ TASKS: dict[str, TaskSpec] = {
             _presets(_HOUR),
             group=GROUP_MAINTENANCE,
         ),
+        # Reads torrent pack file lists from pack-scanning indexers.
+        TaskSpec(
+            "pack_index",
+            "Pack Index",
+            "Reads the file lists of pack and pool torrents from indexers set to index packs, so songs inside them can be found. Only the small .torrent files are downloaded.",
+            KIND_INTERVAL,
+            6 * _HOUR,
+            _presets(_HOUR),
+            group=GROUP_ACQUISITION,
+        ),
         # Walks the whole music folder and the media server index: heavy, so daily at most.
         TaskSpec(
             "library_health",
@@ -380,6 +390,8 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "LibraryHealthCheck": "library_health",
     "SeedCleanupWorkerThread": "seed_cleanup",
     "SeedCleanup": "seed_cleanup",
+    "PackIndexWorkerThread": "pack_index",
+    "ManualPackIndexTask": "pack_index",
     "RecycleBinWorkerThread": "recycle_bin_cleanup",
     "RecycleBinCleanup": "recycle_bin_cleanup",
     "ArtStartupBackfill": "art_thumbnail_backfill",
@@ -700,6 +712,7 @@ PAUSABLE_TASKS: frozenset[str] = frozenset({
     "art_thumbnail_backfill",
     "mix_generation",
     "seed_cleanup",
+    "pack_index",
     "recycle_bin_cleanup",
     "backup",
     "update_check",

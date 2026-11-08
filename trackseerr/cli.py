@@ -514,6 +514,11 @@ def _start_local_workers(db: Database, config: Config) -> None:
     logger.info("Starting SeedCleanupWorker (daily finished-torrent sweep)")
     seed_cleanup_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "seed_cleanup"))
 
+    from .pack_scanner import pack_index_worker
+
+    logger.info("Starting PackIndexWorker (torrent pack and pool indexing)")
+    pack_index_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "pack_index"))
+
     from .recycle_bin import recycle_bin_worker
 
     logger.info("Starting RecycleBinWorker (daily recycle bin cleanup)")
@@ -898,6 +903,7 @@ def _serve(
                 ("ImportListWorker", "import_list_worker", "import_list_worker"),
                 ("LibraryHealthWorker", "library_health", "library_health_worker"),
                 ("SeedCleanupWorker", "seed_cleanup", "seed_cleanup_worker"),
+                ("PackIndexWorker", "pack_scanner", "pack_index_worker"),
                 ("RecycleBinWorker", "recycle_bin", "recycle_bin_worker"),
             ):
                 try:

@@ -3,6 +3,7 @@
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 import logging
+import re
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -130,6 +131,15 @@ def _extract_error_description(xml_text: str) -> Optional[str]:
     return None
 
 
+VIDEO_TITLE_RE = re.compile(
+    r"\b(?:"
+    r"x264|x265|h\.?26[45]|hevc|xvid|divx|720p|1080p|2160p|4k|uhd|hdr"
+    r"|bluray|blu-ray|bdrip|brrip|dvdrip|dvd5|dvd9|mdvdr|hdtv|webrip|web-dl|uhdtv"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
 class TorznabDriver(AcquisitionDriver):
     """Client for Torznab / Newznab XML indexers (Prowlarr, Jackett, NZBGeek, etc.)."""
 
@@ -212,19 +222,28 @@ class TorznabDriver(AcquisitionDriver):
             if enc_len and enc_len.isdigit():
                 size_bytes = int(enc_len)
 
-        # Parse torznab:attr elements
+        # Parse torznab:attr elements and categories
         seeders = None
         leechers = None
         bitrate = None
         fmt = None
         magnet_url = None
+        categories: list[int | str] = []
+
+        for cat_elem in item.findall("category"):
+            if cat_elem.text and cat_elem.text.strip():
+                txt = cat_elem.text.strip()
+                categories.append(int(txt) if txt.isdigit() else txt)
 
         for elem in item:
             tag_lower = elem.tag.lower()
             if tag_lower.endswith("attr"):
                 attr_name = elem.get("name", "").lower()
                 attr_val = elem.get("value", "")
-                if attr_name == "seeders" and attr_val.isdigit():
+                if attr_name == "category" and attr_val.strip():
+                    txt = attr_val.strip()
+                    categories.append(int(txt) if txt.isdigit() else txt)
+                elif attr_name == "seeders" and attr_val.isdigit():
                     seeders = int(attr_val)
                 elif attr_name in ("peers", "leechers") and attr_val.isdigit():
                     leechers = int(attr_val)
@@ -234,6 +253,16 @@ class TorznabDriver(AcquisitionDriver):
                     fmt = attr_val.lower()
                 elif attr_name == "magneturl":
                     magnet_url = attr_val
+
+        # Video filter: drop item if category is 3020 or in 2000-2999 / 5000-5999,
+        # or if the title matches video regex.
+        if VIDEO_TITLE_RE.search(item_title):
+            return None
+
+        for cat in categories:
+            val = int(cat) if isinstance(cat, int) or (isinstance(cat, str) and cat.isdigit()) else None
+            if val is not None and (val == 3020 or 2000 <= val <= 2999 or 5000 <= val <= 5999):
+                return None
 
         if download_url and download_url.startswith("magnet:") and not magnet_url:
             magnet_url = download_url
@@ -273,7 +302,7 @@ class TorznabDriver(AcquisitionDriver):
             download_url=download_url,
             magnet_url=magnet_url,
             source=self.indexer_type,
-            extra={"raw_title": item_title},
+            extra={"raw_title": item_title, "categories": categories},
         )
 
     def _get_search_mode(self) -> str:
@@ -431,6 +460,97 @@ class TorznabDriver(AcquisitionDriver):
             logger.error("Unexpected error in fetch_recent: %s", e)
             return []
 
+    def fetch_page(
+        self, offset: int = 0, limit: int = 100
+    ) -> list[AcquisitionSearchResult]:
+        """Paginates indexer releases using t=search without query."""
+        if not is_safe_service_url(self.host_url):
+            logger.error("Prohibited indexer host URL: %s", self.host_url)
+            return []
+
+        url = self._api_url(t="search", cat=self.categories, offset=offset, limit=limit)
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.get(url)
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            raise IndexerUnavailable(str(e)) from e
+
+        _raise_for_status(resp)
+
+        try:
+            root = ET.fromstring(resp.text)
+        except ET.ParseError as e:
+            raise IndexerUnavailable("Unreadable reply from indexer") from e
+
+        _raise_for_error_reply(root)
+
+        channel = root.find("channel")
+        if channel is None:
+            return []
+
+        results: list[AcquisitionSearchResult] = []
+        for item in channel.findall("item"):
+            res = self._parse_item(item)
+            if res is not None:
+                results.append(res)
+
+        return results
+
+    def fetch_torrent(
+        self, url: str, max_bytes: int = 10 * 1024 * 1024
+    ) -> bytes | str:
+        """Fetches a torrent file by following up to 3 redirects manually.
+
+        Returns bytes of the torrent file, or a magnet URL string if redirected to magnet.
+        Never logs the URL as it carries API keys / passkeys.
+        """
+        current_url = url
+        for _hop in range(4):
+            if current_url.startswith("magnet:"):
+                return current_url
+
+            if not is_safe_service_url(current_url):
+                raise IndexerUnavailable("Prohibited torrent URL (SSRF defense)")
+
+            try:
+                with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
+                    with client.stream("GET", current_url) as resp:
+                        if resp.status_code in (301, 302, 303, 307, 308):
+                            loc = resp.headers.get("Location")
+                            if not loc:
+                                raise IndexerUnavailable(
+                                    f"HTTP {resp.status_code} redirect without Location header"
+                                )
+                            if loc.startswith("magnet:"):
+                                return loc
+                            current_url = str(httpx.URL(current_url).join(loc))
+                            continue
+
+                        _raise_for_status(resp)
+
+                        cl = resp.headers.get("Content-Length")
+                        if cl and cl.isdigit() and int(cl) > max_bytes:
+                            raise IndexerUnavailable(
+                                f"Torrent file exceeds size limit of {max_bytes} bytes"
+                            )
+
+                        chunks: list[bytes] = []
+                        total_bytes = 0
+                        for chunk in resp.iter_bytes(chunk_size=65536):
+                            total_bytes += len(chunk)
+                            if total_bytes > max_bytes:
+                                raise IndexerUnavailable(
+                                    f"Torrent file exceeds size limit of {max_bytes} bytes"
+                                )
+                            chunks.append(chunk)
+
+                        return b"".join(chunks)
+
+            except (httpx.HTTPError, httpx.TimeoutException) as e:
+                raise IndexerUnavailable(str(e)) from e
+
+        raise IndexerUnavailable("Too many redirects fetching torrent")
+
     def download(self, result: AcquisitionSearchResult) -> str:
         """Torznab is an indexer; downloads are dispatched to a download client."""
         return result.magnet_url or result.download_url or result.download_id
@@ -459,5 +579,6 @@ __all__ = [
     "IndexerUnavailable",
     "IndexerUnsupported",
     "TorznabDriver",
+    "VIDEO_TITLE_RE",
     "reset_search_mode_cache",
 ]

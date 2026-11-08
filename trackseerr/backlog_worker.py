@@ -1556,6 +1556,18 @@ class RSSSyncWorker:
             if recent_releases is None:
                 continue
 
+            if str(idx_cfg.get("pack_scan") or "off").lower() != "off":
+                try:
+                    from trackseerr.pack_scanner import collect_from_releases
+
+                    collect_from_releases(db, idx_cfg, recent_releases)
+                except sqlite3.Error as exc:
+                    logger.warning(
+                        "RSSSyncWorker failed to collect pack releases from %s: %s",
+                        idx_cfg.get("name") or idx_cfg.get("id"),
+                        exc,
+                    )
+
             for candidate in recent_releases:
                 if self._stop_event.is_set():
                     break
