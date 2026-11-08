@@ -90,6 +90,18 @@ _RE_192 = re.compile(r"(?i)\b192\s*(?:kbps|k)?\b")
 _RE_V0 = re.compile(r"(?i)(?:\bv0\b|\bvbr[-_ ]?v0\b|\bvbr[-_ ]?0\b)")
 
 
+def strip_trailing_bpm(title: str) -> str | None:
+    """Return title with trailing 60-200 number removed, or None if no such trailing number."""
+    if not title:
+        return None
+    bm = _TRAILING_BPM_RE.search(title)
+    if bm:
+        bpm_val = int(bm.group(1))
+        if 60 <= bpm_val <= 200:
+            return title[: bm.start()].rstrip()
+    return None
+
+
 def _extract_trailing_bpm_key(current: str, extras: dict[str, Any]) -> str:
     changed = True
     while changed:
@@ -173,16 +185,24 @@ def _extract_featured(current: str, extras: dict[str, Any]) -> str:
     return current
 
 
+_POOL_BRACKET_RE = re.compile(
+    r"(?i)\[\s*(?:[a-z0-9_.\s-]*pool|dj\s*city|bpm\s*supreme|direct\s*music\s*service|promo\s*only|www\.[^\]]*)[^\]]*\]"
+)
+
+
 def clean_pool_title(title: str) -> tuple[str, dict[str, Any]]:
     """Clean DJ-pool decorations from title and return (cleaned_title, extras).
 
     Removes trailing BPM, Camelot/Open keys, edit kinds, variants, featured artist,
     and pool watermarks, while preserving remix/edit/mix names in the title.
+    When a trailing 60-200 number is the only pool decoration, the title is returned
+    WITHOUT the BPM removed (to avoid stripping real numbers like 'Summer of 69').
     """
     if not title:
         return ("", {})
 
     extras: dict[str, Any] = {}
+    has_pool_bracket = bool(_POOL_BRACKET_RE.search(title))
     current = title.strip()
     current = _WATERMARK_WWW_RE.sub(" ", current)
     current = _WATERMARK_POOL_RE.sub(" ", current)
@@ -193,6 +213,23 @@ def clean_pool_title(title: str) -> tuple[str, dict[str, Any]]:
     current = _strip_trailing_bracket_tags(current)
     current = re.sub(r"\s+", " ", current).strip()
     current = re.sub(r"\s*-\s*$", "", current).strip()
+
+    if "bpm" in extras:
+        has_other_decorations = (
+            "key" in extras
+            or "variant" in extras
+            or "edit_kind" in extras
+            or "featured" in extras
+            or has_pool_bracket
+        )
+        if has_other_decorations:
+            extras["bpm_stripped"] = True
+        else:
+            extras["bpm_stripped"] = False
+            current = title.strip()
+            current = re.sub(r"\s+", " ", current).strip()
+            current = re.sub(r"\s*-\s*$", "", current).strip()
+
     return (current, extras)
 
 

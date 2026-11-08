@@ -22,6 +22,7 @@ from trackseerr.pack_index import (
     clean_pool_title,
     parse_pack_file,
     search_text,
+    strip_trailing_bpm,
 )
 
 logger = logging.getLogger("trackseerr.pack_index_store")
@@ -361,7 +362,13 @@ class PackIndexStoreMixin:
             if _variant_qualifier_blocks(variant, edit_kind, title, wanted_variant):
                 continue
 
-            if not titles_match(cand_title, wanted_clean):
+            matches_title = titles_match(cand_title, wanted_clean)
+            if not matches_title and not strip_trailing_bpm(wanted_clean):
+                cand_no_bpm = strip_trailing_bpm(cand_title)
+                if cand_no_bpm:
+                    matches_title = titles_match(cand_no_bpm, wanted_clean)
+
+            if not matches_title:
                 continue
 
             cand_artist_source = r["parsed_artist"] or r["path"]
