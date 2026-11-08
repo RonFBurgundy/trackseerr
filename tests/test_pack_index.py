@@ -5,10 +5,14 @@ from pathlib import Path
 import sqlite3
 
 from trackseerr.pack_index import (
+    clean_pool_title,
+    infer_audio_quality,
     looks_like_pack,
     parse_pack_file,
     search_text,
 )
+from trackseerr.pack_scanner import get_pack_backfill_pages
+from trackseerr.quality import parse_release_title
 from trackseerr.storage import Database
 
 
@@ -301,6 +305,262 @@ def test_pack_store_lifecycle_and_search(tmp_path: Path) -> None:
             ).fetchone()[0]
             == 0
         )
+
+    finally:
+        db.close()
+
+
+def test_clean_pool_title() -> None:
+    # 1. Live evidence: remix kept, bpm, edit_kind, featured extracted
+    title, extras = clean_pool_title("Titanium Ft Sia (Alesso Remix) (Clean) 126")
+    assert title == "Titanium (Alesso Remix)"
+    assert extras["bpm"] == 126
+    assert extras["edit_kind"] == "Clean"
+    assert extras["featured"] == "Sia"
+
+    # 2. Key and BPM trailing, Dirty edit
+    title, extras = clean_pool_title("Titanium Ft Sia (Dirty) 126 8A")
+    assert title == "Titanium"
+    assert extras["bpm"] == 126
+    assert extras["key"] == "8A"
+    assert extras["edit_kind"] == "Dirty"
+    assert extras["featured"] == "Sia"
+
+    # 3. Variants: Intro Clean, Acapella, Instrumental, DJ Tool, Quick Hit
+    t, e = clean_pool_title("Song (Intro Clean) 128 4A [www.djpool.com]")
+    assert t == "Song"
+    assert e["variant"] == "Intro Clean"
+    assert e["edit_kind"] == "Clean"
+    assert e["bpm"] == 128
+    assert e["key"] == "4A"
+
+    t, e = clean_pool_title("Song (Acapella) 124")
+    assert t == "Song"
+    assert e["variant"] == "Acapella"
+
+    t, e = clean_pool_title("Song (Instrumental)")
+    assert t == "Song"
+    assert e["variant"] == "Instrumental"
+
+    t, e = clean_pool_title("Song (Inst)")
+    assert t == "Song"
+    assert e["variant"] == "Instrumental"
+
+    t, e = clean_pool_title("Song (DJ Tool)")
+    assert t == "Song"
+    assert e["variant"] == "DJ Tool"
+
+    t, e = clean_pool_title("Song (Quick Hit) 120")
+    assert t == "Song"
+    assert e["variant"] == "Quick Hit"
+    assert e["edit_kind"] == "Quick Hit"
+
+    t, e = clean_pool_title("Song (Short Edit)")
+    assert t == "Song"
+    assert e["variant"] == "Short Edit"
+
+    t, e = clean_pool_title("Song (Clean Edit)")
+    assert t == "Song"
+    assert e["edit_kind"] == "Clean Edit"
+
+    t, e = clean_pool_title("Song (Dirty Edit)")
+    assert t == "Song"
+    assert e["edit_kind"] == "Dirty Edit"
+
+    # 4. Keep mixes like (Extended Mix), (Radio Edit)
+    t, _ = clean_pool_title("Song (Extended Mix)")
+    assert t == "Song (Extended Mix)"
+
+    t, _ = clean_pool_title("Song (Radio Edit)")
+    assert t == "Song (Radio Edit)"
+
+
+def test_parse_pack_file_with_dj_pool_names() -> None:
+    # Featured Sia extracted and appended to artist, title cleaned
+    artist, title = parse_pack_file("David Guetta - Titanium Ft Sia (Dirty) 126 8A.mp3")
+    assert artist == "David Guetta feat. Sia"
+    assert title == "Titanium"
+
+    # Evidence file: remix preserved in title
+    artist, title = parse_pack_file("David Guetta - Titanium Ft Sia (Alesso Remix) (Clean) 126.mp3")
+    assert artist == "David Guetta feat. Sia"
+    assert title == "Titanium (Alesso Remix)"
+
+
+def test_infer_audio_quality() -> None:
+    # FLAC
+    assert infer_audio_quality(".flac", "01 Song.flac", "Pack Title") == "FLAC"
+    p = parse_release_title(infer_audio_quality(".flac", "01 Song.flac", "Pack Title"))
+    assert p.quality == "FLAC 16bit"
+
+    # MP3 320 in file name
+    assert infer_audio_quality(".mp3", "Artist - Song 320.mp3", "Pack Title") == "MP3 320"
+    p = parse_release_title(infer_audio_quality(".mp3", "Artist - Song 320.mp3", "Pack Title"))
+    assert p.quality == "MP3 320"
+    assert p.bitrate_kbps == 320
+
+    # MP3 320 in pack title
+    assert infer_audio_quality(".mp3", "Artist - Song.mp3", "Dj Pools Music Pack [09 Aug 2026] 320kbps") == "MP3 320"
+
+    # MP3 256, 192, V0
+    assert infer_audio_quality(".mp3", "Song 256k.mp3", "Pack") == "MP3 256"
+    assert infer_audio_quality(".mp3", "Song 192kbps.mp3", "Pack") == "MP3 192"
+    assert infer_audio_quality(".mp3", "Song V0.mp3", "Pack") == "MP3 V0"
+
+    # Plain MP3 without bitrate
+    assert infer_audio_quality(".mp3", "Song.mp3", "Pack") == "MP3"
+
+    # AAC, WAV, AIFF
+    assert infer_audio_quality(".m4a", "Song.m4a", "Pack") == "AAC"
+    assert infer_audio_quality(".aac", "Song.aac", "Pack") == "AAC"
+    assert infer_audio_quality(".wav", "Song.wav", "Pack") == "WAV"
+    assert infer_audio_quality(".aiff", "Song.aiff", "Pack") == "AIFF"
+
+
+def test_evidence_file_matching_and_variants(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "evidence_test.db"))
+    try:
+        idx = db.create_indexer(
+            {"id": "idx-ev", "name": "PoolIndexer", "indexer_type": "torznab", "host_url": "https://pool.org"}
+        )
+        pr = db.upsert_pack_release(
+            indexer_id=idx["id"],
+            guid="guid-ev",
+            title="Dj Pools Music Pack [09 Aug 2026] 320kbps",
+            scan_status="scanned",
+            seeders=20,
+        )
+        files = [
+            {"file_index": 0, "path": "David Guetta - Titanium Ft Sia (Alesso Remix) (Clean) 126.mp3", "size_bytes": 8000000},
+            {"file_index": 1, "path": "David Guetta - Titanium Ft Sia (Dirty) 126 8A.mp3", "size_bytes": 8100000},
+            {"file_index": 2, "path": "David Guetta - Titanium (Clean) 126.mp3", "size_bytes": 8000000},
+            {"file_index": 3, "path": "David Guetta - Titanium (Intro Clean) 128 4A.mp3", "size_bytes": 9000000},
+            {"file_index": 4, "path": "David Guetta - Titanium (Acapella) 126.mp3", "size_bytes": 6000000},
+            {"file_index": 5, "path": "David Guetta - Titanium (Instrumental).mp3", "size_bytes": 7500000},
+            {"file_index": 6, "path": "David Guetta - Titanium (Quick Hit) 124.mp3", "size_bytes": 4000000},
+            {"file_index": 7, "path": "David Guetta - Titanium (Extended Mix).mp3", "size_bytes": 10000000},
+        ]
+        db.record_pack_files(pr["id"], files)
+
+        # 1. Plain "Titanium":
+        # Evidence remix file does NOT match plain "Titanium"
+        matches = db.search_pack_files("David Guetta", "Titanium")
+        matched_paths = [m.path for m in matches]
+        assert "David Guetta - Titanium Ft Sia (Alesso Remix) (Clean) 126.mp3" not in matched_paths
+        # David Guetta - Titanium Ft Sia (Dirty) 126 8A.mp3 DOES match plain Titanium
+        assert "David Guetta - Titanium Ft Sia (Dirty) 126 8A.mp3" in matched_paths
+        # Intro, Acapella, Instrumental, Quick Hit do NOT match plain Titanium
+        assert "David Guetta - Titanium (Intro Clean) 128 4A.mp3" not in matched_paths
+        assert "David Guetta - Titanium (Acapella) 126.mp3" not in matched_paths
+        assert "David Guetta - Titanium (Instrumental).mp3" not in matched_paths
+        assert "David Guetta - Titanium (Quick Hit) 124.mp3" not in matched_paths
+
+        # Clean/Dirty preference: Dirty comes before Clean
+        dirty_idx = matched_paths.index("David Guetta - Titanium Ft Sia (Dirty) 126 8A.mp3")
+        clean_idx = matched_paths.index("David Guetta - Titanium (Clean) 126.mp3")
+        assert dirty_idx < clean_idx
+
+        # 2. Evidence remix matches when explicitly wanted
+        remix_matches = db.search_pack_files("David Guetta", "Titanium (Alesso Remix)")
+        assert len(remix_matches) == 1
+        assert remix_matches[0].path == "David Guetta - Titanium Ft Sia (Alesso Remix) (Clean) 126.mp3"
+        assert remix_matches[0].parsed_title == "Titanium (Alesso Remix)"
+        assert remix_matches[0].edit_kind == "Clean"
+        assert remix_matches[0].bpm == 126
+
+        # 3. Variants match when asked
+        intro_matches = db.search_pack_files("David Guetta", "Titanium (Intro)")
+        assert any(m.path == "David Guetta - Titanium (Intro Clean) 128 4A.mp3" for m in intro_matches)
+
+        acap_matches = db.search_pack_files("David Guetta", "Titanium (Acapella)")
+        assert any(m.path == "David Guetta - Titanium (Acapella) 126.mp3" for m in acap_matches)
+
+        inst_matches = db.search_pack_files("David Guetta", "Titanium (Instrumental)")
+        assert any(m.path == "David Guetta - Titanium (Instrumental).mp3" for m in inst_matches)
+
+        qh_matches = db.search_pack_files("David Guetta", "Titanium (Quick Hit)")
+        assert any(m.path == "David Guetta - Titanium (Quick Hit) 124.mp3" for m in qh_matches)
+
+        # 4. Extended preferred over Radio when wanted asks for Extended
+        ext_matches = db.search_pack_files("David Guetta", "Titanium (Extended Mix)")
+        assert len(ext_matches) >= 1
+        assert ext_matches[0].path == "David Guetta - Titanium (Extended Mix).mp3"
+
+    finally:
+        db.close()
+
+
+def test_reparse_pack_files_marker(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "reparse_test.db"))
+    try:
+        idx = db.create_indexer(
+            {"id": "idx-rp", "name": "Indexer", "indexer_type": "torznab", "host_url": "https://test.org"}
+        )
+        pr = db.upsert_pack_release(
+            indexer_id=idx["id"],
+            guid="guid-rp",
+            title="Pack 320",
+            scan_status="scanned",
+        )
+        # Directly insert old-format uncleaned row
+        db.conn.execute(
+            """
+            INSERT INTO pack_files (pack_id, file_index, path, size_bytes, ext, parsed_artist, parsed_title)
+            VALUES (?, 0, 'David Guetta - Titanium Ft Sia (Alesso Remix) (Clean) 126.mp3', 8000000, '.mp3', 'David Guetta', 'Titanium Ft Sia (Alesso Remix) (Clean) 126')
+            """,
+            (pr["id"],),
+        )
+        db.conn.execute(
+            "INSERT INTO pack_files_fts (search, pack_id, file_index) VALUES ('david guetta titanium', ?, 0)",
+            (pr["id"],),
+        )
+        db.conn.commit()
+
+        # Marker is not yet set
+        assert db.get_kv("pack_names_v2") is None
+
+        # First run of reparse updates rows and sets marker
+        reparsed = db.reparse_pack_files()
+        assert reparsed == 1
+        assert db.get_kv("pack_names_v2") == "1"
+
+        # Verify row updated
+        row = db.conn.execute(
+            "SELECT parsed_artist, parsed_title FROM pack_files WHERE pack_id = ? AND file_index = 0",
+            (pr["id"],),
+        ).fetchone()
+        assert row["parsed_artist"] == "David Guetta feat. Sia"
+        assert row["parsed_title"] == "Titanium (Alesso Remix)"
+
+        # Second run returns 0 and does not reparse
+        second_run = db.reparse_pack_files()
+        assert second_run == 0
+
+    finally:
+        db.close()
+
+
+def test_pack_backfill_pages_setting(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "backfill_pages.db"))
+    try:
+        # Default is 5
+        assert get_pack_backfill_pages(db) == 5
+
+        # Custom value
+        db.set_kv("pack_backfill_pages", "10")
+        assert get_pack_backfill_pages(db) == 10
+
+        # Clamped low to 1
+        db.set_kv("pack_backfill_pages", "0")
+        assert get_pack_backfill_pages(db) == 1
+
+        # Clamped high to 50
+        db.set_kv("pack_backfill_pages", "100")
+        assert get_pack_backfill_pages(db) == 50
+
+        # Invalid string defaults to 5
+        db.set_kv("pack_backfill_pages", "invalid")
+        assert get_pack_backfill_pages(db) == 5
 
     finally:
         db.close()

@@ -199,6 +199,14 @@ def _task_progress(task_id: str, running: bool) -> Optional[TaskProgress]:
     if task_id == "lidarr_migration" and lidarr_migration_job.is_running():
         processed, total, mig_message = lidarr_migration_job.progress_snapshot()
         return TaskProgress(current=processed, total=total or None, message=mig_message)
+    if task_id == "pack_index":
+        current, total = pack_scanner.get_progress()
+        msg = job_tracker.running_message(task_id) or getattr(pack_scanner, "_progress_message", None)
+        return TaskProgress(
+            current=current if total else None,
+            total=total or None,
+            message=redact_text(msg) if msg else None,
+        )
     snap = task_manager.manual_run_progress(task_id)
     if snap:
         msg = job_tracker.running_message(task_id)

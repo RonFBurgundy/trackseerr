@@ -61,6 +61,7 @@ from trackseerr.decision_engine import (
     resolve_durations,
 )
 from trackseerr import delay_gate, quality_unavailable
+from trackseerr.pack_index import infer_audio_quality
 from trackseerr.quality import evaluate_release, parse_release_title
 from trackseerr.quality_defaults import entry_qualities, is_v2_items, normalize_entries
 from trackseerr.seed_rules import apply_seed_rules_at_grab
@@ -778,7 +779,8 @@ def _search_pack_index(
         min_seeders = idx_cfg.get("minimum_seeders")
 
         filename = Path(m.path.replace("\\", "/")).name
-        parsed = parse_release_title(filename)
+        quality_hint = infer_audio_quality(m.ext or "", m.path, m.pack_title)
+        parsed = parse_release_title(f"{filename} [{quality_hint}]")
 
         ext_clean = (m.ext or "").lstrip(".").upper()
         cand_artist = m.parsed_artist or artist
@@ -807,8 +809,8 @@ def _search_pack_index(
             item_type="track",
             size_bytes=int(m.size_bytes or 0),
             bit_rate=parsed.bitrate_kbps,
-            format=(m.ext or "").lstrip(".").lower() or None,
-            quality_str=parsed.quality if parsed.quality and parsed.quality != "Unknown" else None,
+            format=(m.ext or "").lstrip(".").lower() or quality_hint.split()[0].lower() or None,
+            quality_str=parsed.quality if parsed.quality and parsed.quality != "Unknown" else (quality_hint if quality_hint != "Unknown" else None),
             seeders=m.seeders,
             download_url=m.download_url,
             magnet_url=m.magnet_url,
