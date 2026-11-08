@@ -14,11 +14,14 @@ from trackseerr.models import AcquisitionSearchResult
 from trackseerr.pack_scanner import (
     LAST_BACKFILL_KV,
     LAST_RUN_KV,
+    PACK_SEARCH_TERMS_DEFAULT,
     PackIndexWorker,
     PackScannerBusy,
     _format_sweep_summary,
     backfill,
     collect_from_releases,
+    get_pack_search_pages,
+    get_pack_search_terms,
     get_progress,
     get_status,
     is_running,
@@ -353,8 +356,8 @@ def test_backfill_pages_and_prune(db: Database) -> None:
         "pack_scan": "auto",
     })
 
-    def fake_fetch_page(offset: int = 0, limit: int = 100):
-        if offset >= 200:
+    def fake_fetch_page(offset: int = 0, limit: int = 100, query: str | None = None):
+        if offset >= 200 or query is not None:
             return []
         page_num = offset // 100
         return [
@@ -384,6 +387,141 @@ def test_backfill_pages_and_prune(db: Database) -> None:
             assert res["collected"] == 4  # 2 pages * 2 releases
             assert res["scanned"] == 4
             assert mock_prune.called
+
+
+def test_pack_search_terms_from_kv(db: Database) -> None:
+    # Default terms when KV is missing
+    assert get_pack_search_terms(db) == list(PACK_SEARCH_TERMS_DEFAULT)
+    assert get_pack_search_pages(db) == 3
+
+    # Custom terms
+    custom = ["custom_pack", "edm_pool"]
+    db.set_kv("pack_search_terms", json.dumps(custom))
+    assert get_pack_search_terms(db) == custom
+
+    # Clamping search pages
+    db.set_kv("pack_search_pages", "10")
+    assert get_pack_search_pages(db) == 10
+    db.set_kv("pack_search_pages", "99")
+    assert get_pack_search_pages(db) == 20
+    db.set_kv("pack_search_pages", "0")
+    assert get_pack_search_pages(db) == 1
+
+    # Corrupted / invalid JSON falls back to default
+    db.set_kv("pack_search_terms", "not a valid json")
+    assert get_pack_search_terms(db) == list(PACK_SEARCH_TERMS_DEFAULT)
+
+    # Empty list falls back to default
+    db.set_kv("pack_search_terms", json.dumps([]))
+    assert get_pack_search_terms(db) == list(PACK_SEARCH_TERMS_DEFAULT)
+
+    # Non-list JSON falls back to default
+    db.set_kv("pack_search_terms", json.dumps({"a": "b"}))
+    assert get_pack_search_terms(db) == list(PACK_SEARCH_TERMS_DEFAULT)
+
+
+def test_backfill_searches_pack_terms(db: Database) -> None:
+    db.create_indexer({
+        "id": "idx-search-terms",
+        "name": "IndexerTerms",
+        "indexer_type": "torznab",
+        "host_url": "http://indexer.local",
+        "pack_scan": "auto",
+    })
+
+    recorded_calls: list[dict[str, Any]] = []
+
+    def fake_fetch_page(offset: int = 0, limit: int = 100, query: str | None = None):
+        recorded_calls.append({"offset": offset, "limit": limit, "query": query})
+        if query:
+            return [
+                AcquisitionSearchResult(
+                    download_id=f"dl-{query}-{offset}",
+                    title=f"Dj Pools Music Pack {query} Vol {offset}",
+                    artist="VA",
+                    album="Packs",
+                    download_url=f"http://indexer.local/dl/{query}_{offset}.torrent",
+                    size_bytes=100000000,
+                    seeders=10,
+                    source="torznab",
+                    protocol="torrent",
+                )
+            ]
+        return []
+
+    mock_driver = MagicMock(spec=TorznabDriver)
+    mock_driver.fetch_page.side_effect = fake_fetch_page
+    mock_driver.fetch_torrent.return_value = make_test_torrent_bytes()
+
+    with patch("trackseerr.pack_scanner.get_indexer_driver", return_value=mock_driver):
+        res = backfill(db, pages=1)
+        # 1 call without query (page 0 returned empty, so stopped)
+        # plus search terms calls: each default term queried
+        queried_terms = [c["query"] for c in recorded_calls if c["query"] is not None]
+        for term in PACK_SEARCH_TERMS_DEFAULT:
+            assert term in queried_terms
+        assert res["collected"] >= len(PACK_SEARCH_TERMS_DEFAULT)
+
+
+def test_backfill_term_stops_on_empty_page(db: Database) -> None:
+    db.create_indexer({
+        "id": "idx-term-empty",
+        "name": "IndexerEmpty",
+        "indexer_type": "torznab",
+        "host_url": "http://indexer.local",
+        "pack_scan": "auto",
+    })
+
+    db.set_kv("pack_search_terms", json.dumps(["term1"]))
+    db.set_kv("pack_search_pages", "5")
+
+    calls = []
+
+    def fake_fetch_page(offset: int = 0, limit: int = 100, query: str | None = None):
+        calls.append((offset, query))
+        # Empty results immediately
+        return []
+
+    mock_driver = MagicMock(spec=TorznabDriver)
+    mock_driver.fetch_page.side_effect = fake_fetch_page
+
+    with patch("trackseerr.pack_scanner.get_indexer_driver", return_value=mock_driver):
+        backfill(db, pages=1)
+        term_calls = [c for c in calls if c[1] == "term1"]
+        # Term stopped after page 0 (offset 0) because it returned empty results
+        assert len(term_calls) == 1
+        assert term_calls[0][0] == 0
+
+
+def test_backfill_term_error_stops_indexer(db: Database) -> None:
+    db.create_indexer({
+        "id": "idx-term-err",
+        "name": "IndexerErr",
+        "indexer_type": "torznab",
+        "host_url": "http://indexer.local",
+        "pack_scan": "auto",
+    })
+
+    db.set_kv("pack_search_terms", json.dumps(["term1", "term2"]))
+
+    calls = []
+
+    def fake_fetch_page(offset: int = 0, limit: int = 100, query: str | None = None):
+        calls.append((offset, query))
+        if query == "term1":
+            raise IndexerRateLimited("Rate limited on term1")
+        return []
+
+    mock_driver = MagicMock(spec=TorznabDriver)
+    mock_driver.fetch_page.side_effect = fake_fetch_page
+
+    with patch("trackseerr.pack_scanner.get_indexer_driver", return_value=mock_driver):
+        res = backfill(db, pages=1)
+        assert res["errors"] >= 1
+        term_calls = [c[1] for c in calls if c[1] is not None]
+        # term1 was called, error raised, term2 was NOT called
+        assert "term1" in term_calls
+        assert "term2" not in term_calls
 
 
 def test_rss_run_calls_collect_and_survives_error(db: Database) -> None:
@@ -452,19 +590,53 @@ def test_run_sweep_24h_cadence(db: Database) -> None:
     with patch("trackseerr.pack_scanner.backfill", return_value={"collected": 10, "scanned": 10, "skipped": 0, "failed": 0, "errors": 0, "pruned": 0}) as mock_bf:
         with patch("trackseerr.pack_scanner.scan_pending", return_value={"scanned": 5, "skipped": 0, "failed": 0, "errors": 0}) as mock_sp:
             # First run: backfill should run
-            stats1 = run_sweep(db, now=now)
+            stats1 = run_sweep(db, now=now, trigger=task_manager.TRIGGER_SCHEDULED)
             assert mock_bf.call_count == 1
             assert mock_sp.call_count == 0
             assert db.get_kv(LAST_BACKFILL_KV) == now.isoformat()
 
             # Immediate second run (5 minutes later): backfill should NOT run
-            run_sweep(db, now=now + timedelta(minutes=5))
+            run_sweep(db, now=now + timedelta(minutes=5), trigger=task_manager.TRIGGER_SCHEDULED)
             assert mock_bf.call_count == 1
             assert mock_sp.call_count == 1
 
             # Run after 25 hours: backfill should run again
-            run_sweep(db, now=now + timedelta(hours=25))
+            run_sweep(db, now=now + timedelta(hours=25), trigger=task_manager.TRIGGER_SCHEDULED)
             assert mock_bf.call_count == 2
+
+
+def test_manual_sweep_always_backfills(db: Database) -> None:
+    now = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    with patch("trackseerr.pack_scanner.backfill", return_value={"collected": 10, "scanned": 10, "skipped": 0, "failed": 0, "errors": 0, "pruned": 0}) as mock_bf:
+        with patch("trackseerr.pack_scanner.scan_pending", return_value={"scanned": 5, "skipped": 0, "failed": 0, "errors": 0}):
+            # Set recent backfill
+            db.set_kv(LAST_BACKFILL_KV, now.isoformat())
+
+            # Manual run 5 minutes later: backfill MUST run
+            run_sweep(db, now=now + timedelta(minutes=5), trigger=task_manager.TRIGGER_MANUAL)
+            assert mock_bf.call_count == 1
+
+            # Default trigger is TRIGGER_MANUAL, should also backfill
+            run_sweep(db, now=now + timedelta(minutes=10))
+            assert mock_bf.call_count == 2
+
+
+def test_scheduled_sweep_respects_24h_gate(db: Database) -> None:
+    now = datetime(2024, 6, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+    with patch("trackseerr.pack_scanner.backfill", return_value={"collected": 10, "scanned": 10, "skipped": 0, "failed": 0, "errors": 0, "pruned": 0}) as mock_bf:
+        with patch("trackseerr.pack_scanner.scan_pending", return_value={"scanned": 5, "skipped": 0, "failed": 0, "errors": 0}) as mock_sp:
+            db.set_kv(LAST_BACKFILL_KV, now.isoformat())
+
+            # Scheduled run within 24h: backfill should not run, scan_pending should
+            run_sweep(db, now=now + timedelta(hours=12), trigger=task_manager.TRIGGER_SCHEDULED)
+            assert mock_bf.call_count == 0
+            assert mock_sp.call_count == 1
+
+            # Scheduled run after 24h: backfill should run
+            run_sweep(db, now=now + timedelta(hours=25), trigger=task_manager.TRIGGER_SCHEDULED)
+            assert mock_bf.call_count == 1
 
 
 def test_pack_scanner_busy_guard(db: Database):

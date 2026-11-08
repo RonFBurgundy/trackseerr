@@ -524,14 +524,14 @@ class TorznabDriver(AcquisitionDriver):
             return []
 
     def fetch_page(
-        self, offset: int = 0, limit: int = 100
+        self, offset: int = 0, limit: int = 100, query: Optional[str] = None
     ) -> list[AcquisitionSearchResult]:
-        """Paginates indexer releases using t=search without query."""
+        """Paginates indexer releases using t=search with optional query."""
         if not is_safe_service_url(self.host_url):
             logger.error("Prohibited indexer host URL: %s", self.host_url)
             return []
 
-        url = self._api_url(t="search", cat=self.categories, offset=offset, limit=limit)
+        url = self._api_url(t="search", cat=self.categories, offset=offset, limit=limit, q=query)
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.get(url)
