@@ -121,6 +121,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Torrent downloads work again with newer qBittorrent versions. qBittorrent 5 replies "accepted, still fetching" when a torrent is added, and TrackSeerr treated that as a failure, so every torrent grab failed and a song grabbed from a pack left a stopped torrent behind.
 - Automatic searches no longer download unrelated releases from usenet or torrent indexers. Some indexers return loose matches for short song titles (for example "17" or "U R"), and the first acceptable one was grabbed. A result now has to name the artist and the song or its album.
 - Manual search no longer sends your Prowlarr API key to the browser inside download links. TrackSeerr adds it back when you grab, and only for links that point at that indexer's own address.
 - After updating, the web interface could stay on its loading screen forever: a one-time rebuild of the pack song list locked the database. The rebuild is now fast and lets the app keep working while it runs.
