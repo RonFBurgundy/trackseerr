@@ -12,6 +12,7 @@ import httpx
 
 from trackseerr.clients.acquisition.base import AcquisitionDriver
 from trackseerr.models import AcquisitionSearchResult, DownloadStatus
+from trackseerr.redaction import safe_exc
 from trackseerr.security import is_safe_service_url
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,23 @@ class QbittorrentDriver(AcquisitionDriver):
         """qBittorrent is a downloader; search is handled via Torznab indexers."""
         return []
 
+    def _check_add_response(self, resp: httpx.Response) -> None:
+        """Validates qBittorrent torrents/add response."""
+        status = resp.status_code
+        text = resp.text
+        if status not in (200, 202) or "Fails." in text:
+            raise RuntimeError(f"qBittorrent torrents/add failed (HTTP {status}): {text[:120]}")
+
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+
+        if isinstance(data, dict):
+            failure_count = data.get("failure_count")
+            if isinstance(failure_count, int) and failure_count > 0:
+                raise RuntimeError(f"qBittorrent torrents/add failed (HTTP {status}): {text[:120]}")
+
     def download(self, result: AcquisitionSearchResult) -> str:
         """Submits magnet or torrent link to qBittorrent."""
         if not is_safe_service_url(self.host_url):
@@ -165,8 +183,7 @@ class QbittorrentDriver(AcquisitionDriver):
                 "paused": "false",
             }
             resp = client.post(add_url, data=payload)
-            if resp.status_code != 200 or "Fails." in resp.text:
-                raise RuntimeError(f"qBittorrent torrents/add failed (HTTP {resp.status_code}): {resp.text[:120]}")
+            self._check_add_response(resp)
 
         return torrent_hash
 
@@ -186,8 +203,7 @@ class QbittorrentDriver(AcquisitionDriver):
             "stopped": "true",
         }
         resp = client.post(add_url, data=payload)
-        if resp.status_code != 200 or "Fails." in resp.text:
-            raise RuntimeError(f"qBittorrent torrents/add failed (HTTP {resp.status_code}): {resp.text[:120]}")
+        self._check_add_response(resp)
 
         files_data = self._wait_for_file_list(client, torrent_hash)
         self._set_file_priorities(client, result, torrent_hash, files_data)
@@ -206,8 +222,8 @@ class QbittorrentDriver(AcquisitionDriver):
                     data = resp.json()
                     if data and isinstance(data, list):
                         return data
-            except Exception:
-                pass
+            except (httpx.HTTPError, ValueError) as exc:
+                logger.debug("Waiting for qBittorrent file list for %s: %s", torrent_hash, safe_exc(exc))
             time.sleep(1)
 
         self._delete_torrent(client, torrent_hash, delete_files=False)

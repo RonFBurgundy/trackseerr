@@ -647,6 +647,50 @@ def test_qbit4_resume_fallback() -> None:
         assert any("torrents/resume" in u for u in urls)
 
 
+def test_partial_grab_with_202_add() -> None:
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=valid"
+
+    cand = AcquisitionSearchResult(
+        download_id="hashqbit5:0",
+        title="Artist - Song [FLAC] (in pack: Compilation)",
+        artist="Artist",
+        download_url="magnet:?xt=urn:btih:hashqbit5&dn=Pack",
+        protocol="torrent",
+        extra={
+            "file_indices": [0],
+            "file_paths": ["01 - Song.flac"],
+            "info_hash": "hashqbit5",
+        },
+    )
+
+    add_resp = MagicMock(
+        status_code=202,
+        text='{"added_torrent_ids":[],"failure_count":0,"pending_count":1,"success_count":0}',
+        json=lambda: {
+            "added_torrent_ids": [],
+            "failure_count": 0,
+            "pending_count": 1,
+            "success_count": 0,
+        },
+    )
+    files_resp = MagicMock(
+        status_code=200,
+        json=lambda: [{"index": 0, "name": "01 - Song.flac"}],
+    )
+    prio_resp = MagicMock(status_code=200, text="Ok.")
+    resume_resp = MagicMock(status_code=200, text="Ok.")
+
+    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", return_value=files_resp):
+        mock_post.side_effect = [add_resp, prio_resp, resume_resp]
+        res_h = driver.download(cand)
+        assert res_h == "hashqbit5"
+
+        urls = [c[0][0] for c in mock_post.call_args_list]
+        assert any("torrents/filePrio" in u for u in urls)
+        assert any("torrents/start" in u or "torrents/resume" in u for u in urls)
+
+
 def test_cleanup_partial_torrent_targets_torrent_only() -> None:
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
     driver._cookie = "SID=valid"

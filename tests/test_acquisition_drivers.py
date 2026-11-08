@@ -1077,6 +1077,120 @@ def test_qbittorrent_download_and_status():
         assert status["speed_bps"] == 500000
 
 
+def test_qbittorrent_add_202_pending_is_success():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+
+    login_resp = MagicMock()
+    login_resp.status_code = 200
+    login_resp.text = "Ok."
+    login_resp.cookies = {"SID": "test_sid"}
+
+    add_resp = MagicMock()
+    add_resp.status_code = 202
+    add_resp.text = '{"added_torrent_ids":[],"failure_count":0,"pending_count":1,"success_count":0}'
+    add_resp.json.return_value = {
+        "added_torrent_ids": [],
+        "failure_count": 0,
+        "pending_count": 1,
+        "success_count": 0,
+    }
+
+    item = AcquisitionSearchResult(
+        download_id="0123456789abcdef0123456789abcdef01234567",
+        title="RAM",
+        artist="Daft Punk",
+        magnet_url="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Music",
+        source="qbittorrent",
+    )
+
+    with patch("httpx.Client.post", side_effect=[login_resp, add_resp]):
+        torrent_id = driver.download(item)
+        assert torrent_id == "0123456789abcdef0123456789abcdef01234567"
+
+
+def test_qbittorrent_add_json_failure_count_raises():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+
+    login_resp = MagicMock()
+    login_resp.status_code = 200
+    login_resp.text = "Ok."
+    login_resp.cookies = {"SID": "test_sid"}
+
+    add_resp = MagicMock()
+    add_resp.status_code = 200
+    add_resp.text = '{"added_torrent_ids":[],"failure_count":1,"pending_count":0,"success_count":0}'
+    add_resp.json.return_value = {
+        "added_torrent_ids": [],
+        "failure_count": 1,
+        "pending_count": 0,
+        "success_count": 0,
+    }
+
+    item = AcquisitionSearchResult(
+        download_id="0123456789abcdef0123456789abcdef01234567",
+        title="RAM",
+        artist="Daft Punk",
+        magnet_url="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Music",
+        source="qbittorrent",
+    )
+
+    with patch("httpx.Client.post", side_effect=[login_resp, add_resp]):
+        with pytest.raises(RuntimeError, match=r"qBittorrent torrents/add failed \(HTTP 200\)"):
+            driver.download(item)
+
+
+def test_qbittorrent_add_fails_text_raises():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+
+    login_resp = MagicMock()
+    login_resp.status_code = 200
+    login_resp.text = "Ok."
+    login_resp.cookies = {"SID": "test_sid"}
+
+    add_resp = MagicMock()
+    add_resp.status_code = 200
+    add_resp.text = "Fails."
+    add_resp.json.side_effect = ValueError("No JSON")
+
+    item = AcquisitionSearchResult(
+        download_id="0123456789abcdef0123456789abcdef01234567",
+        title="RAM",
+        artist="Daft Punk",
+        magnet_url="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Music",
+        source="qbittorrent",
+    )
+
+    with patch("httpx.Client.post", side_effect=[login_resp, add_resp]):
+        with pytest.raises(RuntimeError, match=r"qBittorrent torrents/add failed \(HTTP 200\): Fails\."):
+            driver.download(item)
+
+
+def test_qbittorrent_add_other_status_raises():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+
+    login_resp = MagicMock()
+    login_resp.status_code = 200
+    login_resp.text = "Ok."
+    login_resp.cookies = {"SID": "test_sid"}
+
+    add_resp = MagicMock()
+    add_resp.status_code = 415
+    add_resp.text = "Unsupported Media Type"
+    add_resp.json.side_effect = ValueError("No JSON")
+
+    item = AcquisitionSearchResult(
+        download_id="0123456789abcdef0123456789abcdef01234567",
+        title="RAM",
+        artist="Daft Punk",
+        magnet_url="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Music",
+        source="qbittorrent",
+    )
+
+    with patch("httpx.Client.post", side_effect=[login_resp, add_resp]):
+        with pytest.raises(RuntimeError, match=r"qBittorrent torrents/add failed \(HTTP 415\): Unsupported Media Type"):
+            driver.download(item)
+
+
 # ---------------------------------------------------------------------------
 # Torznab Indexer Tests
 # ---------------------------------------------------------------------------
