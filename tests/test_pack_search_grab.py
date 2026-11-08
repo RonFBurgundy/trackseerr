@@ -9,6 +9,7 @@ import pytest
 
 from trackseerr.acquisition_coordinator import AcquisitionCoordinator
 from trackseerr.acquisition_import import ImportPipelineMixin, _ImportJob, _PollContext
+from trackseerr.acquisition_worker import AcquisitionWorker
 from trackseerr.bencode import info_hash
 from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
 from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
@@ -619,6 +620,81 @@ def test_import_uses_only_selected_files(tmp_path: Path, db: Database) -> None:
     # Verify ONLY wanted_song.flac was located, neighbour_partial.flac is completely ignored
     assert len(job.audio_files) == 1
     assert job.audio_files[0].name == "wanted_song.flac"
+
+
+def test_pack_import_names_song_without_bpm_and_with_album_fallback(
+    tmp_path: Path, db: Database
+) -> None:
+    staging = tmp_path / "staging"
+    music = tmp_path / "music"
+    staging.mkdir()
+    music.mkdir()
+
+    pack_dir = staging / "BigPack"
+    pack_dir.mkdir()
+    wanted_file = pack_dir / "Rafael - Gotta Be Cool 124.mp3"
+    frame = b"\xff\xfb\x90\x00" + b"\x00" * 413
+    wanted_file.write_bytes(frame * 2)
+
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-qbit",
+            name="qBit",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qbit:8080",
+        )
+    )
+
+    dl = db.create_active_download(
+        ActiveDownload(
+            id="dl-pack-rafael",
+            client_id="c-qbit",
+            title="Rafael - Gotta Be Cool 124 [MP3] (in pack: BigPack)",
+            artist="Rafael",
+            item_type="track",
+            status=DownloadStatus.COMPLETED.value,
+            source_path=str(pack_dir),
+            selected_files=[{"file_index": 1, "path": "BigPack/Rafael - Gotta Be Cool 124.mp3"}],
+        )
+    )
+
+    worker = AcquisitionWorker()
+    worker.allowed_roots = MagicMock()
+    worker.allowed_roots.roots = [staging]
+    worker.allowed_roots.check.return_value = (True, "")
+
+    job = _ImportJob(
+        item=dl,
+        download_id=dl["id"],
+        client_id="c-qbit",
+        client_config={"name": "qBit", "driver_type": "qbittorrent"},
+        driver=MagicMock(),
+        driver_type="qbittorrent",
+        import_mode="copy",
+        status_dict={"source_path": str(pack_dir)},
+        target_lookup=dl["id"],
+        db=db,
+    )
+    ctx = _PollContext(
+        media_settings={"staging_folder_path": str(staging), "root_folder_path": str(music)},
+        write_tags=False,
+        embed_art=False,
+        save_cover=False,
+        plex_client=None,
+        lidarr_mode=False,
+    )
+
+    ok = worker._locate_audio_files(db, ctx, job, {"completed": 0, "failed": 0, "imported": 0})
+    assert ok is True
+    assert len(job.audio_files) == 1
+    worker._prepare_placement(db, ctx, job)
+    worker._place_one_file(db, ctx, job, job.audio_files[0])
+    assert job.last_metadata["title"] == "Gotta Be Cool"
+    assert job.last_metadata["album"] == "Unknown Album"
+    placed = list(music.rglob("*.mp3"))
+    assert len(placed) == 1
+    assert "Gotta Be Cool.mp3" in placed[0].name
+    assert "Unknown Album" in str(placed[0].parent)
 
 
 def test_selected_file_missing_warns(tmp_path: Path, db: Database) -> None:

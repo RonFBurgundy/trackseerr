@@ -55,6 +55,7 @@ from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
 from trackseerr.lidarr_release import norm_title, titles_match
 from trackseerr.quality import QualityProfile, evaluate_release, parse_release_title
+from trackseerr.pack_index import clean_pool_title
 from trackseerr.storage import Database
 
 from trackseerr.import_files import (
@@ -279,6 +280,10 @@ _SINGLE_VARIANT_RE = re.compile(
     r"(?:[\(\[]\s*(?:(?:original\s+)?single\s+version|(?:radio|single)\s+edit|(?:radio|single)\s+version|single)\s*[\)\]]|\b(?:single\s+version|single\s+edit|radio\s+edit|radio\s+version)\b)",
     re.IGNORECASE,
 )
+_FEAT_PREFIX_RE = re.compile(
+    r"^(?:feat|ft|featuring)(?:\.|\b)\s+.*?\s+[-–—]\s+",
+    re.IGNORECASE,
+)
 
 
 def _strip_leading_track_number(stem: str) -> str:
@@ -294,8 +299,30 @@ def _strip_artist_prefix(title: str, artist: Optional[str]) -> str:
     if t_clean.casefold().startswith(art_clean):
         remainder = t_clean[len(art_clean):].lstrip(" -–—_.")
         if remainder:
+            feat_match = _FEAT_PREFIX_RE.match(remainder)
+            if feat_match:
+                after_feat = remainder[feat_match.end():].strip()
+                if after_feat:
+                    return after_feat
             return remainder
     return title
+
+
+def _clean_pack_title(title: str, wanted_title: Optional[str] = None) -> str:
+    """Cleans DJ pool title decorations and strips trailing BPM if not part of wanted title."""
+    clean, extras = clean_pool_title(title)
+    bpm = extras.get("bpm")
+    if bpm is not None and not extras.get("bpm_stripped", False):
+        bpm_str = str(bpm)
+        ends_with_bpm = bool(re.search(rf"(?:^|[\s_\.-]){bpm_str}$", clean))
+        in_range = 70 <= bpm <= 180
+        wanted_has_bpm = bool(
+            wanted_title and re.search(rf"(?:^|[\s_\.-]){bpm_str}$", wanted_title.strip())
+        )
+        if ends_with_bpm and in_range and not wanted_has_bpm:
+            clean = re.sub(rf"[\s_\.-]*{bpm_str}$", "", clean).strip()
+            clean = re.sub(r"\s*-\s*$", "", clean).strip()
+    return clean or title.strip()
 
 
 def _candidate_file_title(af: Path, meta: dict[str, Any], artist: Optional[str] = None) -> str:
@@ -518,9 +545,23 @@ def _select_files_for_track(job: _ImportJob) -> list[Path]:
             job.db.set_download_unmatched_files(job.download_id, job.held_files)
             job.db.update_download_status(
                 job.download_id,
-                status=DownloadStatus.WARNING.value,
-                error_message=job.held_msg,
+                status=DownloadStatus.FAILED.value,
+                error_message=f"{job.held_msg}; searching again",
             )
+            try:
+                job.db.add_to_blocklist(
+                    source_title=job.item.get("title", ""),
+                    artist=job.item.get("artist"),
+                    release_guid=job.item.get("id"),
+                    info_hash=job.item.get("download_hash"),
+                    reason=job.held_msg,
+                    download_id=job.download_id,
+                )
+            except sqlite3.Error as bl_err:
+                logger.warning("Failed to add unmatched download %s to blocklist: %s", job.download_id, bl_err)
+            from trackseerr.acquisition_worker import _research_after_failure
+
+            _research_after_failure(job.db, job.item, job.held_msg)
         return []
 
     profile = _job_quality_profile(job)
@@ -1256,14 +1297,24 @@ class ImportPipelineMixin(ImportCatalogMixin):
     ) -> None:
         """Place, tag, and enrich a single audio file."""
         assert job.root_path is not None
+        is_pack_grab = bool(_parse_job_selected_files(job.item))
+        pack_wanted_title: Optional[str] = None
+        if is_pack_grab:
+            _, candidate_wanted = _resolve_job_wanted_track_and_title(job)
+            if candidate_wanted and candidate_wanted != job.item.get("title"):
+                pack_wanted_title = candidate_wanted
+
         try:
             metadata = inspect_audio_file(af)
         except Exception as e:
             logger.warning("Mutagen inspection failed for %s: %s; using item defaults", af, e)
+            cand_title = _candidate_file_title(af, {}, job.item.get("artist"))
+            if is_pack_grab and cand_title:
+                cand_title = _clean_pack_title(cand_title, pack_wanted_title)
             metadata = {
                 "artist": job.item.get("artist", "Unknown Artist"),
-                "title": _candidate_file_title(af, {}, job.item.get("artist")),
-                "album": job.item.get("title") if job.item.get("item_type") == "album" else "Unknown Album",
+                "title": cand_title,
+                "album": (job.req or {}).get("album") or job.item.get("album") or (job.item.get("title") if job.item.get("item_type") == "album" else "Unknown Album"),
                 "file_path": str(af),
                 "extension": af.suffix.lower(),
                 "track_number": None,
@@ -1275,7 +1326,12 @@ class ImportPipelineMixin(ImportCatalogMixin):
         if not metadata.get("artist"):
             metadata["artist"] = job.item.get("artist") or "Unknown Artist"
         if not metadata.get("title"):
-            metadata["title"] = _candidate_file_title(af, metadata, job.item.get("artist"))
+            cand_title = _candidate_file_title(af, metadata, job.item.get("artist"))
+            if is_pack_grab and cand_title:
+                cand_title = _clean_pack_title(cand_title, pack_wanted_title)
+            metadata["title"] = cand_title
+        if not metadata.get("album"):
+            metadata["album"] = (job.req or {}).get("album") or job.item.get("album") or "Unknown Album"
 
         tag_artist = metadata.get("artist")
         tag_mbid = metadata.get("musicbrainz_artistid")
