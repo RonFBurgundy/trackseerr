@@ -140,6 +140,62 @@ VIDEO_TITLE_RE = re.compile(
 )
 
 
+def fetch_torrent_file(
+    url: str, timeout: float = 10.0, max_bytes: int = 10 * 1024 * 1024
+) -> bytes | str:
+    """Fetches a torrent file by following up to 3 redirects manually.
+
+    Returns bytes of the torrent file, or a magnet URL string if redirected to magnet.
+    Never logs the URL as it carries API keys / passkeys.
+    """
+    current_url = url
+    for _hop in range(4):
+        if current_url.startswith("magnet:"):
+            return current_url
+
+        if not is_safe_service_url(current_url):
+            raise IndexerUnavailable("Prohibited torrent URL (SSRF defense)")
+
+        try:
+            with httpx.Client(timeout=timeout, follow_redirects=False) as client:
+                with client.stream("GET", current_url) as resp:
+                    if resp.status_code in (301, 302, 303, 307, 308):
+                        loc = resp.headers.get("Location")
+                        if not loc:
+                            raise IndexerUnavailable(
+                                f"HTTP {resp.status_code} redirect without Location header"
+                            )
+                        if loc.startswith("magnet:"):
+                            return loc
+                        current_url = str(httpx.URL(current_url).join(loc))
+                        continue
+
+                    _raise_for_status(resp)
+
+                    cl = resp.headers.get("Content-Length")
+                    if cl and cl.isdigit() and int(cl) > max_bytes:
+                        raise IndexerUnavailable(
+                            f"Torrent file exceeds size limit of {max_bytes} bytes"
+                        )
+
+                    chunks: list[bytes] = []
+                    total_bytes = 0
+                    for chunk in resp.iter_bytes(chunk_size=65536):
+                        total_bytes += len(chunk)
+                        if total_bytes > max_bytes:
+                            raise IndexerUnavailable(
+                                f"Torrent file exceeds size limit of {max_bytes} bytes"
+                            )
+                        chunks.append(chunk)
+
+                    return b"".join(chunks)
+
+        except (httpx.HTTPError, httpx.TimeoutException) as e:
+            raise IndexerUnavailable(str(e)) from e
+
+    raise IndexerUnavailable("Too many redirects fetching torrent")
+
+
 class TorznabDriver(AcquisitionDriver):
     """Client for Torznab / Newznab XML indexers (Prowlarr, Jackett, NZBGeek, etc.)."""
 
@@ -504,52 +560,7 @@ class TorznabDriver(AcquisitionDriver):
         Returns bytes of the torrent file, or a magnet URL string if redirected to magnet.
         Never logs the URL as it carries API keys / passkeys.
         """
-        current_url = url
-        for _hop in range(4):
-            if current_url.startswith("magnet:"):
-                return current_url
-
-            if not is_safe_service_url(current_url):
-                raise IndexerUnavailable("Prohibited torrent URL (SSRF defense)")
-
-            try:
-                with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
-                    with client.stream("GET", current_url) as resp:
-                        if resp.status_code in (301, 302, 303, 307, 308):
-                            loc = resp.headers.get("Location")
-                            if not loc:
-                                raise IndexerUnavailable(
-                                    f"HTTP {resp.status_code} redirect without Location header"
-                                )
-                            if loc.startswith("magnet:"):
-                                return loc
-                            current_url = str(httpx.URL(current_url).join(loc))
-                            continue
-
-                        _raise_for_status(resp)
-
-                        cl = resp.headers.get("Content-Length")
-                        if cl and cl.isdigit() and int(cl) > max_bytes:
-                            raise IndexerUnavailable(
-                                f"Torrent file exceeds size limit of {max_bytes} bytes"
-                            )
-
-                        chunks: list[bytes] = []
-                        total_bytes = 0
-                        for chunk in resp.iter_bytes(chunk_size=65536):
-                            total_bytes += len(chunk)
-                            if total_bytes > max_bytes:
-                                raise IndexerUnavailable(
-                                    f"Torrent file exceeds size limit of {max_bytes} bytes"
-                                )
-                            chunks.append(chunk)
-
-                        return b"".join(chunks)
-
-            except (httpx.HTTPError, httpx.TimeoutException) as e:
-                raise IndexerUnavailable(str(e)) from e
-
-        raise IndexerUnavailable("Too many redirects fetching torrent")
+        return fetch_torrent_file(url, self.timeout, max_bytes)
 
     def download(self, result: AcquisitionSearchResult) -> str:
         """Torznab is an indexer; downloads are dispatched to a download client."""
@@ -580,5 +591,6 @@ __all__ = [
     "IndexerUnsupported",
     "TorznabDriver",
     "VIDEO_TITLE_RE",
+    "fetch_torrent_file",
     "reset_search_mode_cache",
 ]
