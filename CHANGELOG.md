@@ -121,6 +121,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Songs found inside DJ pools match the right version: pool tags like "(Clean)", "(Dirty)", "Ft …", BPM and key are ignored when comparing, so a request for the original no longer picks a remix, intro or acapella. Pool MP3s get their quality from the file (for example MP3 320) instead of "Unknown".
+- The Pack Index task shows its progress on the Tasks page and a summary when it finishes (packs read, songs indexed, skipped and failed).
 - Torrent and Usenet searches no longer return music videos (720p/1080p, x264, DVDRip and similar releases or video categories).
 - When a search for one song downloads a whole single or album, TrackSeerr now imports only that song, once, in the best format your quality profile allows, onto the song already in your library. Before, it could import every file in the download as new, wrongly named songs, and files that ended up with the same name could overwrite each other. Other files are left in the download folder, and a download with no matching file goes to manual import.
 - An album download that has each song in two formats (for example FLAC and MP3) imports only the better copy of each song.
