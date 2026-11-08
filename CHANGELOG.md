@@ -121,6 +121,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- After updating, the web interface could stay on its loading screen forever: a one-time rebuild of the pack song list locked the database. The rebuild is now fast and lets the app keep working while it runs.
 - Songs found inside DJ pools match the right version: pool tags like "(Clean)", "(Dirty)", "Ft …", BPM and key are ignored when comparing, so a request for the original no longer picks a remix, intro or acapella. Pool MP3s get their quality from the file (for example MP3 320) instead of "Unknown".
 - The Pack Index task shows its progress on the Tasks page and a summary when it finishes (packs read, songs indexed, skipped and failed).
 - Torrent and Usenet searches no longer return music videos (720p/1080p, x264, DVDRip and similar releases or video categories).
