@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import sqlite3
+import time
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -643,4 +644,28 @@ def test_pack_index_logs_one_info_line(db: Database, caplog: pytest.LogCaptureFi
     assert "No indexer has Index packs turned on." in info_records[0].getMessage()
     assert "http://" not in info_records[0].getMessage()
     assert "https://" not in info_records[0].getMessage()
+
+
+def test_reparse_called_after_initial_delay_and_not_in_run_sweep(db: Database) -> None:
+    # 1. run_sweep does NOT trigger reparse_pack_files
+    with patch.object(db, "reparse_pack_files") as mock_reparse:
+        run_sweep(db)
+        mock_reparse.assert_not_called()
+
+    # 2. Worker stopped before initial_delay does NOT trigger reparse_pack_files
+    worker = PackIndexWorker()
+    with patch.object(db, "reparse_pack_files") as mock_reparse:
+        with patch.object(worker, "run_once", return_value=True):
+            worker.start(db, interval_seconds=10.0, initial_delay=1.0)
+            worker.stop()
+            mock_reparse.assert_not_called()
+
+    # 3. Worker triggers reparse_pack_files only after initial_delay
+    worker2 = PackIndexWorker()
+    with patch.object(db, "reparse_pack_files") as mock_reparse:
+        with patch.object(worker2, "run_once", return_value=True):
+            worker2.start(db, interval_seconds=10.0, initial_delay=0.03)
+            time.sleep(0.08)
+            worker2.stop()
+            assert mock_reparse.call_count == 1
 

@@ -3,6 +3,8 @@
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sqlite3
+import threading
+import time
 
 from trackseerr.pack_index import (
     clean_pool_title,
@@ -230,14 +232,14 @@ def test_pack_store_lifecycle_and_search(tmp_path: Path) -> None:
             scan_status="pending",
         )
         # Manually insert files and FTS for r_pending without setting scanned
-        db.conn.execute(
+        cur_pf = db.conn.execute(
             "INSERT INTO pack_files (pack_id, file_index, path, size_bytes, ext, parsed_artist, parsed_title) "
             "VALUES (?, 0, 'David Guetta - Titanium.mp3', 8000000, '.mp3', 'David Guetta', 'Titanium')",
             (r_pending["id"],),
         )
         db.conn.execute(
-            "INSERT INTO pack_files_fts (search, pack_id, file_index) VALUES (?, ?, 0)",
-            ("david guetta titanium", r_pending["id"]),
+            "INSERT INTO pack_files_fts (rowid, search, pack_id, file_index) VALUES (?, ?, ?, 0)",
+            (cur_pf.lastrowid, "david guetta titanium", r_pending["id"]),
         )
         db.conn.commit()
         # Search should not include r_pending because its scan_status is 'pending'
@@ -517,12 +519,15 @@ def test_reparse_pack_files_marker(tmp_path: Path) -> None:
         db.conn.commit()
 
         # Marker is not yet set
-        assert db.get_kv("pack_names_v2") is None
+        assert db.get_kv("pack_names_v3") is None
+
+        # Even if v2 was set, v3 missing causes rebuild
+        db.set_kv("pack_names_v2", "1")
 
         # First run of reparse updates rows and sets marker
         reparsed = db.reparse_pack_files()
         assert reparsed == 1
-        assert db.get_kv("pack_names_v2") == "1"
+        assert db.get_kv("pack_names_v3") == "1"
 
         # Verify row updated
         row = db.conn.execute(
@@ -562,5 +567,243 @@ def test_pack_backfill_pages_setting(tmp_path: Path) -> None:
         db.set_kv("pack_backfill_pages", "invalid")
         assert get_pack_backfill_pages(db) == 5
 
+    finally:
+        db.close()
+
+
+def test_reparse_20k_synthetic_files_perf_and_rowids(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "perf_20k.db"))
+    try:
+        idx = db.create_indexer(
+            {"id": "idx-perf", "name": "Indexer", "indexer_type": "torznab", "host_url": "https://test.org"}
+        )
+        pr = db.upsert_pack_release(
+            indexer_id=idx["id"],
+            guid="guid-perf",
+            title="Synthetic 20k Pack",
+            scan_status="scanned",
+        )
+        pack_id = pr["id"]
+
+        # Insert 20,000 synthetic files: 15,000 audio (.mp3), 5,000 non-audio (.txt)
+        batch = []
+        for i in range(20000):
+            if i % 4 != 0:
+                ext = ".mp3"
+                path = f"Artist {i % 100} - Song {i}.mp3"
+            else:
+                ext = ".txt"
+                path = f"Info {i}.txt"
+            batch.append((pack_id, i, path, 5000000, ext, None, None))
+
+        with db._lock:
+            db.conn.executemany(
+                """
+                INSERT INTO pack_files (pack_id, file_index, path, size_bytes, ext, parsed_artist, parsed_title)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                batch,
+            )
+            # Add dummy FTS row to verify it gets wiped before rebuild
+            db.conn.execute("INSERT INTO pack_files_fts (search, pack_id, file_index) VALUES ('old', 'old', 0)")
+            db.conn.commit()
+
+        t0 = time.perf_counter()
+        reparsed = db.reparse_pack_files()
+        duration = time.perf_counter() - t0
+
+        assert reparsed == 20000
+        assert duration < 5.0, f"Rebuild took {duration:.2f}s, expected < 5.0s"
+        assert db.get_kv("pack_names_v3") == "1"
+
+        # Assert FTS row count matches exactly audio files count
+        audio_count = db.conn.execute(
+            "SELECT COUNT(*) FROM pack_files WHERE ext = '.mp3'"
+        ).fetchone()[0]
+        fts_count = db.conn.execute("SELECT COUNT(*) FROM pack_files_fts").fetchone()[0]
+        assert fts_count == audio_count == 15000
+
+        # Assert all FTS rows have rowids that match pack_files
+        matching = db.conn.execute(
+            """
+            SELECT COUNT(*) FROM pack_files_fts fts
+            JOIN pack_files pf ON pf.rowid = fts.rowid
+            WHERE pf.ext = '.mp3'
+            """
+        ).fetchone()[0]
+        assert matching == 15000
+
+        # Verify no orphan FTS rows
+        orphans = db.conn.execute(
+            """
+            SELECT COUNT(*) FROM pack_files_fts fts
+            LEFT JOIN pack_files pf ON pf.rowid = fts.rowid
+            WHERE pf.rowid IS NULL
+            """
+        ).fetchone()[0]
+        assert orphans == 0
+    finally:
+        db.close()
+
+
+def test_reparse_lock_interleaving_probe_thread(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "lock_probe.db"))
+    try:
+        idx = db.create_indexer(
+            {"id": "idx-probe", "name": "Indexer", "indexer_type": "torznab", "host_url": "https://test.org"}
+        )
+        pr = db.upsert_pack_release(
+            indexer_id=idx["id"],
+            guid="guid-probe",
+            title="Synthetic Probe Pack",
+            scan_status="scanned",
+        )
+        pack_id = pr["id"]
+
+        # Insert 6,000 files to ensure rebuild takes several batches
+        batch = [
+            (pack_id, i, f"Artist {i % 50} - Track {i}.mp3", 4000000, ".mp3", None, None)
+            for i in range(6000)
+        ]
+        with db._lock:
+            db.conn.executemany(
+                """
+                INSERT INTO pack_files (pack_id, file_index, path, size_bytes, ext, parsed_artist, parsed_title)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                batch,
+            )
+            db.conn.commit()
+
+        probe_acquired = threading.Event()
+        probe_duration: list[float] = []
+
+        def probe_fn() -> None:
+            time.sleep(0.02)
+            t_start = time.perf_counter()
+            with db._lock:
+                dt = time.perf_counter() - t_start
+                probe_duration.append(dt)
+                probe_acquired.set()
+
+        t_probe = threading.Thread(target=probe_fn)
+        t_rebuild = threading.Thread(target=db.reparse_pack_files)
+
+        t_rebuild.start()
+        t_probe.start()
+
+        t_probe.join(timeout=3.0)
+        t_rebuild.join(timeout=5.0)
+
+        assert probe_acquired.is_set(), "Probe thread failed to acquire lock"
+        assert probe_duration[0] < 0.5, f"Probe lock acquisition took {probe_duration[0]:.3f}s, expected < 0.5s"
+    finally:
+        db.close()
+
+
+def test_record_pack_files_rescan_isolation(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "rescan_isolation.db"))
+    try:
+        idx = db.create_indexer(
+            {"id": "idx-iso", "name": "Indexer", "indexer_type": "torznab", "host_url": "https://test.org"}
+        )
+        pr_a = db.upsert_pack_release(indexer_id=idx["id"], guid="guid-a", title="Pack A", scan_status="pending")
+        pr_b = db.upsert_pack_release(indexer_id=idx["id"], guid="guid-b", title="Pack B", scan_status="pending")
+
+        files_a = [
+            {"file_index": 0, "path": "Daft Punk - One More Time.mp3", "size_bytes": 1000},
+            {"file_index": 1, "path": "Daft Punk - Aerodynamic.mp3", "size_bytes": 2000},
+        ]
+        files_b = [
+            {"file_index": 0, "path": "Justice - Genesis.mp3", "size_bytes": 3000},
+            {"file_index": 1, "path": "Justice - Phantom.mp3", "size_bytes": 4000},
+        ]
+
+        db.record_pack_files(pr_a["id"], files_a)
+        db.record_pack_files(pr_b["id"], files_b)
+
+        # Snapshot Pack B's FTS rows and rowids
+        b_fts_rows = db.conn.execute(
+            "SELECT rowid, search, pack_id, file_index FROM pack_files_fts WHERE pack_id = ? ORDER BY file_index",
+            (pr_b["id"],),
+        ).fetchall()
+        assert len(b_fts_rows) == 2
+
+        # Re-scan Pack A with updated file list
+        files_a_updated = [
+            {"file_index": 0, "path": "Daft Punk - One More Time (Club Mix).mp3", "size_bytes": 1500},
+            {"file_index": 1, "path": "Daft Punk - Harder Better Faster Stronger.mp3", "size_bytes": 2500},
+            {"file_index": 2, "path": "Daft Punk - Crescendolls.mp3", "size_bytes": 3500},
+        ]
+        db.record_pack_files(pr_a["id"], files_a_updated)
+
+        # Assert Pack B's FTS rows were completely untouched
+        b_fts_rows_after = db.conn.execute(
+            "SELECT rowid, search, pack_id, file_index FROM pack_files_fts WHERE pack_id = ? ORDER BY file_index",
+            (pr_b["id"],),
+        ).fetchall()
+        assert [tuple(r) for r in b_fts_rows_after] == [tuple(r) for r in b_fts_rows]
+
+        # Assert Pack A's FTS rows reflect the update with matching rowids
+        a_fts_rows = db.conn.execute(
+            """
+            SELECT fts.rowid, pf.rowid, fts.file_index, pf.file_index
+            FROM pack_files_fts fts
+            JOIN pack_files pf ON pf.rowid = fts.rowid
+            WHERE fts.pack_id = ?
+            ORDER BY fts.file_index
+            """,
+            (pr_a["id"],),
+        ).fetchall()
+        assert len(a_fts_rows) == 3
+        for r in a_fts_rows:
+            assert r[0] == r[1]
+    finally:
+        db.close()
+
+
+def test_prune_removes_fts_rows_by_rowid(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "prune_rowid.db"))
+    try:
+        idx = db.create_indexer(
+            {"id": "idx-prune", "name": "Indexer", "indexer_type": "torznab", "host_url": "https://test.org"}
+        )
+        pr_old = db.upsert_pack_release(indexer_id=idx["id"], guid="guid-old", title="Old Pack", scan_status="pending")
+        pr_new = db.upsert_pack_release(indexer_id=idx["id"], guid="guid-new", title="New Pack", scan_status="pending")
+
+        db.record_pack_files(
+            pr_old["id"],
+            [{"file_index": 0, "path": "Old Artist - Old Song.mp3", "size_bytes": 1000}],
+        )
+        db.record_pack_files(
+            pr_new["id"],
+            [{"file_index": 0, "path": "New Artist - New Song.mp3", "size_bytes": 2000}],
+        )
+
+        # Backdate pr_old created_at
+        old_date = (datetime.now(timezone.utc) - timedelta(days=100)).strftime("%Y-%m-%d %H:%M:%S")
+        with db._lock:
+            db.conn.execute("UPDATE pack_releases SET created_at = ? WHERE id = ?", (old_date, pr_old["id"]))
+            db.conn.commit()
+
+        new_fts_rowid = db.conn.execute(
+            "SELECT rowid FROM pack_files_fts WHERE pack_id = ?", (pr_new["id"],)
+        ).fetchone()[0]
+
+        pruned = db.prune_pack_index(max_age_days=30)
+        assert pruned == 1
+
+        # Old pack FTS entry is gone
+        old_fts = db.conn.execute(
+            "SELECT COUNT(*) FROM pack_files_fts WHERE pack_id = ?", (pr_old["id"],)
+        ).fetchone()[0]
+        assert old_fts == 0
+
+        # New pack FTS entry is retained with same rowid
+        new_fts = db.conn.execute(
+            "SELECT rowid FROM pack_files_fts WHERE pack_id = ?", (pr_new["id"],)
+        ).fetchone()
+        assert new_fts is not None
+        assert new_fts[0] == new_fts_rowid
     finally:
         db.close()

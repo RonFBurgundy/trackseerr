@@ -468,13 +468,6 @@ def run_sweep(
 
     try:
         with record_task_run(db, "pack_index", trigger) as run, track_job("pack_index", "Pack Index") as handle:
-            # Re-parse existing rows guarded by pack_names_v2
-            if hasattr(db, "reparse_pack_files"):
-                try:
-                    db.reparse_pack_files()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to reparse pack files: %s", safe_exc(exc))
-
             need_backfill = True
             try:
                 raw_bf = db.get_kv(LAST_BACKFILL_KV)
@@ -571,12 +564,12 @@ class PackIndexWorker:
         cycle_interval = interval_fn or (lambda: float(interval_seconds))
 
         def _loop() -> None:
-            if hasattr(db, "reparse_pack_files"):
-                try:
-                    db.reparse_pack_files()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("Failed to reparse pack files: %s", safe_exc(exc))
             if not self._stop_event.wait(initial_delay):
+                if hasattr(db, "reparse_pack_files"):
+                    try:
+                        db.reparse_pack_files()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("Failed to reparse pack files: %s", safe_exc(exc))
                 while not self._stop_event.is_set():
                     self.run_once(db)
                     if wait_for_next_cycle(self._stop_event, cycle_interval):

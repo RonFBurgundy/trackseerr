@@ -9,6 +9,7 @@ import logging
 from pathlib import Path
 import re
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -207,11 +208,14 @@ class PackIndexStoreMixin:
     def record_pack_files(self, pack_id: str, files: list[dict[str, Any]]) -> int:
         """Replace files for pack_id, update pack_releases metadata, index audio files in FTS."""
         with self._lock:
-            self.conn.execute("DELETE FROM pack_files_fts WHERE pack_id = ?", (pack_id,))
+            self.conn.execute(
+                "DELETE FROM pack_files_fts WHERE rowid IN (SELECT rowid FROM pack_files WHERE pack_id = ?)",
+                (pack_id,),
+            )
             self.conn.execute("DELETE FROM pack_files WHERE pack_id = ?", (pack_id,))
 
             pack_files_data = []
-            fts_data = []
+            audio_files = []
 
             for f in files:
                 f_idx = int(f["file_index"])
@@ -221,9 +225,7 @@ class PackIndexStoreMixin:
                 artist, title = parse_pack_file(f_path)
                 pack_files_data.append((pack_id, f_idx, f_path, f_size, ext, artist, title))
                 if ext in AUDIO_EXTS:
-                    _, extras = clean_pool_title(title or "")
-                    fts_text = search_text(f_path, artist, title, extras=extras)
-                    fts_data.append((fts_text, pack_id, f_idx))
+                    audio_files.append((f_idx, f_path, artist, title))
 
             if pack_files_data:
                 self.conn.executemany(
@@ -234,11 +236,25 @@ class PackIndexStoreMixin:
                     pack_files_data,
                 )
 
-            if fts_data:
-                self.conn.executemany(
-                    "INSERT INTO pack_files_fts (search, pack_id, file_index) VALUES (?, ?, ?)",
-                    fts_data,
+            if audio_files:
+                cur = self.conn.execute(
+                    "SELECT rowid, file_index FROM pack_files WHERE pack_id = ?",
+                    (pack_id,),
                 )
+                rowid_map = {r[1]: r[0] for r in cur.fetchall()}
+                fts_data = []
+                for f_idx, f_path, artist, title in audio_files:
+                    f_rowid = rowid_map.get(f_idx)
+                    if f_rowid is not None:
+                        _, extras = clean_pool_title(title or "")
+                        fts_text = search_text(f_path, artist, title, extras=extras)
+                        fts_data.append((f_rowid, fts_text, pack_id, f_idx))
+
+                if fts_data:
+                    self.conn.executemany(
+                        "INSERT INTO pack_files_fts (rowid, search, pack_id, file_index) VALUES (?, ?, ?, ?)",
+                        fts_data,
+                    )
 
             self.conn.execute(
                 """
@@ -331,7 +347,7 @@ class PackIndexStoreMixin:
                         pr.seeders,
                         pr.file_count
                     FROM pack_files_fts fts
-                    JOIN pack_files pf ON pf.pack_id = fts.pack_id AND pf.file_index = fts.file_index
+                    JOIN pack_files pf ON pf.rowid = fts.rowid
                     JOIN pack_releases pr ON pr.id = pf.pack_id
                     WHERE pack_files_fts MATCH ?
                       AND pr.scan_status = 'scanned'
@@ -428,7 +444,8 @@ class PackIndexStoreMixin:
                     chunk = to_delete[i : i + 500]
                     placeholders = ",".join("?" for _ in chunk)
                     self.conn.execute(
-                        f"DELETE FROM pack_files_fts WHERE pack_id IN ({placeholders})", chunk
+                        f"DELETE FROM pack_files_fts WHERE rowid IN (SELECT rowid FROM pack_files WHERE pack_id IN ({placeholders}))",
+                        chunk,
                     )
                     self.conn.execute(
                         f"DELETE FROM pack_releases WHERE id IN ({placeholders})", chunk
@@ -458,48 +475,54 @@ class PackIndexStoreMixin:
                 "files": int(files),
             }
 
-    def reparse_pack_files(self, batch_size: int = 500) -> int:
+    def reparse_pack_files(self, batch_size: int = 1000) -> int:
         """One-off recomputation of parsed_artist, parsed_title, and FTS for already-indexed packs."""
-        with self._lock:
-            if getattr(self, "get_kv", None) and self.get_kv("pack_names_v2"):
-                return 0
+        if getattr(self, "get_kv", None) and self.get_kv("pack_names_v3"):
+            return 0
 
-            cur = self.conn.execute("SELECT pack_id, file_index, path, ext FROM pack_files")
-            rows = cur.fetchall()
-            total = 0
-            for i in range(0, len(rows), batch_size):
-                chunk = rows[i : i + batch_size]
+        with self._lock:
+            self.conn.execute("DELETE FROM pack_files_fts")
+            self.conn.commit()
+
+        total = 0
+        last_rowid = 0
+        while True:
+            with self._lock:
+                cur = self.conn.execute(
+                    "SELECT rowid, pack_id, file_index, path, ext FROM pack_files WHERE rowid > ? ORDER BY rowid LIMIT ?",
+                    (last_rowid, batch_size),
+                )
+                chunk = cur.fetchall()
+                if not chunk:
+                    break
+
                 update_files = []
-                fts_delete = []
                 fts_insert = []
                 for r in chunk:
-                    p_id, f_idx, f_path, ext = r[0], r[1], r[2], r[3]
+                    rowid, p_id, f_idx, f_path, ext = r[0], r[1], r[2], r[3], r[4]
                     artist, title = parse_pack_file(f_path)
-                    update_files.append((artist, title, p_id, f_idx))
+                    update_files.append((artist, title, rowid))
                     if ext in AUDIO_EXTS:
-                        fts_delete.append((p_id, f_idx))
                         _, extras = clean_pool_title(title or "")
                         fts_text = search_text(f_path, artist, title, extras=extras)
-                        fts_insert.append((fts_text, p_id, f_idx))
+                        fts_insert.append((rowid, fts_text, p_id, f_idx))
 
                 if update_files:
                     self.conn.executemany(
-                        "UPDATE pack_files SET parsed_artist = ?, parsed_title = ? WHERE pack_id = ? AND file_index = ?",
+                        "UPDATE pack_files SET parsed_artist = ?, parsed_title = ? WHERE rowid = ?",
                         update_files,
-                    )
-                if fts_delete:
-                    self.conn.executemany(
-                        "DELETE FROM pack_files_fts WHERE pack_id = ? AND file_index = ?",
-                        fts_delete,
                     )
                 if fts_insert:
                     self.conn.executemany(
-                        "INSERT INTO pack_files_fts (search, pack_id, file_index) VALUES (?, ?, ?)",
+                        "INSERT INTO pack_files_fts (rowid, search, pack_id, file_index) VALUES (?, ?, ?, ?)",
                         fts_insert,
                     )
                 self.conn.commit()
+                last_rowid = chunk[-1][0]
                 total += len(chunk)
 
-            if getattr(self, "set_kv", None):
-                self.set_kv("pack_names_v2", "1")
-            return total
+            time.sleep(0)
+
+        if getattr(self, "set_kv", None):
+            self.set_kv("pack_names_v3", "1")
+        return total
