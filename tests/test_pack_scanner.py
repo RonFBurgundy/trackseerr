@@ -15,8 +15,10 @@ from trackseerr.pack_scanner import (
     LAST_RUN_KV,
     PackIndexWorker,
     PackScannerBusy,
+    _format_sweep_summary,
     backfill,
     collect_from_releases,
+    get_progress,
     get_status,
     is_running,
     pack_index_worker,
@@ -488,3 +490,157 @@ def test_pack_scanner_worker_lifecycle(db: Database):
         assert worker.is_running() is True
         worker.stop()
         assert worker.is_running() is False
+
+
+def test_pack_index_progress_reported_while_scanning(db: Database) -> None:
+    from trackseerr.api.routes.system.tasks import _task_progress
+
+    db.create_indexer({
+        "id": "idx-prog",
+        "name": "ProgressTracker",
+        "indexer_type": "torznab",
+        "host_url": "http://indexer.local",
+        "pack_scan": "auto",
+    })
+    db.upsert_pack_release(
+        indexer_id="idx-prog",
+        guid="guid-pack-p1",
+        title="Pack One Title",
+        download_url="http://indexer.local/dl/p1.torrent",
+        scan_status="pending",
+    )
+    db.upsert_pack_release(
+        indexer_id="idx-prog",
+        guid="guid-pack-p2",
+        title="Pack Two Title",
+        download_url="http://indexer.local/dl/p2.torrent",
+        scan_status="pending",
+    )
+
+    torrent_bytes = make_test_torrent_bytes("Pack")
+    observed_progress: list[tuple[tuple[int, int], Any]] = []
+
+    mock_driver = MagicMock(spec=TorznabDriver)
+
+    def fake_fetch(url: str):
+        prog_pair = get_progress()
+        task_prog = _task_progress("pack_index", True)
+        observed_progress.append((prog_pair, task_prog))
+        return torrent_bytes
+
+    mock_driver.fetch_torrent.side_effect = fake_fetch
+
+    with patch("trackseerr.pack_scanner.get_indexer_driver", return_value=mock_driver):
+        with patch("trackseerr.pack_scanner.time.sleep", return_value=None):
+            db.set_kv(LAST_BACKFILL_KV, datetime.now(timezone.utc).isoformat())
+            run_sweep(db)
+
+    assert len(observed_progress) == 2
+    assert observed_progress[0][0] == (1, 2)
+    assert observed_progress[0][1] is not None
+    assert observed_progress[0][1].current == 1
+    assert observed_progress[0][1].total == 2
+    assert "Reading pack 1 of 2: Pack One Title" in (observed_progress[0][1].message or "")
+
+    assert observed_progress[1][0] == (2, 2)
+    assert observed_progress[1][1] is not None
+    assert observed_progress[1][1].current == 2
+    assert observed_progress[1][1].total == 2
+    assert "Reading pack 2 of 2: Pack Two Title" in (observed_progress[1][1].message or "")
+
+    assert get_progress() == (0, 0)
+    assert _task_progress("pack_index", False) is None
+
+
+def test_pack_index_final_message_no_indexer_pack_scan_on(db: Database) -> None:
+    run_sweep(db)
+    finished = db.latest_finished_task_runs()
+    assert "pack_index" in finished
+    assert finished["pack_index"]["message"] == "No indexer has Index packs turned on."
+
+    db.create_indexer({
+        "id": "idx-off",
+        "name": "IndexerOff",
+        "indexer_type": "torznab",
+        "host_url": "http://indexer.local",
+        "pack_scan": "off",
+    })
+    run_sweep(db)
+    finished = db.latest_finished_task_runs()
+    assert finished["pack_index"]["message"] == "No indexer has Index packs turned on."
+
+
+def test_pack_index_final_message_nothing_pending(db: Database) -> None:
+    db.create_indexer({
+        "id": "idx-empty",
+        "name": "IndexerEmpty",
+        "indexer_type": "torznab",
+        "host_url": "http://indexer.local",
+        "pack_scan": "auto",
+    })
+    db.set_kv(LAST_BACKFILL_KV, datetime.now(timezone.utc).isoformat())
+
+    run_sweep(db)
+    finished = db.latest_finished_task_runs()
+    assert finished["pack_index"]["message"] == "No new packs to read. Index holds 0 packs (0 songs)."
+
+
+def test_pack_index_final_message_packs_read(db: Database) -> None:
+    db.create_indexer({
+        "id": "idx-read",
+        "name": "IndexerRead",
+        "indexer_type": "torznab",
+        "host_url": "http://indexer.local",
+        "pack_scan": "auto",
+    })
+    db.upsert_pack_release(
+        indexer_id="idx-read",
+        guid="guid-single-read",
+        title="VA - Greatest Hits",
+        download_url="http://indexer.local/dl/read.torrent",
+        scan_status="pending",
+    )
+    mock_driver = MagicMock(spec=TorznabDriver)
+    mock_driver.fetch_torrent.return_value = make_test_torrent_bytes()
+
+    db.set_kv(LAST_BACKFILL_KV, datetime.now(timezone.utc).isoformat())
+    with patch("trackseerr.pack_scanner.get_indexer_driver", return_value=mock_driver):
+        with patch("trackseerr.pack_scanner.time.sleep", return_value=None):
+            run_sweep(db)
+
+    finished = db.latest_finished_task_runs()
+    assert finished["pack_index"]["message"] == "Read 1 pack: 3 songs indexed. Index holds 1 pack."
+
+
+def test_format_sweep_summary_three_cases_and_example_wording(db: Database) -> None:
+    stats = {
+        "scanned": 140,
+        "songs": 52310,
+        "skipped": 6,
+        "skipped_magnet": 6,
+        "failed": 1,
+    }
+    with patch.object(db, "pack_index_stats", return_value={"packs": 1204, "files": 52310}):
+        msg = _format_sweep_summary(stats, db)
+        assert msg == "Read 140 packs: 52,310 songs indexed, 6 skipped (magnet only), 1 failed. Index holds 1,204 packs."
+
+
+def test_pack_index_logs_one_info_line(db: Database, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    db.create_indexer({
+        "id": "idx-info",
+        "name": "IndexerInfo",
+        "indexer_type": "torznab",
+        "host_url": "http://indexer.local",
+        "pack_scan": "off",
+    })
+    with caplog.at_level(logging.INFO):
+        run_sweep(db)
+
+    info_records = [r for r in caplog.records if r.levelno == logging.INFO and "Pack index:" in r.getMessage()]
+    assert len(info_records) == 1
+    assert "No indexer has Index packs turned on." in info_records[0].getMessage()
+    assert "http://" not in info_records[0].getMessage()
+    assert "https://" not in info_records[0].getMessage()
+

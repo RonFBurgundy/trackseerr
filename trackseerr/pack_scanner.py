@@ -42,10 +42,41 @@ WORKER_INTERVAL_SECONDS = 6 * 3600.0
 _last_run: Optional[dict[str, Any]] = None
 _run_lock = threading.Lock()
 _state_lock = threading.Lock()
+_progress: tuple[int, int] = (0, 0)
+_progress_message: str | None = None
+_progress_lock = threading.Lock()
 
 
 class PackScannerBusy(RuntimeError):
     """Raised when another pack scan sweep is already running."""
+
+
+def _set_progress(
+    current: int,
+    total: int,
+    message: str | None = None,
+    handle: Any | None = None,
+) -> None:
+    global _progress, _progress_message
+    with _progress_lock:
+        _progress = (current, total)
+        if message is not None:
+            _progress_message = message
+    if message is not None and handle is not None:
+        handle.update_message(message)
+
+
+def _reset_progress() -> None:
+    global _progress, _progress_message
+    with _progress_lock:
+        _progress = (0, 0)
+        _progress_message = None
+
+
+def get_progress() -> tuple[int, int]:
+    """Returns the current module-level (current, total) scanning progress."""
+    with _progress_lock:
+        return _progress
 
 
 def _iso(now: datetime) -> str:
@@ -154,6 +185,7 @@ def _process_one_pending_pack(
     if isinstance(res, str):
         db.mark_pack_skipped(pack_id, "Magnet only: file list not available")
         counts["skipped"] += 1
+        counts["skipped_magnet"] = counts.get("skipped_magnet", 0) + 1
         return
 
     try:
@@ -177,74 +209,86 @@ def _process_one_pending_pack(
     db.upsert_pack_release(idx_id, pack["guid"], pack["title"], info_hash=h)
     db.record_pack_files(pack_id, files)
     counts["scanned"] += 1
+    counts["songs"] = counts.get("songs", 0) + audio_count
 
 
-def scan_pending(db: Any, limit: int = 20) -> dict[str, int]:
+def scan_pending(db: Any, limit: int = 20, handle: Any | None = None) -> dict[str, int]:
     """Scans pending pack releases, fetching and parsing their .torrent files."""
-    counts = {"scanned": 0, "skipped": 0, "failed": 0, "errors": 0}
+    counts = {"scanned": 0, "skipped": 0, "failed": 0, "errors": 0, "songs": 0, "skipped_magnet": 0}
     pending = db.list_pending_pack_releases(limit=limit)
     if not pending:
         return counts
+
+    total = len(pending)
+    _set_progress(0, total, handle=handle)
 
     all_indexers = {str(idx.get("id")): idx for idx in db.list_indexers()}
     indexer_drivers: dict[str, Any] = {}
     skipped_indexers: set[str] = set()
     last_request_times: dict[str, float] = {}
 
-    for pack in pending:
-        pack_id = str(pack["id"])
-        idx_id = str(pack["indexer_id"])
+    try:
+        for i, pack in enumerate(pending, 1):
+            pack_title = str(pack.get("title") or "")
+            scan_msg = f"Reading pack {i} of {total}: {pack_title[:60]}"
+            _set_progress(i, total, message=scan_msg, handle=handle)
 
-        if idx_id in skipped_indexers:
-            continue
+            pack_id = str(pack["id"])
+            idx_id = str(pack["indexer_id"])
 
-        idx_cfg = all_indexers.get(idx_id)
-        if not idx_cfg or str(idx_cfg.get("pack_scan") or "off").lower() == "off":
-            db.mark_pack_skipped(pack_id, "Indexer pack_scan is off")
-            counts["skipped"] += 1
-            continue
-
-        if not idx_cfg.get("enabled", True):
-            continue
-
-        if indexer_status.paused_until(idx_id) is not None:
-            skipped_indexers.add(idx_id)
-            continue
-
-        download_url = pack.get("download_url")
-        if not download_url or download_url.startswith("magnet:"):
-            db.mark_pack_skipped(pack_id, "Magnet only: file list not available")
-            counts["skipped"] += 1
-            continue
-
-        if idx_id not in indexer_drivers:
-            try:
-                indexer_drivers[idx_id] = get_indexer_driver(idx_cfg)
-            except Exception as exc:  # noqa: BLE001 - driver factory error
-                logger.warning("Could not instantiate driver for indexer %s: %s", idx_id, safe_exc(exc))
-                skipped_indexers.add(idx_id)
-                counts["errors"] += 1
+            if idx_id in skipped_indexers:
                 continue
 
-        driver = indexer_drivers[idx_id]
-        if not hasattr(driver, "fetch_torrent"):
-            db.mark_pack_skipped(pack_id, "Driver does not support fetch_torrent")
-            counts["skipped"] += 1
-            continue
+            idx_cfg = all_indexers.get(idx_id)
+            if not idx_cfg or str(idx_cfg.get("pack_scan") or "off").lower() == "off":
+                db.mark_pack_skipped(pack_id, "Indexer pack_scan is off")
+                counts["skipped"] += 1
+                continue
 
-        # Pace 1 request / 2 s per indexer
-        elapsed = time.monotonic() - last_request_times.get(idx_id, 0.0)
-        if elapsed < 2.0:
-            time.sleep(2.0 - elapsed)
-        last_request_times[idx_id] = time.monotonic()
+            if not idx_cfg.get("enabled", True):
+                continue
 
-        try:
-            _process_one_pending_pack(db, pack, driver, counts)
-        except IndexerError as exc:
-            indexer_status.record_failure(idx_id, exc)
-            skipped_indexers.add(idx_id)
-            counts["errors"] += 1
-            logger.warning("Indexer error fetching torrent from %s: %s", idx_cfg.get("name") or idx_id, safe_exc(exc))
+            if indexer_status.paused_until(idx_id) is not None:
+                skipped_indexers.add(idx_id)
+                continue
+
+            download_url = pack.get("download_url")
+            if not download_url or download_url.startswith("magnet:"):
+                db.mark_pack_skipped(pack_id, "Magnet only: file list not available")
+                counts["skipped"] += 1
+                counts["skipped_magnet"] = counts.get("skipped_magnet", 0) + 1
+                continue
+
+            if idx_id not in indexer_drivers:
+                try:
+                    indexer_drivers[idx_id] = get_indexer_driver(idx_cfg)
+                except Exception as exc:  # noqa: BLE001 - driver factory error
+                    logger.warning("Could not instantiate driver for indexer %s: %s", idx_id, safe_exc(exc))
+                    skipped_indexers.add(idx_id)
+                    counts["errors"] += 1
+                    continue
+
+            driver = indexer_drivers[idx_id]
+            if not hasattr(driver, "fetch_torrent"):
+                db.mark_pack_skipped(pack_id, "Driver does not support fetch_torrent")
+                counts["skipped"] += 1
+                continue
+
+            # Pace 1 request / 2 s per indexer
+            elapsed = time.monotonic() - last_request_times.get(idx_id, 0.0)
+            if elapsed < 2.0:
+                time.sleep(2.0 - elapsed)
+            last_request_times[idx_id] = time.monotonic()
+
+            try:
+                _process_one_pending_pack(db, pack, driver, counts)
+            except IndexerError as exc:
+                indexer_status.record_failure(idx_id, exc)
+                skipped_indexers.add(idx_id)
+                counts["errors"] += 1
+                logger.warning("Indexer error fetching torrent from %s: %s", idx_cfg.get("name") or idx_id, safe_exc(exc))
+    finally:
+        _reset_progress()
 
     return counts
 
@@ -262,13 +306,22 @@ def get_pack_backfill_pages(db: Any) -> int:
     return 5
 
 
-def backfill(db: Any, pages: int | None = None) -> dict[str, int]:
+def backfill(db: Any, pages: int | None = None, handle: Any | None = None) -> dict[str, int]:
     """Paginates enabled pack-scanning indexers, collects releases, and scans pending."""
     if pages is None:
         effective_pages = get_pack_backfill_pages(db)
     else:
         effective_pages = max(1, min(50, int(pages)))
-    counts = {"collected": 0, "scanned": 0, "skipped": 0, "failed": 0, "errors": 0, "pruned": 0}
+    counts = {
+        "collected": 0,
+        "scanned": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": 0,
+        "pruned": 0,
+        "songs": 0,
+        "skipped_magnet": 0,
+    }
     enabled_indexers = db.list_indexers(enabled_only=True)
 
     for idx_cfg in enabled_indexers:
@@ -294,6 +347,9 @@ def backfill(db: Any, pages: int | None = None) -> dict[str, int]:
         for page in range(effective_pages):
             if indexer_status.paused_until(idx_id) is not None:
                 break
+            idx_name = str(idx_cfg.get("name") or idx_id)
+            bf_msg = f"Looking through {idx_name} releases, page {page + 1} of {effective_pages}"
+            _set_progress(0, 0, message=bf_msg, handle=handle)
             offset = page * 100
             try:
                 releases = driver.fetch_page(offset=offset, limit=100)
@@ -308,9 +364,9 @@ def backfill(db: Any, pages: int | None = None) -> dict[str, int]:
 
             counts["collected"] += collect_from_releases(db, idx_cfg, releases)
 
-    scan_res = scan_pending(db, limit=200)
-    for k in ("scanned", "skipped", "failed", "errors"):
-        counts[k] += scan_res.get(k, 0)
+    scan_res = scan_pending(db, limit=200, handle=handle)
+    for k in ("scanned", "skipped", "failed", "errors", "songs", "skipped_magnet"):
+        counts[k] = counts.get(k, 0) + scan_res.get(k, 0)
 
     try:
         counts["pruned"] = db.prune_pack_index()
@@ -339,6 +395,52 @@ def get_status(db: Any = None) -> dict[str, Any]:
     return {"running": is_running(), "last_run": last}
 
 
+def _format_sweep_summary(stats: dict[str, int], db: Any) -> str:
+    """Formats plain English summary for the sweep."""
+    indexers = db.list_indexers(enabled_only=True) if hasattr(db, "list_indexers") else []
+    has_pack_indexer = any(
+        str(idx.get("pack_scan") or "off").lower() in ("auto", "all")
+        for idx in indexers
+    )
+
+    scanned = int(stats.get("scanned") or 0)
+    skipped = int(stats.get("skipped") or 0)
+    failed = int(stats.get("failed") or 0)
+    total_active = scanned + skipped + failed
+
+    if not has_pack_indexer and total_active == 0:
+        return "No indexer has Index packs turned on."
+
+    idx_stats = db.pack_index_stats() if hasattr(db, "pack_index_stats") else {}
+    n_holds = int(idx_stats.get("packs") or 0)
+    m_songs = int(idx_stats.get("files") or 0)
+
+    if total_active == 0:
+        pack_word = "pack" if n_holds == 1 else "packs"
+        song_word = "song" if m_songs == 1 else "songs"
+        return f"No new packs to read. Index holds {n_holds:,} {pack_word} ({m_songs:,} {song_word})."
+
+    pack_word = "pack" if scanned == 1 else "packs"
+    songs = int(stats.get("songs") or 0)
+    song_word = "song" if songs == 1 else "songs"
+    parts = [f"{songs:,} {song_word} indexed"]
+
+    if skipped > 0:
+        skipped_magnet = int(stats.get("skipped_magnet") or 0)
+        if skipped_magnet > 0 and skipped_magnet == skipped:
+            parts.append(f"{skipped:,} skipped (magnet only)")
+        elif skipped_magnet > 0:
+            parts.append(f"{skipped:,} skipped ({skipped_magnet:,} magnet only)")
+        else:
+            parts.append(f"{skipped:,} skipped")
+
+    if failed > 0:
+        parts.append(f"{failed:,} failed")
+
+    holds_word = "pack" if n_holds == 1 else "packs"
+    return f"Read {scanned:,} {pack_word}: {', '.join(parts)}. Index holds {n_holds:,} {holds_word}."
+
+
 def run_sweep(
     db: Any,
     *,
@@ -353,7 +455,16 @@ def run_sweep(
     when = now or datetime.now(timezone.utc)
     started = _iso(when)
     error: Optional[str] = None
-    stats: dict[str, int] = {"collected": 0, "scanned": 0, "skipped": 0, "failed": 0, "errors": 0, "pruned": 0}
+    stats: dict[str, int] = {
+        "collected": 0,
+        "scanned": 0,
+        "skipped": 0,
+        "failed": 0,
+        "errors": 0,
+        "pruned": 0,
+        "songs": 0,
+        "skipped_magnet": 0,
+    }
 
     try:
         with record_task_run(db, "pack_index", trigger) as run, track_job("pack_index", "Pack Index") as handle:
@@ -375,7 +486,7 @@ def run_sweep(
                 logger.warning("Could not read %s: %s", LAST_BACKFILL_KV, safe_exc(exc))
 
             if need_backfill:
-                bf_stats = backfill(db)
+                bf_stats = backfill(db, handle=handle)
                 for k, v in bf_stats.items():
                     stats[k] = stats.get(k, 0) + v
                 try:
@@ -383,21 +494,20 @@ def run_sweep(
                 except sqlite3.Error as exc:
                     logger.warning("Could not persist %s: %s", LAST_BACKFILL_KV, safe_exc(exc))
             else:
-                sp_stats = scan_pending(db, limit=200)
+                sp_stats = scan_pending(db, limit=200, handle=handle)
                 for k, v in sp_stats.items():
                     stats[k] = stats.get(k, 0) + v
 
-            msg = (
-                f"scanned={stats['scanned']}, skipped={stats['skipped']}, "
-                f"failed={stats['failed']}, errors={stats['errors']}"
-            )
+            msg = _format_sweep_summary(stats, db)
             run.message = handle.message = msg
+            logger.info("Pack index: %s", msg)
 
         return stats
     except Exception as exc:
         error = safe_exc(exc)
         raise
     finally:
+        _reset_progress()
         record = {
             "started_at": started,
             "finished_at": _iso(datetime.now(timezone.utc)),
@@ -506,6 +616,7 @@ __all__ = [
     "backfill",
     "collect_from_releases",
     "get_pack_backfill_pages",
+    "get_progress",
     "get_status",
     "is_running",
     "pack_index_worker",
