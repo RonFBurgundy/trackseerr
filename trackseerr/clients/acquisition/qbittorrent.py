@@ -10,6 +10,7 @@ from typing import Any, Optional
 
 import httpx
 
+from trackseerr.bencode import BencodeError, info_hash
 from trackseerr.clients.acquisition.base import AcquisitionDriver
 from trackseerr.models import AcquisitionSearchResult, DownloadStatus
 from trackseerr.redaction import safe_exc
@@ -143,24 +144,69 @@ class QbittorrentDriver(AcquisitionDriver):
             if isinstance(failure_count, int) and failure_count > 0:
                 raise RuntimeError(f"qBittorrent torrents/add failed (HTTP {status}): {text[:120]}")
 
+    def _fetch_torrent_payload(
+        self, result: AcquisitionSearchResult
+    ) -> tuple[Optional[bytes], str]:
+        if result.magnet_url:
+            return None, result.magnet_url
+
+        download_url = result.download_url or ""
+        if download_url.startswith("http"):
+            from trackseerr.clients.acquisition.torznab import (
+                IndexerUnavailable,
+                fetch_torrent_file,
+            )
+
+            try:
+                fetched = fetch_torrent_file(download_url, self.timeout)
+                if isinstance(fetched, str):
+                    return None, fetched
+                return fetched, download_url
+            except IndexerUnavailable as exc:
+                logger.warning(
+                    "Could not fetch the .torrent file, letting qBittorrent fetch the link: %s",
+                    safe_exc(exc),
+                )
+                return None, download_url
+
+        return None, download_url
+
+    def _post_add(
+        self,
+        client: httpx.Client,
+        torrent_bytes: Optional[bytes],
+        target_url: str,
+        extra_fields: dict[str, Any],
+    ) -> httpx.Response:
+        add_url = f"{self.host_url}/api/v2/torrents/add"
+        if torrent_bytes is not None:
+            files = {"torrents": ("release.torrent", torrent_bytes, "application/x-bittorrent")}
+            return client.post(add_url, files=files, data=extra_fields)
+        return client.post(add_url, data={"urls": target_url, **extra_fields})
+
     def download(self, result: AcquisitionSearchResult) -> str:
         """Submits magnet or torrent link to qBittorrent."""
         if not is_safe_service_url(self.host_url):
             raise ValueError("Prohibited host URL")
 
-        target_url = result.magnet_url or result.download_url
-        if not target_url:
+        torrent_bytes, target_url = self._fetch_torrent_payload(result)
+        if torrent_bytes is None and not target_url:
             raise ValueError("No magnet or download URL provided for torrent")
 
-        # Determine torrent hash
-        torrent_hash = result.download_id
-        btih_match = _BTIH_RE.search(target_url)
-        if btih_match:
-            torrent_hash = btih_match.group(1).lower()
-        elif result.extra and result.extra.get("info_hash"):
-            torrent_hash = str(result.extra["info_hash"]).lower()
-        elif ":" in torrent_hash:
-            torrent_hash = torrent_hash.split(":")[0].lower()
+        if torrent_bytes is not None:
+            try:
+                torrent_hash = info_hash(torrent_bytes)
+            except BencodeError as exc:
+                raise RuntimeError("The indexer did not return a valid .torrent file") from exc
+        else:
+            torrent_hash = result.download_id
+            btih_match = _BTIH_RE.search(target_url)
+            if btih_match:
+                torrent_hash = btih_match.group(1).lower()
+            elif result.extra and result.extra.get("info_hash"):
+                torrent_hash = str(result.extra["info_hash"]).lower()
+            elif ":" in torrent_hash:
+                torrent_hash = torrent_hash.split(":")[0].lower()
 
         extra = result.extra if isinstance(result.extra, dict) else {}
         file_indices = extra.get("file_indices")
@@ -174,15 +220,20 @@ class QbittorrentDriver(AcquisitionDriver):
                     client.headers["Cookie"] = self._cookie
 
             if file_indices:
-                return self._download_partial(client, result, target_url, torrent_hash)
+                return self._download_partial(
+                    client,
+                    result,
+                    target_url,
+                    torrent_hash,
+                    torrent_bytes=torrent_bytes,
+                )
 
-            add_url = f"{self.host_url}/api/v2/torrents/add"
-            payload = {
-                "urls": target_url,
-                "category": self.category,
-                "paused": "false",
-            }
-            resp = client.post(add_url, data=payload)
+            resp = self._post_add(
+                client,
+                torrent_bytes,
+                target_url,
+                {"category": self.category, "paused": "false"},
+            )
             self._check_add_response(resp)
 
         return torrent_hash
@@ -193,16 +244,15 @@ class QbittorrentDriver(AcquisitionDriver):
         result: AcquisitionSearchResult,
         target_url: str,
         torrent_hash: str,
+        torrent_bytes: Optional[bytes] = None,
     ) -> str:
         """Downloads only selected files from a torrent pack."""
-        add_url = f"{self.host_url}/api/v2/torrents/add"
-        payload = {
-            "urls": target_url,
-            "category": self.category,
-            "paused": "true",
-            "stopped": "true",
-        }
-        resp = client.post(add_url, data=payload)
+        resp = self._post_add(
+            client,
+            torrent_bytes,
+            target_url,
+            {"category": self.category, "paused": "true", "stopped": "true"},
+        )
         self._check_add_response(resp)
 
         files_data = self._wait_for_file_list(client, torrent_hash)

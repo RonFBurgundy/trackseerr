@@ -9,6 +9,7 @@ import pytest
 
 from trackseerr.acquisition_coordinator import AcquisitionCoordinator
 from trackseerr.acquisition_import import ImportPipelineMixin, _ImportJob, _PollContext
+from trackseerr.bencode import info_hash
 from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
 from trackseerr.item_history import GrabTrigger
 from trackseerr.models import (
@@ -687,6 +688,73 @@ def test_partial_grab_with_202_add() -> None:
         assert res_h == "hashqbit5"
 
         urls = [c[0][0] for c in mock_post.call_args_list]
+        assert any("torrents/filePrio" in u for u in urls)
+        assert any("torrents/start" in u or "torrents/resume" in u for u in urls)
+
+
+def test_partial_grab_uploads_torrent_file() -> None:
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=valid"
+
+    torrent_bytes = (
+        b"d4:infod6:lengthi1e4:name1:x12:piece lengthi16384e6:pieces20:"
+        + b"0" * 20
+        + b"ee"
+    )
+    expected_hash = info_hash(torrent_bytes)
+
+    cand = AcquisitionSearchResult(
+        download_id="original_id:0",
+        title="Artist - Song [FLAC] (in pack: Compilation)",
+        artist="Artist",
+        download_url="http://indexer.local/download?apikey=secret123",
+        protocol="torrent",
+        extra={
+            "file_indices": [0],
+            "file_paths": ["01 - Song.flac"],
+        },
+    )
+
+    add_resp = MagicMock(status_code=200, text="Ok.")
+    files_resp = MagicMock(
+        status_code=200,
+        json=lambda: [{"index": 0, "name": "01 - Song.flac"}],
+    )
+    prio_resp = MagicMock(status_code=200, text="Ok.")
+    resume_resp = MagicMock(status_code=200, text="Ok.")
+
+    with patch(
+        "trackseerr.clients.acquisition.torznab.fetch_torrent_file",
+        return_value=torrent_bytes,
+    ) as mock_fetch, patch(
+        "httpx.Client.post"
+    ) as mock_post, patch(
+        "httpx.Client.get", return_value=files_resp
+    ):
+        mock_post.side_effect = [add_resp, prio_resp, resume_resp]
+        res_h = driver.download(cand)
+        assert res_h == expected_hash
+
+        mock_fetch.assert_called_once_with(
+            "http://indexer.local/download?apikey=secret123", driver.timeout
+        )
+
+        calls = mock_post.call_args_list
+        assert len(calls) >= 3
+
+        # First call is torrents/add: multipart and stopped
+        add_url, add_kwargs = calls[0][0][0], calls[0][1]
+        assert "torrents/add" in add_url
+        files = add_kwargs.get("files")
+        data = add_kwargs.get("data")
+        assert files is not None and "torrents" in files
+        assert files["torrents"] == ("release.torrent", torrent_bytes, "application/x-bittorrent")
+        assert "urls" not in data
+        assert data.get("paused") == "true"
+        assert data.get("stopped") == "true"
+
+        # File priorities and resume
+        urls = [c[0][0] for c in calls]
         assert any("torrents/filePrio" in u for u in urls)
         assert any("torrents/start" in u or "torrents/resume" in u for u in urls)
 
