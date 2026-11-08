@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
+from trackseerr.api.routes.acquisition import _strip_api_key
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config
 from trackseerr.models import (
@@ -27,6 +28,7 @@ from trackseerr.models import (
     DownloadClientConfig,
     DownloadDriverType,
     DownloadStatus,
+    IndexerConfig,
     MusicRequest,
     QualityProfile,
     QualityProfileItem,
@@ -867,3 +869,230 @@ def test_manual_grab_explicit_client_no_failover(app_and_client, test_db, test_c
     assert resp.status_code == 500
     driver.download.assert_called_once()
     assert [c.args[0]["id"] for c in factory.call_args_list] == ["qbit-b"]
+
+
+def test_strip_api_key_keeps_other_params():
+    # Case-insensitive ApiKey
+    assert (
+        _strip_api_key("http://prowlarr:9696/download?ApiKey=SECRET&link=abc")
+        == "http://prowlarr:9696/download?link=abc"
+    )
+    # Case-insensitive api_key
+    assert (
+        _strip_api_key("http://prowlarr:9696/download?api_key=SECRET&link=abc")
+        == "http://prowlarr:9696/download?link=abc"
+    )
+    # URL without query
+    assert _strip_api_key("http://prowlarr:9696/download") == "http://prowlarr:9696/download"
+    # URL without apikey retains all params and order
+    assert (
+        _strip_api_key("http://prowlarr:9696/download?link=abc&file=x")
+        == "http://prowlarr:9696/download?link=abc&file=x"
+    )
+
+
+def test_strip_api_key_none():
+    assert _strip_api_key(None) is None
+    assert _strip_api_key("") == ""
+
+
+def test_search_hides_indexer_api_key(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    mock_candidates = [
+        AcquisitionSearchResult(
+            download_id="cand-1",
+            title="Daft Punk - Discovery (2001) [FLAC 24bit-96kHz WEB]",
+            artist="Daft Punk",
+            album="Discovery",
+            item_type="album",
+            size_bytes=800 * 1024 * 1024,
+            seeders=30,
+            source="torznab",
+            download_url="http://prowlarr:9696/1/download?apikey=SECRET123&link=abc&file=x",
+            extra={
+                "indexer_id": "idx-1",
+                "indexer_name": "Prowlarr",
+                "details_url": "http://prowlarr:9696/1/details?apikey=SECRET123&link=abc",
+            },
+        )
+    ]
+
+    with patch(
+        "trackseerr.api.routes.acquisition.acquisition_coordinator.search_all_indexers",
+        return_value=mock_candidates,
+    ):
+        resp = client.post(
+            "/api/acquisition/search",
+            headers=admin_headers,
+            json={"artist": "Daft Punk", "album": "Discovery", "item_type": "album"},
+        )
+
+    assert resp.status_code == 200
+    assert "SECRET123" not in resp.text
+    data = resp.json()
+    assert len(data["results"]) == 1
+    result = data["results"][0]
+    assert "link=abc" in result["download_url"]
+    assert "file=x" in result["download_url"]
+    assert "apikey" not in result["download_url"]
+
+
+def test_manual_grab_restores_indexer_api_key(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="qbit-client-1",
+            name="qBittorrent Primary",
+            driver_type="qbittorrent",
+            host_url="http://127.0.0.1:8080",
+            enabled=True,
+            priority=1,
+        )
+    )
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-1",
+            name="Prowlarr",
+            indexer_type="torznab",
+            host_url="http://prowlarr:9696/13/",
+            api_key="SECRET123",
+            enabled=True,
+        )
+    )
+    test_db.create_request(
+        MusicRequest(
+            id="req-manual-1",
+            user_id="user-alice",
+            item_type="album",
+            title="Random Access Memories",
+            artist="Daft Punk",
+            status=RequestStatus.PENDING,
+        )
+    )
+
+    grab_payload = {
+        "release": {
+            "id": "rel-qbit-101",
+            "title": "Daft Punk - Random Access Memories (2013) [FLAC 24bit]",
+            "indexer_name": "Prowlarr",
+            "protocol": "torrent",
+            "size_bytes": 1200000000,
+            "seeders": 45,
+            "download_url": "http://prowlarr:9696/1/download?link=abc",
+            "magnet_url": None,
+            "parsed_quality": "FLAC 24bit",
+            "is_acceptable": True,
+            "score": 1050,
+            "meets_cutoff": True,
+            "rejection_reasons": [],
+            "extra": {"indexer_id": "idx-1", "indexer_name": "Prowlarr"},
+        },
+        "artist": "Daft Punk",
+        "title": "Random Access Memories",
+        "album": "Random Access Memories",
+        "item_type": "album",
+        "request_id": "req-manual-1",
+    }
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "daftpunkram1234567890abcdef"
+
+    with patch(
+        "trackseerr.api.routes.acquisition.get_acquisition_driver",
+        return_value=mock_driver,
+    ):
+        resp = client.post(
+            "/api/acquisition/grab",
+            headers=admin_headers,
+            json=grab_payload,
+        )
+
+    assert resp.status_code == 200
+    mock_driver.download.assert_called_once()
+    download_arg = mock_driver.download.call_args[0][0]
+    assert "apikey=SECRET123" in download_arg.download_url
+    assert "link=abc" in download_arg.download_url
+
+
+def test_manual_grab_never_sends_key_to_other_host(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="qbit-client-1",
+            name="qBittorrent Primary",
+            driver_type="qbittorrent",
+            host_url="http://127.0.0.1:8080",
+            enabled=True,
+            priority=1,
+        )
+    )
+    test_db.create_indexer(
+        IndexerConfig(
+            id="idx-1",
+            name="Prowlarr",
+            indexer_type="torznab",
+            host_url="http://prowlarr:9696/13/",
+            api_key="SECRET123",
+            enabled=True,
+        )
+    )
+    test_db.create_request(
+        MusicRequest(
+            id="req-manual-1",
+            user_id="user-alice",
+            item_type="album",
+            title="Random Access Memories",
+            artist="Daft Punk",
+            status=RequestStatus.PENDING,
+        )
+    )
+
+    grab_payload = {
+        "release": {
+            "id": "rel-qbit-101",
+            "title": "Daft Punk - Random Access Memories (2013) [FLAC 24bit]",
+            "indexer_name": "Prowlarr",
+            "protocol": "torrent",
+            "size_bytes": 1200000000,
+            "seeders": 45,
+            "download_url": "http://evil.example/x?link=abc",
+            "magnet_url": None,
+            "parsed_quality": "FLAC 24bit",
+            "is_acceptable": True,
+            "score": 1050,
+            "meets_cutoff": True,
+            "rejection_reasons": [],
+            "extra": {"indexer_id": "idx-1", "indexer_name": "Prowlarr"},
+        },
+        "artist": "Daft Punk",
+        "title": "Random Access Memories",
+        "album": "Random Access Memories",
+        "item_type": "album",
+        "request_id": "req-manual-1",
+    }
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "daftpunkram1234567890abcdef"
+
+    with patch(
+        "trackseerr.api.routes.acquisition.get_acquisition_driver",
+        return_value=mock_driver,
+    ):
+        resp = client.post(
+            "/api/acquisition/grab",
+            headers=admin_headers,
+            json=grab_payload,
+        )
+
+    assert resp.status_code == 200
+    mock_driver.download.assert_called_once()
+    download_arg = mock_driver.download.call_args[0][0]
+    assert "apikey" not in download_arg.download_url
+    assert download_arg.download_url == "http://evil.example/x?link=abc"
+
