@@ -135,17 +135,20 @@ def _seed_bryan_adams(
     return music, staging, dl
 
 
-def _run_worker(db: Database, dl: Path, staging: Path) -> dict[str, int]:
-    driver = MagicMock()
-    driver.get_status.return_value = {
-        "status": DownloadStatus.COMPLETED.value,
-        "progress": 100.0,
-        "size_bytes": 1,
-        "speed_bps": 0,
-        "eta_seconds": 0,
-        "source_path": str(dl),
-        "error_message": None,
-    }
+def _run_worker(
+    db: Database, dl: Path, staging: Path, driver: MagicMock | None = None
+) -> dict[str, int]:
+    if driver is None:
+        driver = MagicMock()
+        driver.get_status.return_value = {
+            "status": DownloadStatus.COMPLETED.value,
+            "progress": 100.0,
+            "size_bytes": 1,
+            "speed_bps": 0,
+            "eta_seconds": 0,
+            "source_path": str(dl),
+            "error_message": None,
+        }
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
         return AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
@@ -255,23 +258,56 @@ def test_track_grab_single_version_used_when_only_variant(tmp_path: Path, db: Da
 
 
 def test_track_grab_no_matching_file_goes_to_manual_import(tmp_path: Path, db: Database):
-    """When no files in download match wanted title, marks for manual import without failure/blocklist."""
+    """When no files in download match wanted title, marks FAILED, blocklists, and searches again."""
     music, staging, dl = _seed_bryan_adams(db, tmp_path)
 
     _flac(dl / "01 Cuts Like A Knife.flac", b"DIFFERENT-SONG-1")
     _flac(dl / "02 Summer of 69.flac", b"DIFFERENT-SONG-2")
 
-    stats = _run_worker(db, dl, staging)
-    assert stats["imported"] == 0
-    assert stats["failed"] == 0
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "size_bytes": 1,
+        "speed_bps": 0,
+        "eta_seconds": 0,
+        "source_path": str(dl),
+        "error_message": None,
+    }
 
+    with patch("trackseerr.acquisition_worker._research_after_failure") as mock_research:
+        stats = _run_worker(db, dl, staging, driver=driver)
+
+    assert stats["imported"] == 0
     assert len(list(music.rglob("*.flac"))) == 0
 
     row = db.get_active_download("dl-1")
-    assert row["status"] == DownloadStatus.WARNING.value
-    assert row["error_message"] == 'No file in the download matches "(Everything I Do) I Do It for You"'
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert row["error_message"] == 'No file in the download matches "(Everything I Do) I Do It for You"; searching again'
     assert len(row["unmatched_files"]) == 2
-    assert not db.is_blocklisted(release_title="Bryan Adams - (Everything I Do) I Do It For You (1991) (CDM) [FLAC] [MP3]")
+    assert db.is_blocklisted(release_title="Bryan Adams - (Everything I Do) I Do It For You (1991) (CDM) [FLAC] [MP3]")
+    mock_research.assert_called_once()
+    assert mock_research.call_args[0][0] == db
+    assert mock_research.call_args[0][1]["id"] == "dl-1"
+    assert mock_research.call_args[0][2] == 'No file in the download matches "(Everything I Do) I Do It for You"'
+    driver.cancel.assert_not_called()
+    driver.cleanup_completed.assert_not_called()
+
+
+def test_single_file_download_still_imports_without_match(tmp_path: Path, db: Database):
+    """Single-file download whose filename doesn't match still imports and links to wanted track."""
+    music, staging, dl = _seed_bryan_adams(db, tmp_path)
+
+    _flac(dl / "01 Cuts Like A Knife.flac", b"SINGLE-FILE-NOMATCH")
+
+    stats = _run_worker(db, dl, staging)
+    assert stats["imported"] == 1
+    assert stats["failed"] == 0
+
+    placed_files = list(music.rglob("*.flac"))
+    assert len(placed_files) == 1
+    assert placed_files[0].read_bytes().endswith(b"SINGLE-FILE-NOMATCH")
+    assert db.get_library_file_for_track("trk-everything") is not None
 
 
 def test_track_grab_request_without_track_id_resolves_catalog_track(tmp_path: Path, db: Database):
