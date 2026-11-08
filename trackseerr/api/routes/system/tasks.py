@@ -25,7 +25,7 @@ from trackseerr.api.schemas.system import (
     TaskProgress,
     TaskRunItem,
 )
-from trackseerr import art_pipeline, library_health, process_stats, recycle_bin, seed_cleanup
+from trackseerr import art_pipeline, library_health, pack_scanner, process_stats, recycle_bin, seed_cleanup
 from trackseerr.acquisition_worker import acquisition_worker
 from trackseerr.update_check import (
     run_update_check,
@@ -135,6 +135,7 @@ _MANUAL_RUNNABLE = {
     "artist_metadata_refresh",
     "art_thumbnail_backfill",
     "seed_cleanup",
+    "pack_index",
     "library_health",
     "recycle_bin_cleanup",
     "lidarr_request_retry",
@@ -230,6 +231,7 @@ def get_all_scheduled_tasks(
     lidarr_stat = lidarr_worker.get_status()
     ar_stat = artist_refresh_worker.get_status()
     sc_stat = seed_cleanup.get_status(db)
+    pi_stat = pack_scanner.get_status(db)
     rb_stat = recycle_bin.get_status()
     mig_stat = lidarr_migration_job.get_status()
     try:
@@ -298,6 +300,11 @@ def get_all_scheduled_tasks(
         "seed_cleanup": (
             "running" if (sc_stat.get("running") or "seed_cleanup" in _running_tasks) else "idle",
             (sc_stat.get("last_run") or {}).get("finished_at"),
+            False,
+        ),
+        "pack_index": (
+            "running" if (pi_stat.get("running") or "pack_index" in _running_tasks) else "idle",
+            (pi_stat.get("last_run") or {}).get("finished_at"),
             False,
         ),
         "library_health": (
@@ -693,6 +700,9 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Library manager is Lidarr; seed cleanup is disabled.")
         if not seed_cleanup.start_sweep_async(db):
             return {"success": True, "message": "Task 'seed_cleanup' is already running"}
+    elif task_id == "pack_index":
+        if not pack_scanner.start_sweep_async(db):
+            return {"success": True, "message": "Task 'pack_index' is already running"}
     elif task_id == "recycle_bin_cleanup":
         if not recycle_bin.start_cleanup_async(db):
             return {"success": True, "message": "Task 'recycle_bin_cleanup' is already running"}

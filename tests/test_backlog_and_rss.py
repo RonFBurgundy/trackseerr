@@ -60,7 +60,7 @@ SAMPLE_TORZNAB_FEED_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <enclosure url="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&amp;dn=Daft+Punk" length="450000000" type="application/x-bittorrent" />
       <torznab:attr name="seeders" value="42" />
       <torznab:attr name="peers" value="10" />
-      <torznab:attr name="category" value="3020" />
+      <torznab:attr name="category" value="3040" />
     </item>
     <item>
       <title>Coldplay - Parachutes (2000) [MP3 320kbps]</title>

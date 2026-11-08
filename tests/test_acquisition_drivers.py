@@ -1102,7 +1102,7 @@ TORZNAB_RESULTS_XML = """<?xml version="1.0" encoding="UTF-8"?>
       <title>Pink Floyd - The Dark Side of the Moon (1973) [FLAC]</title>
       <guid>http://prowlarr:9696/1/details/101</guid>
       <size>280000000</size>
-      <category>3020</category>
+      <category>3040</category>
       <enclosure url="magnet:?xt=urn:btih:fedcba9876543210fedcba9876543210fedcba98&amp;dn=Pink+Floyd" length="280000000" type="application/x-bittorrent" />
       <torznab:attr name="seeders" value="25" />
       <torznab:attr name="peers" value="30" />
@@ -1162,6 +1162,130 @@ def test_torznab_search_music():
         assert item.quality_str == "FLAC"
         assert item.download_url is not None
         assert "magnet:" in item.download_url
+
+
+def test_torznab_video_filter():
+    import xml.etree.ElementTree as ET
+    indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
+
+    # Category 3020 is dropped
+    xml_cat3020 = ET.fromstring("""
+        <item>
+            <title>Pink Floyd - The Dark Side of the Moon (1973) [FLAC]</title>
+            <category>3020</category>
+        </item>
+    """)
+    assert indexer._parse_item(xml_cat3020) is None
+
+    # Movie category (2000-2999) is dropped
+    xml_movie = ET.fromstring("""
+        <item>
+            <title>David Guetta - Live Concert</title>
+            <category>2040</category>
+        </item>
+    """)
+    assert indexer._parse_item(xml_movie) is None
+
+    # TV category (5000-5999) via torznab:attr is dropped
+    xml_tv = ET.fromstring("""
+        <item xmlns:torznab="http://torznab.com/schemas/2015/feed">
+            <title>David Guetta - TV Show</title>
+            <torznab:attr name="category" value="5030" />
+        </item>
+    """)
+    assert indexer._parse_item(xml_tv) is None
+
+    # Evidence video titles are dropped even in audio category (3000)
+    video_titles = [
+        "David Guetta ft Bebe Rexha-Im Good (Blue) (2022 MTV Europe Music Awards)-1080p-x264-2022-SRPx",
+        "David Guetta-Tomorrowland (2026)-DDC-1080p-VP9-2026-SRPx iNT",
+        "David Guetta Nothing But The Beat 2011 MDVDR-EiSO",
+    ]
+    for title in video_titles:
+        xml_item = ET.fromstring(f"""
+            <item>
+                <title>{title}</title>
+                <category>3000</category>
+            </item>
+        """)
+        assert indexer._parse_item(xml_item) is None, f"Expected {title} to be dropped"
+
+    # Evidence audio titles with bare WEB or CD/FLAC are KEPT
+    audio_titles = [
+        "David Guetta X MORTEN - Lost In The Rhythm (Extended Mix)-SINGLE-WEB-2023-FMC",
+        "David Guetta-Pop Life-CD-FLAC-2007-PERFECT",
+    ]
+    for title in audio_titles:
+        xml_item = ET.fromstring(f"""
+            <item>
+                <title>{title}</title>
+                <category>3000</category>
+            </item>
+        """)
+        res = indexer._parse_item(xml_item)
+        assert res is not None, f"Expected {title} to be kept"
+        assert res.title == title
+        assert res.extra["categories"] == [3000]
+
+
+def test_torznab_fetch_page():
+    indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = TORZNAB_RESULTS_XML
+
+    with patch("httpx.Client.get", return_value=mock_resp) as mock_get:
+        results = indexer.fetch_page(offset=100, limit=50)
+        assert len(results) == 1
+        assert "offset=100" in mock_get.call_args[0][0]
+        assert "limit=50" in mock_get.call_args[0][0]
+        assert "t=search" in mock_get.call_args[0][0]
+
+
+def test_torznab_fetch_torrent_success():
+    indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
+    torrent_data = b"d4:infod6:lengthi100e4:name4:teste8:announce4:teste"
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.headers = {"Content-Length": str(len(torrent_data))}
+    mock_resp.iter_bytes.return_value = [torrent_data]
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = False
+
+    with patch("httpx.Client.stream", return_value=mock_resp):
+        res = indexer.fetch_torrent("http://prowlarr:9696/1/download/123.torrent")
+        assert res == torrent_data
+
+
+def test_torznab_fetch_torrent_magnet_redirect():
+    indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
+    magnet_url = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567"
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 302
+    mock_resp.headers = {"Location": magnet_url}
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = False
+
+    with patch("httpx.Client.stream", return_value=mock_resp):
+        res = indexer.fetch_torrent("http://prowlarr:9696/1/download/123.torrent")
+        assert res == magnet_url
+
+
+def test_torznab_fetch_torrent_oversize_rejected():
+    from trackseerr.clients.acquisition.torznab import IndexerUnavailable
+    indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.headers = {"Content-Length": "20000000"}  # 20MB > 10MB
+    mock_resp.__enter__.return_value = mock_resp
+    mock_resp.__exit__.return_value = False
+
+    with patch("httpx.Client.stream", return_value=mock_resp):
+        with pytest.raises(IndexerUnavailable, match="exceeds size limit"):
+            indexer.fetch_torrent("http://prowlarr:9696/1/download/huge.torrent")
 
 
 # ---------------------------------------------------------------------------

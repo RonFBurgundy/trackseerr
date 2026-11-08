@@ -278,6 +278,7 @@ def test_pausable_tasks_are_interval_tasks():
         "art_thumbnail_backfill",
         "mix_generation",
         "seed_cleanup",
+        "pack_index",
         "recycle_bin_cleanup",
         "backup",
         "update_check",
@@ -303,6 +304,22 @@ def test_health_check_task_registered_and_pausable(db):
     assert task_manager.is_paused(db, "health_check") is True
     task_manager.set_paused(db, "health_check", False)
     assert task_manager.is_paused(db, "health_check") is False
+
+
+def test_pack_index_task_registered_and_pausable(db):
+    spec = task_manager.TASKS.get("pack_index")
+    assert spec is not None
+    assert spec.name == "Pack Index"
+    assert spec.kind == task_manager.KIND_INTERVAL
+    assert spec.default_interval_seconds == 6 * 3600
+    assert spec.group == task_manager.GROUP_ACQUISITION
+    assert "pack_index" in task_manager.PAUSABLE_TASKS
+
+    assert task_manager.is_paused(db, "pack_index") is False
+    task_manager.set_paused(db, "pack_index", True)
+    assert task_manager.is_paused(db, "pack_index") is True
+    task_manager.set_paused(db, "pack_index", False)
+    assert task_manager.is_paused(db, "pack_index") is False
 
 
 def test_set_paused_round_trip_and_rejects_non_pausable(db):
