@@ -32,6 +32,7 @@ from trackseerr.item_history import TRIGGER_MANUAL, GrabTrigger, _iso
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.redaction import redact_text
 from trackseerr.clients.acquisition import get_acquisition_driver
+from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
 from trackseerr.seed_rules import apply_seed_rules_at_grab
 from trackseerr.models import (
     AcquisitionSearchResult,
@@ -342,6 +343,44 @@ def grab_release(
         ) from exc
 
 
+def _dispatch_manual_grab(
+    search_result: AcquisitionSearchResult,
+    client: Optional[dict[str, Any]],
+    db: Database,
+    title: str,
+) -> tuple[dict[str, Any], Any, str]:
+    """Validates and dispatches manual grab to client driver."""
+    if search_result.extra and search_result.extra.get("file_indices") and client is not None:
+        c_driver = (client.get("driver_type") or client.get("service_type") or "").lower()
+        if c_driver != "qbittorrent":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only qBittorrent can download part of a torrent",
+            )
+    try:
+        if client is not None:
+            client_driver = get_acquisition_driver(client)
+            download_hash = client_driver.download(search_result)
+            return client, client_driver, download_hash
+        client_res, download_hash = acquisition_coordinator.dispatch_with_failover(
+            db, search_result, get_acquisition_driver
+        )
+        return client_res, get_acquisition_driver(client_res), download_hash
+    except AcquisitionUnavailableError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except NoClientAvailable:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No download client configured or available for protocol",
+        )
+    except ValueError as e:
+        logger.error("Validation error dispatching download for '%s': %s", title, redact_text(str(e)))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Download dispatch failed: {redact_text(str(e))}")
+    except Exception as e:
+        logger.error("Failed dispatching download for '%s': %s", title, redact_text(str(e)))
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Download client error: {redact_text(str(e))}")
+
+
 def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any]) -> dict[str, Any]:
     """Force-enqueues a manually selected candidate release to the target download client.
 
@@ -375,43 +414,21 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
     )
 
     # 3. Dispatch download to client driver
-    try:
-        if client is not None:
-            client_driver = get_acquisition_driver(client)
-            download_hash = client_driver.download(search_result)
-        else:
-            client, download_hash = acquisition_coordinator.dispatch_with_failover(
-                db, search_result, get_acquisition_driver
-            )
-            client_driver = get_acquisition_driver(client)
-    except NoClientAvailable:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No download client configured or available for protocol",
-        )
-    except ValueError as e:
-        logger.error(
-            "Validation error dispatching download for '%s': %s",
-            payload.release.title,
-            redact_text(str(e)),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Download dispatch failed: {redact_text(str(e))}",
-        )
-    except Exception as e:
-        logger.error(
-            "Failed dispatching download for '%s': %s",
-            payload.release.title,
-            redact_text(str(e)),
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Download client error: {redact_text(str(e))}",
-        )
+    client, client_driver, download_hash = _dispatch_manual_grab(
+        search_result, client, db, payload.release.title
+    )
 
     # 4. Insert active download record
     download_id = f"dl-{uuid.uuid4().hex[:12]}"
+    selected_files_list = None
+    if search_result.extra and search_result.extra.get("file_indices"):
+        indices = search_result.extra.get("file_indices") or []
+        paths = search_result.extra.get("file_paths") or []
+        selected_files_list = [
+            {"file_index": idx, "path": path}
+            for idx, path in zip(indices, paths)
+        ]
+
     active_dl = ActiveDownload(
         id=download_id,
         request_id=payload.request_id,
@@ -427,6 +444,7 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
         target_path=None,
         track_id=payload.track_id,
         album_id=payload.album_id,
+        selected_files=selected_files_list,
     )
     try:
         db.create_active_download(active_dl)

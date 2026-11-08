@@ -8,6 +8,7 @@ appropriate download clients (qBittorrent, SABnzbd, slskd), and tracks active tr
 import dataclasses
 from dataclasses import dataclass
 import logging
+from pathlib import Path
 import re
 import sqlite3
 import threading
@@ -729,6 +730,115 @@ def _search_indexers(
     return results
 
 
+def _search_pack_index(
+    db: Database,
+    artist: str,
+    title: Optional[str],
+    album: Optional[str],
+    context: Optional[SearchContext],
+    errors: Optional[list[dict[str, str]]],
+) -> list[AcquisitionSearchResult]:
+    """Searches the local pack index for songs matching artist and title."""
+    if not title or not str(title).strip():
+        return []
+    try:
+        indexers = db.list_indexers(enabled_only=True)
+    except Exception as e:
+        logger.error("Failed to query enabled indexers for pack search: %s", e)
+        return []
+
+    eligible_indexers: dict[str, dict[str, Any]] = {}
+    for idx_cfg in indexers:
+        idx_id = str(idx_cfg.get("id"))
+        if str(idx_cfg.get("pack_scan") or "off").lower() == "off":
+            continue
+        if indexer_status.paused_until(idx_id) is not None:
+            continue
+        eligible_indexers[idx_id] = idx_cfg
+
+    if not eligible_indexers:
+        return []
+
+    started = time.monotonic()
+    try:
+        matches = db.search_pack_files(artist, str(title).strip())
+    except Exception as e:
+        logger.warning("Failed to search pack files: %s", redact_text(str(e)))
+        return []
+
+    results: list[AcquisitionSearchResult] = []
+    by_indexer: dict[str, list[AcquisitionSearchResult]] = {idx_id: [] for idx_id in eligible_indexers}
+
+    for m in matches:
+        if m.indexer_id not in eligible_indexers:
+            continue
+        idx_cfg = eligible_indexers[m.indexer_id]
+        idx_name = str(idx_cfg.get("name", "unknown"))
+        priority = _indexer_priority(idx_cfg)
+        min_seeders = idx_cfg.get("minimum_seeders")
+
+        filename = Path(m.path.replace("\\", "/")).name
+        parsed = parse_release_title(filename)
+
+        ext_clean = (m.ext or "").lstrip(".").upper()
+        cand_artist = m.parsed_artist or artist
+        cand_title = m.parsed_title or title
+        display_title = f"{cand_artist} - {cand_title} [{ext_clean}] (in pack: {m.pack_title})"
+        download_id = f"{m.info_hash or m.pack_id}:{m.file_index}"
+
+        extra = {
+            "pack_id": m.pack_id,
+            "pack_title": m.pack_title,
+            "pack_file_count": m.file_count,
+            "file_indices": [m.file_index],
+            "file_paths": [m.path],
+            "info_hash": m.info_hash,
+            "indexer_id": idx_cfg.get("id"),
+            "indexer_name": idx_name,
+            "indexer_priority": priority,
+            "indexer_minimum_seeders": min_seeders,
+        }
+
+        res = AcquisitionSearchResult(
+            download_id=download_id,
+            title=display_title,
+            artist=cand_artist,
+            album=album,
+            item_type="track",
+            size_bytes=int(m.size_bytes or 0),
+            bit_rate=parsed.bitrate_kbps,
+            format=(m.ext or "").lstrip(".").lower() or None,
+            quality_str=parsed.quality if parsed.quality and parsed.quality != "Unknown" else None,
+            seeders=m.seeders,
+            download_url=m.download_url,
+            magnet_url=m.magnet_url,
+            source="torznab",
+            protocol="torrent",
+            extra=extra,
+        )
+        results.append(res)
+        by_indexer[m.indexer_id].append(res)
+
+    for idx_id, idx_cfg in eligible_indexers.items():
+        idx_name = str(idx_cfg.get("name", "unknown"))
+        source_name = f"{idx_name} (pack index)"
+        idx_type = str(idx_cfg.get("indexer_type") or "torznab")
+        res_count = len(by_indexer.get(idx_id, []))
+        _record_search(
+            db=db,
+            context=context,
+            source_name=source_name,
+            source_type=idx_type,
+            artist=artist,
+            title=title,
+            album=album,
+            count=res_count,
+            started=started,
+        )
+
+    return results
+
+
 def _search_slskd(
     db: Database,
     artist: str,
@@ -839,6 +949,9 @@ class AcquisitionCoordinator:
         all_results: list[AcquisitionSearchResult] = []
         if not slskd_only:
             all_results.extend(_search_indexers(db, artist, title, album, context, errors))
+            current_rung = context.rung if context else 1
+            if current_rung == 1:
+                all_results.extend(_search_pack_index(db, artist, title, album, context, errors))
         all_results.extend(_search_slskd(db, artist, title, album, context, errors, slskd_query_text, stats))
         return _apply_blocklist(db, all_results, include_blocklisted)
 
@@ -1034,6 +1147,8 @@ class AcquisitionCoordinator:
                 continue
 
             parsed = parse_release_title(candidate.title)
+            if candidate.quality_str and candidate.extra and candidate.extra.get("file_indices"):
+                parsed.quality = candidate.quality_str
             eval_res = evaluate_prepared(
                 parsed,
                 prepared,
@@ -1127,7 +1242,14 @@ class AcquisitionCoordinator:
         """
         make_driver = driver_factory or get_acquisition_driver
         clients = self.clients_for_protocol(candidate.protocol, db)
+        if candidate.extra and candidate.extra.get("file_indices"):
+            clients = [
+                c for c in clients
+                if (c.get("driver_type") or c.get("service_type") or "").lower() == "qbittorrent"
+            ]
         if not clients:
+            if candidate.extra and candidate.extra.get("file_indices"):
+                raise AcquisitionUnavailableError("Only qBittorrent can download part of a torrent")
             raise NoClientAvailable(f"No enabled download client available for {candidate.protocol}")
         last_error: Optional[Exception] = None
         for client in clients:
@@ -1140,6 +1262,29 @@ class AcquisitionCoordinator:
                 last_error = e
         assert last_error is not None
         raise last_error
+
+
+    def _select_grab_candidate(
+        self,
+        ranked: list[tuple[AcquisitionSearchResult, EvaluationResult]],
+        db: Database,
+    ) -> tuple[Optional[AcquisitionSearchResult], Optional[EvaluationResult], Optional[str]]:
+        """Picks the top candidate, skipping pack-file candidates when no qBittorrent client is available."""
+        has_pack = False
+        for cand, res in ranked:
+            if cand.extra and cand.extra.get("file_indices"):
+                has_pack = True
+                clients = self.clients_for_protocol(cand.protocol, db)
+                has_qbit = any(
+                    (c.get("driver_type") or c.get("service_type") or "").lower() == "qbittorrent"
+                    for c in clients
+                )
+                if not has_qbit:
+                    logger.info("Skipping candidate '%s': Only qBittorrent can download part of a torrent", cand.title)
+                    continue
+            return cand, res, None
+        skip_reason = "Only qBittorrent can download part of a torrent" if has_pack else None
+        return None, None, skip_reason
 
     def search_and_grab(
         self,
@@ -1297,7 +1442,30 @@ class AcquisitionCoordinator:
                 "candidates_count": len(candidates),
             }
 
-        top_candidate, eval_res = ranked[0]
+        top_candidate, eval_res, pack_skip_reason = self._select_grab_candidate(ranked, db)
+        if top_candidate is None or eval_res is None:
+            reason = pack_skip_reason or (
+                "No acceptable releases found meeting quality profile criteria"
+                if min_score is None
+                else f"No candidate release score exceeds current score {min_score}"
+            )
+            searched_kwargs: dict[str, Any] = dict(
+                request_id=request_id, message=reason, dedupe_last=True,
+                details={"reason": reason, "candidates_count": len(candidates), "searched": title},
+                **trigger_kwargs(trigger),
+            )
+            if track_id or album_id:
+                emit(db, "searched", track_id=track_id, album_id=album_id, **searched_kwargs)
+            else:
+                emit_named(
+                    db, "searched", artist=artist, album=album or (title if item_type == "album" else None),
+                    title=title if item_type != "album" else None, **searched_kwargs,
+                )
+            return {
+                "success": False,
+                "message": reason,
+                "candidates_count": len(candidates),
+            }
 
         # 3b. Delay gate (manual grabs never come through here with a delay: they pass bypass_delay or use /grab)
         if not bypass_delay:
@@ -1372,6 +1540,21 @@ class AcquisitionCoordinator:
         trigger: GrabTrigger,
     ) -> dict[str, Any]:
         """Dispatches a chosen candidate to its protocol's client and records the download (no delay gate)."""
+        if top_candidate.extra and top_candidate.extra.get("file_indices"):
+            clients = self.clients_for_protocol(top_candidate.protocol, db)
+            has_qbit = any(
+                (c.get("driver_type") or c.get("service_type") or "").lower() == "qbittorrent"
+                for c in clients
+            )
+            if not has_qbit:
+                reason = "Only qBittorrent can download part of a torrent"
+                logger.info("Skipping candidate '%s': %s", top_candidate.title, reason)
+                return {
+                    "success": False,
+                    "reason": reason,
+                    "message": reason,
+                }
+
         # 5. Dispatch to the best client for the protocol, failing over to the next on client-side errors
         try:
             client, download_hash = self.dispatch_with_failover(db, top_candidate)
@@ -1413,6 +1596,15 @@ class AcquisitionCoordinator:
 
         # 6. Record active download in database
         download_id = f"dl-{uuid.uuid4().hex[:12]}"
+        selected_files_list = None
+        if top_candidate.extra and top_candidate.extra.get("file_indices"):
+            indices = top_candidate.extra.get("file_indices") or []
+            paths = top_candidate.extra.get("file_paths") or []
+            selected_files_list = [
+                {"file_index": idx, "path": path}
+                for idx, path in zip(indices, paths)
+            ]
+
         active_dl = ActiveDownload(
             id=download_id,
             request_id=request_id,
@@ -1428,6 +1620,7 @@ class AcquisitionCoordinator:
             target_path=None,
             track_id=track_id,
             album_id=album_id,
+            selected_files=selected_files_list,
         )
         db.create_active_download(active_dl)
         apply_seed_rules_at_grab(
