@@ -121,37 +121,47 @@ class TestCalendarValidation:
         _, client = app_and_client
         # Missing start and end uses defaults (today-7 to today+30)
         assert client.get("/api/calendar", headers=admin_headers).status_code == 200
-        # Partial query params: only start
-        assert client.get("/api/calendar?start=2026-10-01", headers=admin_headers).status_code == 200
-        # Partial query params: only end
-        assert client.get("/api/calendar?end=2026-10-31", headers=admin_headers).status_code == 200
+        # Partial query params: only start (default end is today+30)
+        start_date = (date.today() - timedelta(days=5)).isoformat()
+        assert client.get(f"/api/calendar?start={start_date}", headers=admin_headers).status_code == 200
+        # Partial query params: only end (default start is today-7)
+        end_date = (date.today() + timedelta(days=30)).isoformat()
+        assert client.get(f"/api/calendar?end={end_date}", headers=admin_headers).status_code == 200
 
     def test_invalid_date_format_returns_400(self, app_and_client, admin_headers):
         _, client = app_and_client
-        resp = client.get("/api/calendar?start=2026/10/01&end=2026-10-31", headers=admin_headers)
+        end_date = (date.today() + timedelta(days=30)).isoformat()
+        resp = client.get(f"/api/calendar?start=2026/10/01&end={end_date}", headers=admin_headers)
         assert resp.status_code == 400
         assert "Invalid start date" in resp.json()["detail"]
 
-        resp = client.get("/api/calendar?start=2026-10-01&end=invalid", headers=admin_headers)
+        start_date = (date.today() - timedelta(days=7)).isoformat()
+        resp = client.get(f"/api/calendar?start={start_date}&end=invalid", headers=admin_headers)
         assert resp.status_code == 400
         assert "Invalid end date" in resp.json()["detail"]
 
     def test_end_before_start_returns_400(self, app_and_client, admin_headers):
         _, client = app_and_client
-        resp = client.get("/api/calendar?start=2026-10-20&end=2026-10-10", headers=admin_headers)
+        start_date = (date.today() + timedelta(days=10)).isoformat()
+        end_date = date.today().isoformat()
+        resp = client.get(f"/api/calendar?start={start_date}&end={end_date}", headers=admin_headers)
         assert resp.status_code == 400
         assert "end date must be on or after start date" in resp.json()["detail"].lower()
 
     def test_range_exceeding_120_days_returns_400(self, app_and_client, admin_headers):
         _, client = app_and_client
-        resp = client.get("/api/calendar?start=2026-01-01&end=2026-05-15", headers=admin_headers)
+        start_date = date.today().isoformat()
+        end_date = (date.today() + timedelta(days=130)).isoformat()
+        resp = client.get(f"/api/calendar?start={start_date}&end={end_date}", headers=admin_headers)
         assert resp.status_code == 400
         assert "120 days" in resp.json()["detail"]
 
     def test_range_at_120_days_is_accepted(self, app_and_client, admin_headers):
         _, client = app_and_client
-        # 120 days: 2026-01-01 to 2026-05-01 is 120 days
-        resp = client.get("/api/calendar?start=2026-01-01&end=2026-05-01", headers=admin_headers)
+        # 120 days: start to start + 120 days
+        start_date = date.today().isoformat()
+        end_date = (date.today() + timedelta(days=120)).isoformat()
+        resp = client.get(f"/api/calendar?start={start_date}&end={end_date}", headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json() == []
 
