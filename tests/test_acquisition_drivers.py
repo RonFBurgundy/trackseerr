@@ -897,6 +897,164 @@ def test_sabnzbd_download_and_status():
         assert status["progress"] == 45.0
 
 
+def test_sab_encrypted_slot_fails():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secret")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "queue": {
+            "slots": [
+                {
+                    "nzo_id": "nzo-enc",
+                    "status": "Paused",
+                    "labels": ["Encrypted"],
+                }
+            ]
+        }
+    }
+    with patch("httpx.Client.get", return_value=mock_resp):
+        status = driver.get_status("nzo-enc")
+        assert status["status"] == DownloadStatus.FAILED.value
+        assert status["error_message"] == "SABnzbd paused it: the download is password-protected"
+
+
+def test_sab_too_large_slot_fails():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secret")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "queue": {
+            "slots": [
+                {
+                    "nzo_id": "nzo-large",
+                    "status": "Paused",
+                    "labels": ["too large"],
+                }
+            ]
+        }
+    }
+    with patch("httpx.Client.get", return_value=mock_resp):
+        status = driver.get_status("nzo-large")
+        assert status["status"] == DownloadStatus.FAILED.value
+        assert status["error_message"] == "SABnzbd paused it: the download is larger than its size limit"
+
+
+def test_sab_paused_duplicate_fails():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secret")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "queue": {
+            "slots": [
+                {
+                    "nzo_id": "nzo-dup",
+                    "status": "Paused",
+                    "labels": ["DUPLICATE"],
+                }
+            ]
+        }
+    }
+    with patch("httpx.Client.get", return_value=mock_resp):
+        status = driver.get_status("nzo-dup")
+        assert status["status"] == DownloadStatus.FAILED.value
+        assert status["error_message"] == "SABnzbd paused it as a duplicate"
+
+
+def test_sab_unpaused_duplicate_label_still_downloading():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secret")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "queue": {
+            "slots": [
+                {
+                    "nzo_id": "nzo-dup-active",
+                    "status": "Downloading",
+                    "labels": ["DUPLICATE"],
+                    "percentage": "20.0",
+                }
+            ]
+        }
+    }
+    with patch("httpx.Client.get", return_value=mock_resp):
+        status = driver.get_status("nzo-dup-active")
+        assert status["status"] == DownloadStatus.DOWNLOADING.value
+        assert status["error_message"] is None
+
+
+def test_sab_missing_job_flags_missing():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secret")
+    mock_q = MagicMock(status_code=200)
+    mock_q.json.return_value = {"queue": {"slots": []}}
+    mock_h = MagicMock(status_code=200)
+    mock_h.json.return_value = {"history": {"slots": []}}
+
+    def side_effect(url):
+        if "mode=queue" in str(url):
+            return mock_q
+        return mock_h
+
+    with patch("httpx.Client.get", side_effect=side_effect):
+        status = driver.get_status("nzo-missing")
+        assert status["status"] == DownloadStatus.QUEUED.value
+        assert status.get("missing") is True
+
+
+@pytest.mark.parametrize(
+    "post_status",
+    ["Extracting", "Verifying", "Repairing", "Moving", "Running"],
+)
+def test_sab_history_postprocessing_not_missing(post_status: str):
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secret")
+    mock_q = MagicMock(status_code=200)
+    mock_q.json.return_value = {"queue": {"slots": []}}
+    mock_h = MagicMock(status_code=200)
+    mock_h.json.return_value = {
+        "history": {
+            "slots": [
+                {
+                    "nzo_id": "nzo-postproc",
+                    "status": post_status,
+                    "bytes": 52428800,
+                }
+            ]
+        }
+    }
+
+    def side_effect(url):
+        if "mode=queue" in str(url):
+            return mock_q
+        return mock_h
+
+    with patch("httpx.Client.get", side_effect=side_effect):
+        status = driver.get_status("nzo-postproc")
+        assert status["status"] == DownloadStatus.DOWNLOADING.value
+        assert status["progress"] == 100.0
+        assert status["size_bytes"] == 52428800
+        assert status["speed_bps"] == 0
+        assert status["eta_seconds"] == 0
+        assert status["source_path"] is None
+        assert status["error_message"] is None
+        assert "missing" not in status
+
+
+def test_sab_http_error_not_flagged_missing():
+    driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secret")
+    mock_q = MagicMock(status_code=500)
+    mock_h = MagicMock(status_code=200)
+    mock_h.json.return_value = {"history": {"slots": []}}
+
+    def side_effect(url):
+        if "mode=queue" in str(url):
+            return mock_q
+        return mock_h
+
+    with patch("httpx.Client.get", side_effect=side_effect):
+        status = driver.get_status("nzo-error")
+        assert status["status"] == DownloadStatus.QUEUED.value
+        assert "missing" not in status
+
+
 def test_sabnzbd_download_unsafe_url_rejected():
     driver = SabnzbdDriver("http://sabnzbd:8080", api_key="secret")
     item = AcquisitionSearchResult(
