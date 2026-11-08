@@ -242,6 +242,71 @@ def _last_search(db: Database, query: "InteractiveSearchQuery") -> Optional[dict
     return None
 
 
+def _manual_search_fallbacks(
+    artist: str,
+    title: Optional[str],
+    album: Optional[str],
+    db: Database,
+    candidates: list[AcquisitionSearchResult],
+    indexer_errors: list[dict[str, str]],
+    context: SearchContext,
+) -> list[AcquisitionSearchResult]:
+    """Runs fallback manual searches (album-only search and Soulseek banned-word workaround) and dedupes."""
+    combined = list(candidates)
+
+    # If clean_title and clean_album are both set and clean_album.casefold() != clean_title.casefold():
+    # run a second acquisition_coordinator.search_all_indexers with title=None, album=clean_album
+    if title and album and album.casefold() != title.casefold():
+        try:
+            album_results = acquisition_coordinator.search_all_indexers(
+                artist=artist,
+                title=None,
+                album=album,
+                db=db,
+                include_blocklisted=True,
+                errors=indexer_errors,
+                context=context,
+            )
+            combined.extend(album_results)
+        except Exception as e:
+            logger.error(
+                "Failed searching indexers for '%s' (album '%s'): %s",
+                artist,
+                album,
+                redact_text(str(e)),
+            )
+
+    # If no candidate so far has protocol == "slskd": append _banned_term_tier results
+    if not any(r.protocol == "slskd" for r in combined):
+        try:
+            banned_results = acquisition_coordinator._banned_term_tier(
+                artist,
+                title,
+                album,
+                db,
+                context,
+                start_rung=2,
+            )
+            combined.extend(banned_results)
+        except Exception as e:
+            logger.error(
+                "Failed Soulseek banned-term search for '%s' ('%s' / '%s'): %s",
+                artist,
+                title,
+                album,
+                redact_text(str(e)),
+            )
+
+    # De-duplicate the combined list by download_id (keep first occurrence)
+    seen: set[str] = set()
+    deduped: list[AcquisitionSearchResult] = []
+    for r in combined:
+        if r.download_id not in seen:
+            seen.add(r.download_id)
+            deduped.append(r)
+    return deduped
+
+
 def _build_release_item(
     r: AcquisitionSearchResult,
     eval_res: Any,
@@ -317,6 +382,7 @@ def search_releases(
 
     # 2. Query all enabled indexers and slskd clients
     indexer_errors: list[dict[str, str]] = []
+    context = SearchContext(trigger_kind=TRIGGER_MANUAL, track_id=query.track_id, album_id=query.album_id)
     try:
         candidates = acquisition_coordinator.search_all_indexers(
             artist=clean_artist,
@@ -325,7 +391,7 @@ def search_releases(
             db=db,
             include_blocklisted=True,
             errors=indexer_errors,
-            context=SearchContext(trigger_kind=TRIGGER_MANUAL, track_id=query.track_id, album_id=query.album_id),
+            context=context,
         )
     except Exception as e:
         logger.error(
@@ -336,6 +402,16 @@ def search_releases(
             redact_text(str(e)),
         )
         candidates = []
+
+    candidates = _manual_search_fallbacks(
+        artist=clean_artist,
+        title=clean_title,
+        album=clean_album,
+        db=db,
+        candidates=candidates,
+        indexer_errors=indexer_errors,
+        context=context,
+    )
 
     # 3. Parse and evaluate each candidate release
     prepared = prepare_profile(profile)
