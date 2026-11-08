@@ -80,6 +80,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Manual search for a song also searches its album when the album name is different, and when Soulseek returns nothing it tries again around Soulseek's banned search words, the same way automatic searches do.
 - Manual search is easier to find: an album's **⋯** menu on the artist page has **Manual search…**, and each song in an open album has a search button, like in the album details window.
 - TrackSeerr is gentler on the MusicBrainz mirror: at most 3 requests per second and 2 at a time (set with `MUSICBRAINZ_MIRROR_RPS` and `MUSICBRAINZ_MIRROR_CONCURRENCY`). When the mirror asks it to slow down, it waits as long as asked, and it stops asking a mirror that keeps refusing it.
 - On phones, task rows on the Tasks page show icon-only Run and Cancel buttons and drop the Running badge while the progress bar shows, so task names have room (they wrap to two lines instead of being cut off).
@@ -121,6 +122,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Songs imported from DJ pools no longer keep the BPM in their title ("Gotta Be Cool 124" becomes "Gotta Be Cool"), file names like "Coolio Feat. L.V. - Gangsta's Paradise" give the right song title, and a file with no album tag goes into "Unknown Album" instead of a folder named only by its year.
+- When a song download contains several files and none of them is the wanted song, TrackSeerr now marks it failed, blocklists that release and searches again, instead of leaving it in the Queue waiting for a manual import. The files can still be imported by hand.
 - Grabbing a second song from a pack that is already in qBittorrent now adds that song to the existing torrent instead of failing. Removing one of those songs from the Queue only stops that song's file, and seed cleanup waits until every song in the torrent has finished. Manual search no longer marks the other songs in a pack as "Already downloading".
 - TrackSeerr never changes or removes a torrent that is in qBittorrent under another app's category.
 - A bad .torrent file from an indexer now fails just that release instead of pausing all torrent downloads for 5 minutes. Magnet links that use the short (base32) hash format are now tracked correctly, and qBittorrent 5's "stopped" states are understood.
