@@ -3,6 +3,7 @@
 import logging
 import sqlite3
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -30,7 +31,7 @@ from trackseerr.api.schemas.acquisition import (
 )
 from trackseerr.item_history import TRIGGER_MANUAL, GrabTrigger, _iso
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
-from trackseerr.redaction import redact_text
+from trackseerr.redaction import redact_text, safe_exc
 from trackseerr.clients.acquisition import get_acquisition_driver
 from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
 from trackseerr.seed_rules import apply_seed_rules_at_grab
@@ -48,6 +49,45 @@ from trackseerr.storage import Database
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _strip_api_key(url: Optional[str]) -> Optional[str]:
+    """Remove every query parameter whose name lowercased is apikey or api_key."""
+    if not url:
+        return url
+    parts = urlsplit(url)
+    if not parts.query:
+        return url
+    q_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    filtered = [(k, v) for k, v in q_pairs if k.lower() not in ("apikey", "api_key")]
+    if len(filtered) == len(q_pairs):
+        return url
+    new_query = urlencode(filtered)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
+
+
+def _restore_api_key(url: Optional[str], indexer: Optional[dict[str, Any]]) -> Optional[str]:
+    """Re-add indexer apikey to url if url matches indexer host and has no apikey parameter."""
+    if not url or not indexer:
+        return url
+    api_key = indexer.get("api_key") if isinstance(indexer, dict) else getattr(indexer, "api_key", None)
+    if not api_key:
+        return url
+    host_url = indexer.get("host_url") if isinstance(indexer, dict) else getattr(indexer, "host_url", None)
+    if not host_url:
+        return url
+    parts = urlsplit(url)
+    idx_parts = urlsplit(host_url)
+    if not parts.netloc or not idx_parts.netloc:
+        return url
+    if parts.scheme.lower() != idx_parts.scheme.lower() or parts.netloc.lower() != idx_parts.netloc.lower():
+        return url
+    q_pairs = parse_qsl(parts.query, keep_blank_values=True)
+    if any(k.lower() in ("apikey", "api_key") for k, _ in q_pairs):
+        return url
+    q_pairs.append(("apikey", str(api_key)))
+    new_query = urlencode(q_pairs)
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, new_query, parts.fragment))
 
 
 class InteractiveReleaseItem(BaseModel):
@@ -200,6 +240,9 @@ def _build_release_item(
     if proto in ("slskd", "soulseek"):
         proto = "p2p"
     extra_data = dict(r.extra or {})
+    for k, v in list(extra_data.items()):
+        if isinstance(v, str) and v.startswith("http"):
+            extra_data[k] = _strip_api_key(v)
     indexer_name = extra_data.get("indexer_name") or r.source or ("slskd" if proto == "p2p" else "Indexer")
     pub_date = extra_data.get("publish_date") or extra_data.get("pub_date") or extra_data.get("pubDate")
     reasons = list(eval_res.rejection_reasons)
@@ -221,7 +264,7 @@ def _build_release_item(
         size_bytes=int(r.size_bytes or 0),
         seeders=r.seeders,
         publish_date=str(pub_date) if pub_date is not None else None,
-        download_url=r.download_url,
+        download_url=_strip_api_key(r.download_url),
         magnet_url=r.magnet_url,
         parsed_quality=eval_res.parsed_quality,
         source=parsed.source or r.source,
@@ -395,6 +438,17 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
         except Exception as e:
             logger.warning("Failed to fetch download client '%s': %s", payload.client_id, e)
 
+    indexer: Optional[dict[str, Any]] = None
+    extra = payload.release.extra or {}
+    if extra.get("indexer_id"):
+        try:
+            indexer = db.get_indexer(str(extra["indexer_id"]))
+        except sqlite3.Error as exc:
+            logger.warning("Failed to fetch indexer '%s': %s", extra["indexer_id"], safe_exc(exc))
+            indexer = None
+
+    download_url = _restore_api_key(payload.release.download_url, indexer)
+
     # 2. Reconstruct canonical AcquisitionSearchResult
     search_result = AcquisitionSearchResult(
         download_id=payload.release.id,
@@ -406,7 +460,7 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
         format=None,
         quality_str=payload.release.parsed_quality,
         seeders=payload.release.seeders,
-        download_url=payload.release.download_url,
+        download_url=download_url,
         magnet_url=payload.release.magnet_url,
         source=payload.release.source or payload.release.indexer_name,
         extra=payload.release.extra or {},
