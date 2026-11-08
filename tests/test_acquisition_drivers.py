@@ -1792,6 +1792,30 @@ def test_torznab_fetch_page():
         assert "t=search" in mock_get.call_args[0][0]
 
 
+def test_torznab_fetch_page_with_query_sends_q():
+    indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = TORZNAB_RESULTS_XML
+
+    with patch("httpx.Client.get", return_value=mock_resp) as mock_get:
+        results = indexer.fetch_page(offset=0, limit=100, query="Dj Pools")
+        assert len(results) == 1
+        assert "q=Dj%20Pools" in mock_get.call_args[0][0]
+
+
+def test_torznab_fetch_page_without_query_has_no_q():
+    indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = TORZNAB_RESULTS_XML
+
+    with patch("httpx.Client.get", return_value=mock_resp) as mock_get:
+        results = indexer.fetch_page(offset=0, limit=100)
+        assert len(results) == 1
+        assert "q=" not in mock_get.call_args[0][0]
+
+
 def test_torznab_fetch_torrent_success():
     indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
     torrent_data = b"d4:infod6:lengthi100e4:name4:teste8:announce4:teste"

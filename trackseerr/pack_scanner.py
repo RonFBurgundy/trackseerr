@@ -293,6 +293,38 @@ def scan_pending(db: Any, limit: int = 20, handle: Any | None = None) -> dict[st
     return counts
 
 
+PACK_SEARCH_TERMS_DEFAULT = ("Dj Pools Music Pack", "pack", "pool", "megapack", "chart", "VA")
+
+
+def get_pack_search_terms(db: Any) -> list[str]:
+    """Read pack_search_terms from kv_store as JSON list of non-empty strings, else default."""
+    if hasattr(db, "get_kv"):
+        try:
+            raw = db.get_kv("pack_search_terms")
+            if raw is not None:
+                parsed = json.loads(raw)
+                if isinstance(parsed, list):
+                    terms = [str(t).strip() for t in parsed if isinstance(t, str) and t.strip()]
+                    if terms:
+                        return terms
+        except (ValueError, TypeError, sqlite3.Error) as exc:
+            logger.warning("Could not read pack_search_terms, falling back to default: %s", safe_exc(exc))
+    return list(PACK_SEARCH_TERMS_DEFAULT)
+
+
+def get_pack_search_pages(db: Any) -> int:
+    """Read pack_search_pages from kv_store, default 3, clamped 1-20."""
+    if hasattr(db, "get_kv"):
+        try:
+            raw = db.get_kv("pack_search_pages")
+            if raw is not None:
+                val = int(raw)
+                return max(1, min(20, val))
+        except (ValueError, TypeError, sqlite3.Error):
+            pass
+    return 3
+
+
 def get_pack_backfill_pages(db: Any) -> int:
     """Read pack_backfill_pages from kv_store, default 5, clamped 1-50."""
     if hasattr(db, "get_kv"):
@@ -304,6 +336,45 @@ def get_pack_backfill_pages(db: Any) -> int:
         except (ValueError, TypeError, sqlite3.Error):
             pass
     return 5
+
+
+def _backfill_search_terms(
+    db: Any,
+    idx_cfg: dict[str, Any],
+    driver: Any,
+    counts: dict[str, int],
+    handle: Any | None,
+) -> None:
+    """Queries configured pack search terms for an indexer, collecting results."""
+    idx_id = str(idx_cfg.get("id"))
+    if indexer_status.paused_until(idx_id) is not None:
+        return
+
+    idx_name = str(idx_cfg.get("name") or idx_id)
+    terms = get_pack_search_terms(db)
+    search_pages = get_pack_search_pages(db)
+
+    for term in terms:
+        if indexer_status.paused_until(idx_id) is not None:
+            break
+        for page in range(search_pages):
+            if indexer_status.paused_until(idx_id) is not None:
+                break
+            msg = f'Searching {idx_name} for "{term}", page {page + 1} of {search_pages}'
+            _set_progress(0, 0, message=msg, handle=handle)
+            offset = page * 100
+            try:
+                releases = driver.fetch_page(offset=offset, limit=100, query=term)
+                indexer_status.record_success(idx_id)
+            except IndexerError as exc:
+                indexer_status.record_failure(idx_id, exc)
+                counts["errors"] += 1
+                return
+
+            if not releases:
+                break
+
+            counts["collected"] += collect_from_releases(db, idx_cfg, releases)
 
 
 def backfill(db: Any, pages: int | None = None, handle: Any | None = None) -> dict[str, int]:
@@ -363,6 +434,8 @@ def backfill(db: Any, pages: int | None = None, handle: Any | None = None) -> di
                 break
 
             counts["collected"] += collect_from_releases(db, idx_cfg, releases)
+
+        _backfill_search_terms(db, idx_cfg, driver, counts, handle)
 
     scan_res = scan_pending(db, limit=200, handle=handle)
     for k in ("scanned", "skipped", "failed", "errors", "songs", "skipped_magnet"):
@@ -469,14 +542,15 @@ def run_sweep(
     try:
         with record_task_run(db, "pack_index", trigger) as run, track_job("pack_index", "Pack Index") as handle:
             need_backfill = True
-            try:
-                raw_bf = db.get_kv(LAST_BACKFILL_KV)
-                if raw_bf:
-                    dt = parse_iso(raw_bf)
-                    if dt and (when - dt) < timedelta(hours=BACKFILL_INTERVAL_HOURS):
-                        need_backfill = False
-            except sqlite3.Error as exc:
-                logger.warning("Could not read %s: %s", LAST_BACKFILL_KV, safe_exc(exc))
+            if trigger != TRIGGER_MANUAL:
+                try:
+                    raw_bf = db.get_kv(LAST_BACKFILL_KV)
+                    if raw_bf:
+                        dt = parse_iso(raw_bf)
+                        if dt and (when - dt) < timedelta(hours=BACKFILL_INTERVAL_HOURS):
+                            need_backfill = False
+                except sqlite3.Error as exc:
+                    logger.warning("Could not read %s: %s", LAST_BACKFILL_KV, safe_exc(exc))
 
             if need_backfill:
                 bf_stats = backfill(db, handle=handle)
