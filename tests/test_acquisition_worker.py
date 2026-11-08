@@ -769,6 +769,24 @@ def test_usenet_failure_researches_track(test_db, tmp_path):
     driver.cancel.assert_not_called()
 
 
+def test_usenet_missing_fails_after_limit(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SABNZBD, 35)
+    _set_row(test_db, track_id="trk-1")
+    with patch("trackseerr.backlog_worker.backlog_worker.queue_wanted_search", return_value={"queued": 1}) as q, \
+            patch.object(Database, "list_wanted_search_targets", return_value=[{"track_id": "trk-1"}]):
+        driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0, "missing": True})
+    assert row["status"] == DownloadStatus.FAILED.value
+    assert row["error_message"] == "Download disappeared from the usenet client"
+    q.assert_called_once()
+
+
+def test_usenet_missing_within_limit_kept(test_db, tmp_path):
+    _seed_slskd_row(test_db, DownloadDriverType.SABNZBD, 15)
+    driver, row = _poll_slskd(test_db, tmp_path, {"status": "queued", "progress": 0.0, "missing": True})
+    assert row["status"] == DownloadStatus.QUEUED.value
+    assert row.get("error_message") is None
+
+
 def test_failed_album_download_researches_album_tracks(test_db, tmp_path):
     _seed_slskd_row(test_db, DownloadDriverType.SABNZBD, 5)
     _set_row(test_db, album_id="alb-1")

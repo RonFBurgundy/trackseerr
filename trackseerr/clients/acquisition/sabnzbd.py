@@ -159,6 +159,16 @@ class SabnzbdDriver(AcquisitionDriver):
                 return str(nzo_ids[0])
             return str(data.get("nzo_id", result.download_id))
 
+    @staticmethod
+    def _check_slot_stuck_reason(labels: list[str], is_paused: bool) -> Optional[str]:
+        if "ENCRYPTED" in labels:
+            return "SABnzbd paused it: the download is password-protected"
+        if "TOO LARGE" in labels:
+            return "SABnzbd paused it: the download is larger than its size limit"
+        if "DUPLICATE" in labels and is_paused:
+            return "SABnzbd paused it as a duplicate"
+        return None
+
     def get_status(self, download_id: str) -> dict[str, Any]:
         """Inspects status of a download in SABnzbd queue or history."""
         if not is_safe_service_url(self.host_url):
@@ -166,23 +176,40 @@ class SabnzbdDriver(AcquisitionDriver):
 
         try:
             with httpx.Client(timeout=self.timeout) as client:
+                queue_ok = False
                 # 1. Check active queue
                 queue_url = self._api_url("queue")
                 q_resp = client.get(queue_url)
                 if q_resp.status_code == 200:
                     q_data = q_resp.json().get("queue", {})
                     slots = q_data.get("slots", [])
+                    queue_ok = True
                     for slot in slots:
                         if slot.get("nzo_id") == download_id:
+                            labels = [str(x).upper() for x in slot.get("labels") or []]
+                            slot_status = str(slot.get("status", "")).lower()
+                            is_paused = "paused" in slot_status
+
+                            stuck_reason = self._check_slot_stuck_reason(labels, is_paused)
+                            if stuck_reason:
+                                return {
+                                    "status": DownloadStatus.FAILED.value,
+                                    "progress": 0.0,
+                                    "size_bytes": 0,
+                                    "speed_bps": 0,
+                                    "eta_seconds": 0,
+                                    "source_path": None,
+                                    "error_message": stuck_reason,
+                                }
+
                             percentage = float(slot.get("percentage") or 0.0)
                             kbpersec = float(slot.get("kbpersec") or 0.0)
                             mb_total = float(slot.get("mb") or 0.0)
                             size_bytes = int(mb_total * 1024 * 1024)
                             speed_bps = int(kbpersec * 1024)
-                            slot_status = str(slot.get("status", "")).lower()
 
                             status_str = DownloadStatus.DOWNLOADING.value
-                            if "paused" in slot_status:
+                            if is_paused:
                                 status_str = DownloadStatus.QUEUED.value
 
                             return {
@@ -196,11 +223,13 @@ class SabnzbdDriver(AcquisitionDriver):
                             }
 
                 # 2. Check history (completed / failed)
+                history_ok = False
                 hist_url = self._api_url("history", nzo_ids=download_id)
                 h_resp = client.get(hist_url)
                 if h_resp.status_code == 200:
                     h_data = h_resp.json().get("history", {})
                     h_slots = h_data.get("slots", [])
+                    history_ok = True
                     for slot in h_slots:
                         if slot.get("nzo_id") == download_id:
                             h_status = str(slot.get("status", "")).upper()
@@ -227,15 +256,18 @@ class SabnzbdDriver(AcquisitionDriver):
                                     "error_message": slot.get("fail_message", "Usenet download failed"),
                                 }
 
-            return {
-                "status": DownloadStatus.QUEUED.value,
-                "progress": 0.0,
-                "size_bytes": 0,
-                "speed_bps": 0,
-                "eta_seconds": 0,
-                "source_path": None,
-                "error_message": None,
-            }
+                res: dict[str, Any] = {
+                    "status": DownloadStatus.QUEUED.value,
+                    "progress": 0.0,
+                    "size_bytes": 0,
+                    "speed_bps": 0,
+                    "eta_seconds": 0,
+                    "source_path": None,
+                    "error_message": None,
+                }
+                if queue_ok and history_ok:
+                    res["missing"] = True
+                return res
         except Exception as e:
             logger.warning("Error fetching SABnzbd status for %s: %s", download_id, e)
             return {

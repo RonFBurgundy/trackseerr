@@ -246,6 +246,17 @@ def _torrent_dead_reason(item: dict[str, Any], status_dict: dict[str, Any], now:
     return f"Torrent never started downloading after {limit} min (no seeders?)"
 
 
+def _usenet_missing_reason(
+    item: dict[str, Any], status_dict: dict[str, Any], now: datetime, limit: int
+) -> Optional[str]:
+    """Return why a usenet download should be failed as missing, or None."""
+    if status_dict.get("missing"):
+        age = _minutes_since(item.get("created_at"), now)
+        if age is not None and age > limit:
+            return "Download disappeared from the usenet client"
+    return None
+
+
 def _fail_if_torrent_dead(
     driver: Any, item: dict[str, Any], status_dict: dict[str, Any], lookup: str, client_config: dict[str, Any]
 ) -> dict[str, Any]:
@@ -263,11 +274,16 @@ def _apply_stall_checks(
     db: Database, driver: Any, item: dict[str, Any], status_dict: dict[str, Any], lookup: str,
     client_config: dict[str, Any], is_slskd: bool,
 ) -> dict[str, Any]:
-    """Soulseek stall detection or dead-torrent detection, whichever the client type calls for."""
+    """Soulseek stall detection, dead-torrent detection, or usenet missing check."""
     if is_slskd:
         return _check_slskd_status(db, driver, item, status_dict, lookup, client_config)
     if is_torrent_driver_type(client_config.get("driver_type")):
         return _fail_if_torrent_dead(driver, item, status_dict, lookup, client_config)
+    if client_config.get("driver_type") in ("sabnzbd", "nzbget"):
+        limit = _env_minutes("USENET_MISSING_MINUTES", 30)
+        reason = _usenet_missing_reason(item, status_dict, datetime.now(timezone.utc), limit)
+        if reason:
+            return {**status_dict, "status": DownloadStatus.FAILED.value, "error_message": reason}
     return status_dict
 
 
