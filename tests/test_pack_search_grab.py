@@ -10,6 +10,7 @@ import pytest
 from trackseerr.acquisition_coordinator import AcquisitionCoordinator
 from trackseerr.acquisition_import import ImportPipelineMixin, _ImportJob, _PollContext
 from trackseerr.bencode import info_hash
+from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
 from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
 from trackseerr.item_history import GrabTrigger
 from trackseerr.models import (
@@ -247,7 +248,12 @@ def test_grab_pack_file_sets_priorities_and_resumes() -> None:
     mock_prio_resp = MagicMock(status_code=200, text="Ok.")
     mock_start_resp = MagicMock(status_code=200, text="Ok.")
 
-    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", return_value=mock_files_resp):
+    def mock_get(url, *args, **kwargs):
+        if "torrents/info" in url:
+            return MagicMock(status_code=200, json=lambda: [])
+        return mock_files_resp
+
+    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", side_effect=mock_get):
         mock_post.side_effect = [mock_add_resp, mock_prio_resp, mock_prio_resp, mock_start_resp]
         result_hash = driver.download(cand)
         assert result_hash == "hash123"
@@ -300,13 +306,19 @@ def test_grab_waits_for_magnet_metadata() -> None:
         status_code=200,
         json=lambda: [{"index": 0, "name": "01 - Song.flac"}],
     )
+    file_responses = [empty_resp, empty_resp, files_resp]
+
+    def mock_get(url, *args, **kwargs):
+        if "torrents/info" in url:
+            return MagicMock(status_code=200, json=lambda: [])
+        return file_responses.pop(0)
 
     with patch("httpx.Client.post", return_value=MagicMock(status_code=200, text="Ok.")), \
-         patch("httpx.Client.get", side_effect=[empty_resp, empty_resp, files_resp]) as mock_get, \
+         patch("httpx.Client.get", side_effect=mock_get) as mock_get_patch, \
          patch("time.sleep") as mock_sleep:
         h = driver.download(cand)
         assert h == "hashmeta"
-        assert mock_get.call_count == 3
+        assert mock_get_patch.call_count == 4
         assert mock_sleep.call_count == 2
 
 
@@ -345,7 +357,7 @@ def test_metadata_timeout_removes_torrent() -> None:
         assert del_calls[0][1]["data"]["hashes"] == "hashtimeout"
 
 
-def test_index_drift_aborts() -> None:
+def test_index_drift_is_unavailable() -> None:
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
     driver._cookie = "SID=valid"
 
@@ -370,15 +382,76 @@ def test_index_drift_aborts() -> None:
         ],
     )
 
-    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", return_value=drift_resp):
+    def mock_get(url, *args, **kwargs):
+        if "torrents/info" in url:
+            return MagicMock(status_code=200, json=lambda: [])
+        return drift_resp
+
+    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", side_effect=mock_get):
         mock_post.return_value = MagicMock(status_code=200, text="Ok.")
-        with pytest.raises(RuntimeError) as exc_info:
+        with pytest.raises(AcquisitionUnavailableError) as exc_info:
             driver.download(cand)
+        assert exc_info.value.reason == "release_unavailable"
         assert "Index drift" in str(exc_info.value)
 
         del_calls = [c for c in mock_post.call_args_list if "torrents/delete" in c[0][0]]
         assert len(del_calls) == 1
         assert del_calls[0][1]["data"]["deleteFiles"] == "false"
+
+
+def test_second_song_from_existing_pack_torrent() -> None:
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=valid"
+
+    cand = AcquisitionSearchResult(
+        download_id="hashpack:7",
+        title="Artist - Seventh Song [FLAC] (in pack: Compilation)",
+        artist="Artist",
+        download_url="magnet:?xt=urn:btih:hashpack&dn=Pack",
+        protocol="torrent",
+        extra={
+            "file_indices": [7],
+            "file_paths": ["folder/07 - Seventh Song.flac"],
+            "info_hash": "hashpack",
+        },
+    )
+
+    info_resp = MagicMock(
+        status_code=200,
+        json=lambda: [{"hash": "hashpack", "category": "trackseerr"}],
+    )
+    files_resp = MagicMock(
+        status_code=200,
+        json=lambda: [
+            {"index": 3, "name": "folder/03 - Third Song.flac", "priority": 1},
+            {"index": 7, "name": "folder/07 - Seventh Song.flac", "priority": 0},
+        ],
+    )
+
+    def mock_get(url, *args, **kwargs):
+        if "torrents/info" in url:
+            return info_resp
+        if "torrents/files" in url:
+            return files_resp
+        return MagicMock(status_code=404)
+
+    mock_post_resp = MagicMock(status_code=200, text="Ok.")
+    with patch("httpx.Client.get", side_effect=mock_get), patch(
+        "httpx.Client.post", return_value=mock_post_resp
+    ) as mock_post:
+        res_h = driver.download(cand)
+        assert res_h == "hashpack"
+
+        urls = [c[0][0] for c in mock_post.call_args_list]
+        assert not any("torrents/add" in u for u in urls)
+        assert any("torrents/filePrio" in u for u in urls)
+        assert any("torrents/start" in u or "torrents/resume" in u for u in urls)
+
+        prio_calls = [c for c in mock_post.call_args_list if "torrents/filePrio" in c[0][0]]
+        assert len(prio_calls) == 1
+        assert prio_calls[0][1]["data"]["id"] == "7"
+        assert prio_calls[0][1]["data"]["priority"] == 1
+        assert not any(c[1]["data"]["priority"] == 0 for c in prio_calls)
 
 
 def test_non_qbit_client_skips_pack_candidate(db: Database) -> None:
@@ -638,7 +711,12 @@ def test_qbit4_resume_fallback() -> None:
     start_resp = MagicMock(status_code=404, text="Not Found")
     resume_resp = MagicMock(status_code=200, text="Ok.")
 
-    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", return_value=files_resp):
+    def mock_get(url, *args, **kwargs):
+        if "torrents/info" in url:
+            return MagicMock(status_code=200, json=lambda: [])
+        return files_resp
+
+    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", side_effect=mock_get):
         mock_post.side_effect = [add_resp, prio_resp, start_resp, resume_resp]
         res_h = driver.download(cand)
         assert res_h == "hashqbit4"
@@ -682,7 +760,12 @@ def test_partial_grab_with_202_add() -> None:
     prio_resp = MagicMock(status_code=200, text="Ok.")
     resume_resp = MagicMock(status_code=200, text="Ok.")
 
-    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", return_value=files_resp):
+    def mock_get_202(url, *args, **kwargs):
+        if "torrents/info" in url:
+            return MagicMock(status_code=200, json=lambda: [])
+        return files_resp
+
+    with patch("httpx.Client.post") as mock_post, patch("httpx.Client.get", side_effect=mock_get_202):
         mock_post.side_effect = [add_resp, prio_resp, resume_resp]
         res_h = driver.download(cand)
         assert res_h == "hashqbit5"
@@ -723,13 +806,18 @@ def test_partial_grab_uploads_torrent_file() -> None:
     prio_resp = MagicMock(status_code=200, text="Ok.")
     resume_resp = MagicMock(status_code=200, text="Ok.")
 
+    def mock_get_upload(url, *args, **kwargs):
+        if "torrents/info" in url:
+            return MagicMock(status_code=200, json=lambda: [])
+        return files_resp
+
     with patch(
         "trackseerr.clients.acquisition.torznab.fetch_torrent_file",
         return_value=torrent_bytes,
     ) as mock_fetch, patch(
         "httpx.Client.post"
     ) as mock_post, patch(
-        "httpx.Client.get", return_value=files_resp
+        "httpx.Client.get", side_effect=mock_get_upload
     ):
         mock_post.side_effect = [add_resp, prio_resp, resume_resp]
         res_h = driver.download(cand)

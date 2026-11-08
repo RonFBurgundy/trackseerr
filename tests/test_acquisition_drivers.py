@@ -17,7 +17,7 @@ import pytest
 import httpx
 
 from trackseerr.bencode import info_hash
-from trackseerr.clients.acquisition.base import AcquisitionDriver
+from trackseerr.clients.acquisition.base import AcquisitionDriver, AcquisitionUnavailableError
 from trackseerr.clients.acquisition.slskd import SlskdDriver, SlskdNotLoggedInError
 from trackseerr.clients.acquisition.sabnzbd import SabnzbdDriver
 from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
@@ -1155,7 +1155,65 @@ def test_qbittorrent_uploads_fetched_torrent_file():
         assert data.get("paused") == "false"
 
 
-def test_qbittorrent_falls_back_to_url_when_fetch_fails(caplog):
+def test_btih_base32_converted_to_hex():
+    import base64
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=test_sid"
+    b32_hash = "4X2VGV4B5S6Y7Z3C3G2V4B5S6Y7Z3C3G"
+    expected_hex = base64.b32decode(b32_hash.upper()).hex().lower()
+    item = AcquisitionSearchResult(
+        download_id="original_id",
+        title="RAM",
+        artist="Daft Punk",
+        magnet_url=f"magnet:?xt=urn:btih:{b32_hash}&dn=Music",
+        source="qbittorrent",
+    )
+    add_resp = MagicMock(status_code=200, text="Ok.")
+    with patch("httpx.Client.post", return_value=add_resp):
+        res_hash = driver.download(item)
+        assert res_hash == expected_hex
+
+
+def test_torznab_parses_infohash_attr():
+    import xml.etree.ElementTree as ET
+    indexer = TorznabDriver("http://prowlarr:9696/1/api", api_key="prowlarrkey")
+    xml_item = ET.fromstring("""
+        <item xmlns:torznab="http://torznab.com/schemas/2015/feed">
+            <title>Daft Punk - Discovery (2001) [FLAC]</title>
+            <category>3000</category>
+            <torznab:attr name="infohash" value="ABCDEF0123456789ABCDEF0123456789ABCDEF01" />
+        </item>
+    """)
+    result = indexer._parse_item(xml_item)
+    assert result is not None
+    assert result.extra.get("info_hash") == "abcdef0123456789abcdef0123456789abcdef01"
+
+
+def test_fetch_failure_without_hash_is_unavailable():
+    from trackseerr.clients.acquisition.torznab import IndexerUnavailable
+
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+
+    item = AcquisitionSearchResult(
+        download_id="original_id",
+        title="RAM",
+        artist="Daft Punk",
+        download_url="http://indexer.local/download?apikey=secret123",
+        source="qbittorrent",
+    )
+
+    with patch(
+        "trackseerr.clients.acquisition.torznab.fetch_torrent_file",
+        side_effect=IndexerUnavailable("Connection timeout"),
+    ), patch("httpx.Client.post") as mock_post:
+        with pytest.raises(AcquisitionUnavailableError) as exc_info:
+            driver.download(item)
+        assert exc_info.value.reason == "release_unavailable"
+        assert "Could not download the .torrent file from the indexer" in str(exc_info.value)
+        assert mock_post.call_count == 0
+
+
+def test_fetch_failure_with_known_hash_falls_back_to_url():
     from trackseerr.clients.acquisition.torznab import IndexerUnavailable
 
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
@@ -1163,105 +1221,143 @@ def test_qbittorrent_falls_back_to_url_when_fetch_fails(caplog):
     login_resp = MagicMock(status_code=200, text="Ok.", cookies={"SID": "test_sid"})
     add_resp = MagicMock(status_code=200, text="Ok.")
 
+    known_hash = "abcdef0123456789abcdef0123456789abcdef01"
     download_url = "http://indexer.local/download?apikey=secretkey123"
     item = AcquisitionSearchResult(
-        download_id="hashfromid",
+        download_id="original_id",
         title="RAM",
         artist="Daft Punk",
         download_url=download_url,
         source="qbittorrent",
+        extra={"info_hash": known_hash},
     )
 
-    with caplog.at_level(logging.WARNING), patch(
+    with patch(
         "trackseerr.clients.acquisition.torznab.fetch_torrent_file",
         side_effect=IndexerUnavailable("Connection timeout"),
     ), patch(
         "httpx.Client.post", side_effect=[login_resp, add_resp]
     ) as mock_post:
         res_hash = driver.download(item)
-        assert res_hash == "hashfromid"
+        assert res_hash == known_hash
 
         add_call = mock_post.call_args_list[1]
         assert "torrents/add" in add_call[0][0]
         data = add_call[1].get("data")
         assert data is not None
         assert data.get("urls") == download_url
-        assert "files" not in add_call[1] or add_call[1]["files"] is None
-
-        assert any(
-            "Could not fetch the .torrent file, letting qBittorrent fetch the link" in r.message
-            for r in caplog.records
-        )
-        assert "secretkey123" not in caplog.text
-        assert "apikey" not in caplog.text
-        assert download_url not in caplog.text
 
 
-def test_qbittorrent_magnet_skips_fetch():
+def test_existing_torrent_other_category_is_untouched():
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=test_sid"
 
-    login_resp = MagicMock(status_code=200, text="Ok.", cookies={"SID": "test_sid"})
-    add_resp = MagicMock(status_code=200, text="Ok.")
-
-    magnet = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Music"
+    torrent_hash = "0123456789abcdef0123456789abcdef01234567"
     item = AcquisitionSearchResult(
-        download_id="0123456789abcdef0123456789abcdef01234567",
+        download_id=torrent_hash,
         title="RAM",
         artist="Daft Punk",
-        magnet_url=magnet,
-        download_url="http://indexer.local/download?apikey=secret123",
+        magnet_url=f"magnet:?xt=urn:btih:{torrent_hash}&dn=Music",
         source="qbittorrent",
     )
 
-    with patch(
-        "trackseerr.clients.acquisition.torznab.fetch_torrent_file"
-    ) as mock_fetch, patch(
-        "httpx.Client.post", side_effect=[login_resp, add_resp]
-    ) as mock_post:
-        res_hash = driver.download(item)
-        assert res_hash == "0123456789abcdef0123456789abcdef01234567"
-        mock_fetch.assert_not_called()
-
-        add_call = mock_post.call_args_list[1]
-        assert "torrents/add" in add_call[0][0]
-        data = add_call[1].get("data")
-        assert data.get("urls") == magnet
+    info_resp = MagicMock(
+        status_code=200,
+        json=lambda: [{"hash": torrent_hash, "category": "lidarr"}],
+    )
+    with patch("httpx.Client.get", return_value=info_resp), patch("httpx.Client.post") as mock_post:
+        with pytest.raises(AcquisitionUnavailableError) as exc_info:
+            driver.download(item)
+        assert exc_info.value.reason == "release_unavailable"
+        assert "outside TrackSeerr's category" in str(exc_info.value)
+        assert mock_post.call_count == 0
 
 
-def test_qbittorrent_redirect_to_magnet_uses_urls():
+def test_existing_full_torrent_is_reused():
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=test_sid"
 
-    login_resp = MagicMock(status_code=200, text="Ok.", cookies={"SID": "test_sid"})
-    add_resp = MagicMock(status_code=200, text="Ok.")
-
-    magnet = "magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01&dn=Music"
+    torrent_hash = "0123456789abcdef0123456789abcdef01234567"
     item = AcquisitionSearchResult(
-        download_id="old_id",
+        download_id=torrent_hash,
         title="RAM",
         artist="Daft Punk",
-        download_url="http://indexer.local/download?apikey=secret123",
+        magnet_url=f"magnet:?xt=urn:btih:{torrent_hash}&dn=Music",
         source="qbittorrent",
     )
 
-    with patch(
-        "trackseerr.clients.acquisition.torznab.fetch_torrent_file",
-        return_value=magnet,
-    ) as mock_fetch, patch(
-        "httpx.Client.post", side_effect=[login_resp, add_resp]
+    info_resp = MagicMock(
+        status_code=200,
+        json=lambda: [{"hash": torrent_hash, "category": "trackseerr"}],
+    )
+    files_resp = MagicMock(
+        status_code=200,
+        json=lambda: [
+            {"index": 0, "name": "01 - Track.flac"},
+            {"index": 1, "name": "02 - Track.flac"},
+        ],
+    )
+
+    def mock_get(url, *args, **kwargs):
+        if "torrents/info" in url:
+            return info_resp
+        if "torrents/files" in url:
+            return files_resp
+        return MagicMock(status_code=404)
+
+    post_resp = MagicMock(status_code=200, text="Ok.")
+    with patch("httpx.Client.get", side_effect=mock_get), patch(
+        "httpx.Client.post", return_value=post_resp
     ) as mock_post:
         res_hash = driver.download(item)
-        assert res_hash == "abcdef0123456789abcdef0123456789abcdef01"
-        mock_fetch.assert_called_once_with(
-            "http://indexer.local/download?apikey=secret123", driver.timeout
-        )
+        assert res_hash == torrent_hash
+        post_urls = [c[0][0] for c in mock_post.call_args_list]
+        assert not any("torrents/add" in u for u in post_urls)
+        assert any("torrents/filePrio" in u for u in post_urls)
+        prio_call = next(c for c in mock_post.call_args_list if "torrents/filePrio" in c[0][0])
+        assert prio_call[1]["data"]["id"] == "0|1"
+        assert prio_call[1]["data"]["priority"] == 1
+        assert any("torrents/start" in u or "torrents/resume" in u for u in post_urls)
 
-        add_call = mock_post.call_args_list[1]
-        assert "torrents/add" in add_call[0][0]
-        data = add_call[1].get("data")
-        assert data.get("urls") == magnet
+
+def test_qbit5_stopped_states():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=test_sid"
+    info_resp_dl = MagicMock(
+        status_code=200,
+        json=lambda: [{"hash": "h1", "state": "stoppedDL", "progress": 0.5}],
+    )
+    info_resp_up = MagicMock(
+        status_code=200,
+        json=lambda: [{"hash": "h2", "state": "stoppedUP", "progress": 1.0}],
+    )
+
+    with patch("httpx.Client.get", return_value=info_resp_dl):
+        status = driver.get_status("h1")
+        assert status["status"] == DownloadStatus.QUEUED.value
+
+    with patch("httpx.Client.get", return_value=info_resp_up):
+        status = driver.get_status("h2")
+        assert status["status"] == DownloadStatus.COMPLETED.value
 
 
-def test_qbittorrent_invalid_torrent_bytes_raises():
+def test_deselect_files_posts_priority_zero():
+    driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
+    driver._cookie = "SID=test_sid"
+    mock_post_resp = MagicMock(status_code=200, text="Ok.")
+    with patch("httpx.Client.post", return_value=mock_post_resp) as mock_post:
+        ok = driver.deselect_files("hash123", [1, 3, 5])
+        assert ok is True
+        assert mock_post.called
+        url = mock_post.call_args[0][0]
+        data = mock_post.call_args[1]["data"]
+        assert "torrents/filePrio" in url
+        assert data["hash"] == "hash123"
+        assert data["id"] == "1|3|5"
+        assert data["priority"] == 0
+
+
+def test_invalid_torrent_bytes_is_unavailable():
     driver = QbittorrentDriver("http://qbittorrent:8080", "admin", "adminadmin")
 
     item = AcquisitionSearchResult(
@@ -1277,9 +1373,10 @@ def test_qbittorrent_invalid_torrent_bytes_raises():
         return_value=b"<html>",
     ):
         with pytest.raises(
-            RuntimeError, match="The indexer did not return a valid .torrent file"
-        ):
+            AcquisitionUnavailableError, match="The indexer did not return a valid .torrent file"
+        ) as exc_info:
             driver.download(item)
+        assert exc_info.value.reason == "release_unavailable"
 
 
 def test_qbittorrent_add_json_failure_count_raises():

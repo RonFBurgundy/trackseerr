@@ -1,5 +1,6 @@
 """qBittorrent WebAPI v2 Acquisition Driver."""
 
+import base64
 import logging
 import ntpath
 from pathlib import Path
@@ -11,7 +12,7 @@ from typing import Any, Optional
 import httpx
 
 from trackseerr.bencode import BencodeError, info_hash
-from trackseerr.clients.acquisition.base import AcquisitionDriver
+from trackseerr.clients.acquisition.base import AcquisitionDriver, AcquisitionUnavailableError
 from trackseerr.models import AcquisitionSearchResult, DownloadStatus
 from trackseerr.redaction import safe_exc
 from trackseerr.security import is_safe_service_url
@@ -19,6 +20,18 @@ from trackseerr.security import is_safe_service_url
 logger = logging.getLogger(__name__)
 
 _BTIH_RE = re.compile(r"urn:btih:([a-fA-F0-9]{40}|[a-zA-Z2-7]{32})", re.IGNORECASE)
+
+
+def _btih_to_hex(value: str) -> str:
+    cleaned = value.strip()
+    if len(cleaned) == 40:
+        return cleaned.lower()
+    if len(cleaned) == 32:
+        try:
+            return base64.b32decode(cleaned.upper()).hex().lower()
+        except Exception:
+            return cleaned.lower()
+    return cleaned.lower()
 
 
 class QbittorrentDriver(AcquisitionDriver):
@@ -184,6 +197,60 @@ class QbittorrentDriver(AcquisitionDriver):
             return client.post(add_url, files=files, data=extra_fields)
         return client.post(add_url, data={"urls": target_url, **extra_fields})
 
+    def _existing_torrent(
+        self, client: httpx.Client, torrent_hash: str
+    ) -> Optional[dict[str, Any]]:
+        """Queries qBittorrent for an existing torrent with the given hash."""
+        info_url = f"{self.host_url}/api/v2/torrents/info?hashes={torrent_hash.lower()}"
+        try:
+            resp = client.get(info_url)
+            if resp.status_code == 200:
+                data = resp.json()
+                if isinstance(data, list) and data:
+                    return data[0]
+            return None
+        except Exception as exc:
+            logger.debug(
+                "Failed to query existing torrent info for %s: %s",
+                torrent_hash,
+                safe_exc(exc),
+            )
+            return None
+
+    def _handle_existing_torrent(
+        self,
+        client: httpx.Client,
+        existing: dict[str, Any],
+        result: AcquisitionSearchResult,
+        torrent_hash: str,
+        file_indices: Optional[list[int]],
+    ) -> str:
+        if existing.get("category") != self.category:
+            raise AcquisitionUnavailableError(
+                "This torrent is already in qBittorrent outside TrackSeerr's category",
+                reason="release_unavailable",
+            )
+
+        files_url = f"{self.host_url}/api/v2/torrents/files?hash={torrent_hash.lower()}"
+        resp = client.get(files_url)
+        files_data = resp.json() if resp.status_code == 200 else []
+
+        prio_url = f"{self.host_url}/api/v2/torrents/filePrio"
+        if file_indices:
+            self._verify_file_indices(result, files_data)
+            indices = list(file_indices)
+        else:
+            indices = [f.get("index", idx) for idx, f in enumerate(files_data)]
+
+        if indices:
+            for i in range(0, len(indices), 500):
+                chunk = indices[i : i + 500]
+                ids_str = "|".join(str(idx) for idx in chunk)
+                client.post(prio_url, data={"hash": torrent_hash, "id": ids_str, "priority": 1})
+
+        self._resume_torrent(client, torrent_hash)
+        return torrent_hash
+
     def download(self, result: AcquisitionSearchResult) -> str:
         """Submits magnet or torrent link to qBittorrent."""
         if not is_safe_service_url(self.host_url):
@@ -193,22 +260,28 @@ class QbittorrentDriver(AcquisitionDriver):
         if torrent_bytes is None and not target_url:
             raise ValueError("No magnet or download URL provided for torrent")
 
+        extra = result.extra if isinstance(result.extra, dict) else {}
         if torrent_bytes is not None:
             try:
                 torrent_hash = info_hash(torrent_bytes)
             except BencodeError as exc:
-                raise RuntimeError("The indexer did not return a valid .torrent file") from exc
+                raise AcquisitionUnavailableError(
+                    "The indexer did not return a valid .torrent file",
+                    reason="release_unavailable",
+                ) from exc
         else:
-            torrent_hash = result.download_id
             btih_match = _BTIH_RE.search(target_url)
+            extra_hash = extra.get("info_hash")
             if btih_match:
-                torrent_hash = btih_match.group(1).lower()
-            elif result.extra and result.extra.get("info_hash"):
-                torrent_hash = str(result.extra["info_hash"]).lower()
-            elif ":" in torrent_hash:
-                torrent_hash = torrent_hash.split(":")[0].lower()
+                torrent_hash = _btih_to_hex(btih_match.group(1))
+            elif extra_hash:
+                torrent_hash = _btih_to_hex(str(extra_hash))
+            else:
+                raise AcquisitionUnavailableError(
+                    "Could not download the .torrent file from the indexer",
+                    reason="release_unavailable",
+                )
 
-        extra = result.extra if isinstance(result.extra, dict) else {}
         file_indices = extra.get("file_indices")
 
         with httpx.Client(timeout=self.timeout) as client:
@@ -218,6 +291,12 @@ class QbittorrentDriver(AcquisitionDriver):
                 self._login(client)
                 if self._cookie:
                     client.headers["Cookie"] = self._cookie
+
+            existing = self._existing_torrent(client, torrent_hash)
+            if existing is not None:
+                return self._handle_existing_torrent(
+                    client, existing, result, torrent_hash, file_indices
+                )
 
             if file_indices:
                 return self._download_partial(
@@ -290,14 +369,11 @@ class QbittorrentDriver(AcquisitionDriver):
         except Exception as e:
             logger.warning("Failed to delete torrent %s: %s", torrent_hash, e)
 
-    def _set_file_priorities(
+    def _verify_file_indices(
         self,
-        client: httpx.Client,
         result: AcquisitionSearchResult,
-        torrent_hash: str,
         files_data: list[dict[str, Any]],
     ) -> None:
-        """Verifies indices and sets priority 0 for other files and 1 for wanted files."""
         extra = result.extra if isinstance(result.extra, dict) else {}
         wanted_indices = list(extra.get("file_indices") or [])
         stored_paths = list(extra.get("file_paths") or [])
@@ -311,15 +387,33 @@ class QbittorrentDriver(AcquisitionDriver):
             f = file_by_idx.get(w_idx)
             s_basename = Path(str(s_path).replace("\\", "/")).name
             if not f:
-                self._delete_torrent(client, torrent_hash, delete_files=False)
-                raise RuntimeError(f"Wanted file index {w_idx} not found in qBittorrent file list")
+                raise AcquisitionUnavailableError(
+                    f"Wanted file index {w_idx} not found in qBittorrent file list",
+                    reason="release_unavailable",
+                )
             f_name = str(f.get("name") or "").replace("\\", "/")
             if not f_name.endswith(s_basename):
-                self._delete_torrent(client, torrent_hash, delete_files=False)
-                raise RuntimeError(
-                    f"Index drift: file {w_idx} name {f_name!r} does not match expected {s_basename!r}"
+                raise AcquisitionUnavailableError(
+                    f"Index drift: file {w_idx} name {f_name!r} does not match expected {s_basename!r}",
+                    reason="release_unavailable",
                 )
 
+    def _set_file_priorities(
+        self,
+        client: httpx.Client,
+        result: AcquisitionSearchResult,
+        torrent_hash: str,
+        files_data: list[dict[str, Any]],
+    ) -> None:
+        """Verifies indices and sets priority 0 for other files and 1 for wanted files."""
+        try:
+            self._verify_file_indices(result, files_data)
+        except AcquisitionUnavailableError:
+            self._delete_torrent(client, torrent_hash, delete_files=False)
+            raise
+
+        extra = result.extra if isinstance(result.extra, dict) else {}
+        wanted_indices = list(extra.get("file_indices") or [])
         wanted_set = set(wanted_indices)
         all_indices = [f.get("index", idx) for idx, f in enumerate(files_data)]
         other_indices = [idx for idx in all_indices if idx not in wanted_set]
@@ -439,10 +533,10 @@ class QbittorrentDriver(AcquisitionDriver):
                 progress, size = self._apply_partial_progress(client, download_id, progress, size)
 
                 status_str = DownloadStatus.DOWNLOADING.value
-                if progress >= 100.0 or any(s in state for s in ("uploading", "pausedup", "queuedup", "stalledup")):
+                if progress >= 100.0 or any(s in state for s in ("uploading", "pausedup", "queuedup", "stalledup", "stoppedup")):
                     status_str = DownloadStatus.COMPLETED.value
                     progress = 100.0
-                elif any(s in state for s in ("pauseddl", "queueddl", "allocating", "checking")):
+                elif any(s in state for s in ("pauseddl", "queueddl", "allocating", "checking", "stoppeddl")):
                     status_str = DownloadStatus.QUEUED.value
                 elif any(s in state for s in ("error", "missingfiles")):
                     status_str = DownloadStatus.FAILED.value
@@ -473,6 +567,36 @@ class QbittorrentDriver(AcquisitionDriver):
                 "seeding_time_seconds": 0,
                 "error_message": str(e),
             }
+
+    def deselect_files(self, download_id: str, file_indices: list[int]) -> bool:
+        """Sets priority 0 for specified file indices in a torrent."""
+        if not is_safe_service_url(self.host_url):
+            return False
+        if not file_indices:
+            return True
+
+        prio_url = f"{self.host_url}/api/v2/torrents/filePrio"
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                if self._cookie:
+                    client.headers["Cookie"] = self._cookie
+                else:
+                    self._login(client)
+                    if self._cookie:
+                        client.headers["Cookie"] = self._cookie
+
+                all_ok = True
+                for i in range(0, len(file_indices), 500):
+                    chunk = file_indices[i : i + 500]
+                    ids_str = "|".join(str(idx) for idx in chunk)
+                    payload = {"hash": download_id.lower(), "id": ids_str, "priority": 0}
+                    resp = client.post(prio_url, data=payload)
+                    if resp.status_code != 200:
+                        all_ok = False
+                return all_ok
+        except Exception as e:
+            logger.error("Failed to deselect files for torrent %s: %s", download_id, e)
+            return False
 
     def cancel(self, download_id: str) -> bool:
         """Deletes torrent and downloaded files from qBittorrent."""
