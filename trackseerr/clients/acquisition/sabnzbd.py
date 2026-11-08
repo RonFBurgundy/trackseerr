@@ -255,6 +255,15 @@ class SabnzbdDriver(AcquisitionDriver):
                                     "source_path": None,
                                     "error_message": slot.get("fail_message", "Usenet download failed"),
                                 }
+                            return {
+                                "status": DownloadStatus.DOWNLOADING.value,
+                                "progress": 100.0,
+                                "size_bytes": int(float(slot.get("bytes") or 0)),
+                                "speed_bps": 0,
+                                "eta_seconds": 0,
+                                "source_path": None,
+                                "error_message": None,
+                            }
 
                 res: dict[str, Any] = {
                     "status": DownloadStatus.QUEUED.value,
