@@ -122,6 +122,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The Pack Index now finds older packs too: besides reading the newest releases, its daily run searches the indexer for pack names ("Dj Pools Music Pack", pack, pool, megapack, chart, VA), so songs in last summer's pools can be found. Pressing **Run now** on the Pack Index task always does this full run instead of waiting a day.
 - Songs imported from DJ pools no longer keep the BPM in their title ("Gotta Be Cool 124" becomes "Gotta Be Cool"), file names like "Coolio Feat. L.V. - Gangsta's Paradise" give the right song title, and a file with no album tag goes into "Unknown Album" instead of a folder named only by its year.
 - When a song download contains several files and none of them is the wanted song, TrackSeerr now marks it failed, blocklists that release and searches again, instead of leaving it in the Queue waiting for a manual import. The files can still be imported by hand.
 - Grabbing a second song from a pack that is already in qBittorrent now adds that song to the existing torrent instead of failing. Removing one of those songs from the Queue only stops that song's file, and seed cleanup waits until every song in the torrent has finished. Manual search no longer marks the other songs in a pack as "Already downloading".
