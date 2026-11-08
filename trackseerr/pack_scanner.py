@@ -1,4 +1,9 @@
-"""Pack scanner: finds torrent packs, reads their file lists, and indexes audio files."""
+"""Pack scanner: finds torrent packs, reads their file lists, and indexes audio files.
+
+Backfill Depth:
+    The number of pages fetched per enabled indexer during periodic pack backfill
+    is governed by the kv_store key `pack_backfill_pages` (integer, default 5, clamped 1-50).
+"""
 
 from __future__ import annotations
 
@@ -244,8 +249,25 @@ def scan_pending(db: Any, limit: int = 20) -> dict[str, int]:
     return counts
 
 
-def backfill(db: Any, pages: int = 5) -> dict[str, int]:
+def get_pack_backfill_pages(db: Any) -> int:
+    """Read pack_backfill_pages from kv_store, default 5, clamped 1-50."""
+    if hasattr(db, "get_kv"):
+        try:
+            raw = db.get_kv("pack_backfill_pages")
+            if raw is not None:
+                val = int(raw)
+                return max(1, min(50, val))
+        except (ValueError, TypeError, sqlite3.Error):
+            pass
+    return 5
+
+
+def backfill(db: Any, pages: int | None = None) -> dict[str, int]:
     """Paginates enabled pack-scanning indexers, collects releases, and scans pending."""
+    if pages is None:
+        effective_pages = get_pack_backfill_pages(db)
+    else:
+        effective_pages = max(1, min(50, int(pages)))
     counts = {"collected": 0, "scanned": 0, "skipped": 0, "failed": 0, "errors": 0, "pruned": 0}
     enabled_indexers = db.list_indexers(enabled_only=True)
 
@@ -269,7 +291,7 @@ def backfill(db: Any, pages: int = 5) -> dict[str, int]:
         if not hasattr(driver, "fetch_page"):
             continue
 
-        for page in range(pages):
+        for page in range(effective_pages):
             if indexer_status.paused_until(idx_id) is not None:
                 break
             offset = page * 100
@@ -335,6 +357,13 @@ def run_sweep(
 
     try:
         with record_task_run(db, "pack_index", trigger) as run, track_job("pack_index", "Pack Index") as handle:
+            # Re-parse existing rows guarded by pack_names_v2
+            if hasattr(db, "reparse_pack_files"):
+                try:
+                    db.reparse_pack_files()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to reparse pack files: %s", safe_exc(exc))
+
             need_backfill = True
             try:
                 raw_bf = db.get_kv(LAST_BACKFILL_KV)
@@ -346,7 +375,7 @@ def run_sweep(
                 logger.warning("Could not read %s: %s", LAST_BACKFILL_KV, safe_exc(exc))
 
             if need_backfill:
-                bf_stats = backfill(db, pages=5)
+                bf_stats = backfill(db)
                 for k, v in bf_stats.items():
                     stats[k] = stats.get(k, 0) + v
                 try:
@@ -432,6 +461,11 @@ class PackIndexWorker:
         cycle_interval = interval_fn or (lambda: float(interval_seconds))
 
         def _loop() -> None:
+            if hasattr(db, "reparse_pack_files"):
+                try:
+                    db.reparse_pack_files()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to reparse pack files: %s", safe_exc(exc))
             if not self._stop_event.wait(initial_delay):
                 while not self._stop_event.is_set():
                     self.run_once(db)
@@ -471,6 +505,7 @@ __all__ = [
     "PackScannerBusy",
     "backfill",
     "collect_from_releases",
+    "get_pack_backfill_pages",
     "get_status",
     "is_running",
     "pack_index_worker",

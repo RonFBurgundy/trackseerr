@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
+from pathlib import Path
+import re
+from typing import Any
 
 from trackseerr.exclusions import exclusion_norm
 
@@ -59,6 +61,177 @@ _PACK_KEYWORDS_RE = re.compile(
 _VA_DOT_RE = re.compile(r"(?:^|[\s._\-\(\[])v\.a\.(?:$|[\s._\-\)\]])", re.IGNORECASE)
 
 
+_TRAILING_KEY_RE = re.compile(
+    r"(?i)(?:[\(\[]\s*|\b)((?:[1-9]|1[0-2])[ab]|\d{1,2}[dm])(?:\s*[\)\]]|\b)\s*$"
+)
+_TRAILING_BPM_RE = re.compile(
+    r"(?i)(?:[\(\[]\s*|\b)(\d{2,3})\s*(?:bpm)?(?:\s*[\)\]]|\b)\s*$"
+)
+_KEY_ANYWHERE_RE = re.compile(
+    r"(?i)(?:[\(\[]\s*)(\b(?:[1-9]|1[0-2])[ab]|\d{1,2}[dm])(?:\s*[\)\]])"
+)
+_VARIANT_RE = re.compile(
+    r"(?i)[\(\[]\s*(intro(?:\s+clean|\s+dirty)?|acap+ella|instrumental|inst|dj\s+tool|hype\s+intro)\s*[\)\]]"
+)
+_EDIT_RE = re.compile(
+    r"(?i)[\(\[]\s*(clean(?:\s+edit)?|dirty(?:\s+edit)?|explicit|quick\s*hit|short\s*edit)\s*[\)\]]"
+)
+_FEAT_RE = re.compile(
+    r"(?i)(?:[\(\[]\s*)?\b(?:feat|ft|featuring)\b\.?\s+([^()\[\]\-_]+?)(?:\s*[\)\]]|(?=\s*[\(\[]|$))"
+)
+_WATERMARK_WWW_RE = re.compile(r"(?i)\[\s*www\.[^\]]*\]")
+_WATERMARK_POOL_RE = re.compile(
+    r"(?i)\[\s*(?:[a-z0-9_.\s-]*pool|dj\s*city|bpm\s*supreme|direct\s*music\s*service|promo\s*only)[^\]]*\]"
+)
+
+_RE_320 = re.compile(r"(?i)\b320\s*(?:kbps|k)?\b")
+_RE_256 = re.compile(r"(?i)\b256\s*(?:kbps|k)?\b")
+_RE_192 = re.compile(r"(?i)\b192\s*(?:kbps|k)?\b")
+_RE_V0 = re.compile(r"(?i)(?:\bv0\b|\bvbr[-_ ]?v0\b|\bvbr[-_ ]?0\b)")
+
+
+def _extract_trailing_bpm_key(current: str, extras: dict[str, Any]) -> str:
+    changed = True
+    while changed:
+        changed = False
+        km = _TRAILING_KEY_RE.search(current)
+        if km:
+            extras["key"] = km.group(1).upper()
+            current = current[: km.start()].rstrip()
+            changed = True
+            continue
+        bm = _TRAILING_BPM_RE.search(current)
+        if bm:
+            bpm_val = int(bm.group(1))
+            if 60 <= bpm_val <= 200:
+                extras["bpm"] = bpm_val
+                current = current[: bm.start()].rstrip()
+                changed = True
+                continue
+
+    if "key" not in extras:
+        km = _KEY_ANYWHERE_RE.search(current)
+        if km:
+            extras["key"] = km.group(1).upper()
+            current = f"{current[:km.start()]} {current[km.end():]}"
+    return current
+
+
+def _extract_variant(current: str, extras: dict[str, Any]) -> str:
+    vm = _VARIANT_RE.search(current)
+    if not vm:
+        return current
+    v_raw = vm.group(1).lower()
+    if "intro clean" in v_raw:
+        extras["variant"] = "Intro Clean"
+        extras.setdefault("edit_kind", "Clean")
+    elif "intro dirty" in v_raw:
+        extras["variant"] = "Intro Dirty"
+        extras.setdefault("edit_kind", "Dirty")
+    elif "hype intro" in v_raw:
+        extras["variant"] = "Hype Intro"
+    elif "intro" in v_raw:
+        extras["variant"] = "Intro"
+    elif "acap" in v_raw:
+        extras["variant"] = "Acapella"
+    elif "inst" in v_raw:
+        extras["variant"] = "Instrumental"
+    elif "tool" in v_raw:
+        extras["variant"] = "DJ Tool"
+    return f"{current[:vm.start()]} {current[vm.end():]}"
+
+
+def _extract_edit_kind(current: str, extras: dict[str, Any]) -> str:
+    em = _EDIT_RE.search(current)
+    if not em:
+        return current
+    e_raw = em.group(1).lower()
+    if "clean edit" in e_raw:
+        extras["edit_kind"] = "Clean Edit"
+    elif "dirty edit" in e_raw:
+        extras["edit_kind"] = "Dirty Edit"
+    elif "clean" in e_raw:
+        extras["edit_kind"] = "Clean"
+    elif "dirty" in e_raw:
+        extras["edit_kind"] = "Dirty"
+    elif "explicit" in e_raw:
+        extras["edit_kind"] = "Explicit"
+    elif "quick hit" in e_raw:
+        extras["edit_kind"] = "Quick Hit"
+        extras.setdefault("variant", "Quick Hit")
+    elif "short edit" in e_raw:
+        extras["edit_kind"] = "Short Edit"
+        extras.setdefault("variant", "Short Edit")
+    return f"{current[:em.start()]} {current[em.end():]}"
+
+
+def _extract_featured(current: str, extras: dict[str, Any]) -> str:
+    fm = _FEAT_RE.search(current)
+    if fm:
+        extras["featured"] = fm.group(1).strip()
+        current = f"{current[:fm.start()]} {current[fm.end():]}"
+    return current
+
+
+def clean_pool_title(title: str) -> tuple[str, dict[str, Any]]:
+    """Clean DJ-pool decorations from title and return (cleaned_title, extras).
+
+    Removes trailing BPM, Camelot/Open keys, edit kinds, variants, featured artist,
+    and pool watermarks, while preserving remix/edit/mix names in the title.
+    """
+    if not title:
+        return ("", {})
+
+    extras: dict[str, Any] = {}
+    current = title.strip()
+    current = _WATERMARK_WWW_RE.sub(" ", current)
+    current = _WATERMARK_POOL_RE.sub(" ", current)
+    current = _extract_trailing_bpm_key(current, extras)
+    current = _extract_variant(current, extras)
+    current = _extract_edit_kind(current, extras)
+    current = _extract_featured(current, extras)
+    current = _strip_trailing_bracket_tags(current)
+    current = re.sub(r"\s+", " ", current).strip()
+    current = re.sub(r"\s*-\s*$", "", current).strip()
+    return (current, extras)
+
+
+def infer_audio_quality(ext: str, path: str, pack_title: str) -> str:
+    """Infer audio quality string understood by parse_release_title."""
+    clean_ext = (ext or "").lower()
+    if not clean_ext and path:
+        clean_ext = Path(path.replace("\\", "/")).suffix.lower()
+    if not clean_ext.startswith("."):
+        clean_ext = f".{clean_ext}"
+
+    if clean_ext == ".flac":
+        return "FLAC"
+    elif clean_ext == ".mp3":
+        combined = f"{path} {pack_title}"
+        if _RE_320.search(combined):
+            return "MP3 320"
+        if _RE_V0.search(combined):
+            return "MP3 V0"
+        if _RE_256.search(combined):
+            return "MP3 256"
+        if _RE_192.search(combined):
+            return "MP3 192"
+        return "MP3"
+    elif clean_ext in (".m4a", ".aac"):
+        return "AAC"
+    elif clean_ext == ".wav":
+        return "WAV"
+    elif clean_ext in (".aiff", ".aif"):
+        return "AIFF"
+    elif clean_ext in (".ogg", ".oga"):
+        return "OGG"
+    elif clean_ext == ".opus":
+        return "Opus"
+    elif clean_ext == ".alac":
+        return "ALAC"
+    return clean_ext.lstrip(".").upper() or "Unknown"
+
+
 def _strip_trailing_bracket_tags(text: str) -> str:
     current = text
     while True:
@@ -76,7 +249,8 @@ def parse_pack_file(path: str) -> tuple[str | None, str | None]:
     - strip leading track/disc numbers and separators ('045 ', '045 - ', '1-05. ', '[045] ')
     - split on the first ' - ' / ' – ' / ' — ' into (artist, title)
     - no separator -> (None, stem)
-    - strip trailing [...] tags like [Clean], [320], [www.site.com], keep ( ... Mix) / (Extended) etc. in the title
+    - clean DJ pool decorations (BPM, key, variants, edit kinds, watermarks)
+    - keep remix/edit/mix names in the title
     - folder-level artist (e.g. 'Artist - Album/01 Song.flac') may be used when the file has no artist.
     """
     if not path or not path.strip():
@@ -104,8 +278,9 @@ def parse_pack_file(path: str) -> tuple[str | None, str | None]:
         artist = None
         title = stripped
 
+    extras: dict[str, Any] = {}
     if title:
-        title = _strip_trailing_bracket_tags(title)
+        title, extras = clean_pool_title(title)
     if artist:
         artist = _strip_trailing_bracket_tags(artist)
 
@@ -124,13 +299,26 @@ def parse_pack_file(path: str) -> tuple[str | None, str | None]:
             if cand_artist_clean.casefold() not in ("va", "v.a.", "various", "various artists") and cand_artist_clean:
                 artist = cand_artist_clean
 
+    feat = extras.get("featured")
+    if feat:
+        if artist:
+            if not re.search(r"(?i)\b(?:feat|ft|featuring)\b", artist):
+                artist = f"{artist} feat. {feat}"
+        else:
+            artist = f"feat. {feat}"
+
     final_artist = artist if (artist and artist.strip()) else None
     final_title = title if (title and title.strip()) else None
     return (final_artist, final_title)
 
 
-def search_text(path: str, artist: str | None, title: str | None) -> str:
-    """Normalized text for FTS: exclusion_norm applied to artist, title and filename stem."""
+def search_text(
+    path: str,
+    artist: str | None,
+    title: str | None,
+    extras: dict[str, Any] | None = None,
+) -> str:
+    """Normalized text for FTS: exclusion_norm applied to artist, title, filename stem, and extras."""
     normalized_path = path.replace("\\", "/")
     filename = normalized_path.split("/")[-1] if normalized_path else ""
     stem = re.sub(r"\.[a-zA-Z0-9]+$", "", filename).strip()
@@ -148,6 +336,14 @@ def search_text(path: str, artist: str | None, title: str | None) -> str:
         norm_s = exclusion_norm(stem)
         if norm_s and norm_s != (parts[-1] if parts else ""):
             parts.append(norm_s)
+
+    if extras:
+        for k in ("bpm", "key", "variant", "edit_kind"):
+            val = extras.get(k)
+            if val is not None:
+                norm_val = exclusion_norm(str(val))
+                if norm_val and norm_val not in parts:
+                    parts.append(norm_val)
 
     return " ".join(parts)
 
@@ -187,3 +383,6 @@ class PackFileMatch:
     info_hash: str | None
     seeders: int | None
     file_count: int
+    variant: str | None = None
+    edit_kind: str | None = None
+    bpm: int | None = None

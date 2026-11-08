@@ -6,10 +6,11 @@ Provides persistence, queries, search, and lifecycle management for torrent pack
 from __future__ import annotations
 
 import logging
+from pathlib import Path
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 from trackseerr.exclusions import exclusion_norm
@@ -18,6 +19,7 @@ from trackseerr.media_match import split_artist_credits
 from trackseerr.pack_index import (
     AUDIO_EXTS,
     PackFileMatch,
+    clean_pool_title,
     parse_pack_file,
     search_text,
 )
@@ -28,6 +30,74 @@ logger = logging.getLogger("trackseerr.pack_index_store")
 def _quote_fts(token: str) -> str:
     escaped = token.replace('"', '""')
     return f'"{escaped}"'
+
+
+def _variant_qualifier_blocks(
+    variant: str | None,
+    edit_kind: str | None,
+    wanted_title: str,
+    wanted_variant: str | None = None,
+) -> bool:
+    """True if candidate and wanted title have incompatible variant/edit qualifiers."""
+    cand_v = (variant or edit_kind or "").lower()
+    has_cand_v = bool(variant or edit_kind in ("Quick Hit", "Short Edit"))
+
+    if has_cand_v:
+        if "intro" in cand_v and not re.search(r"(?i)\bintro\b", wanted_title):
+            return True
+        if ("acapella" in cand_v or "acappella" in cand_v) and not re.search(r"(?i)\bacap+ella\b", wanted_title):
+            return True
+        if ("instrumental" in cand_v or "inst" in cand_v) and not re.search(r"(?i)\binst(?:rumental)?\b", wanted_title):
+            return True
+        if ("dj tool" in cand_v or "tool" in cand_v) and not re.search(r"(?i)\b(?:dj\s*)?tool\b", wanted_title):
+            return True
+        if ("quick hit" in cand_v or "short edit" in cand_v) and not re.search(
+            r"(?i)\b(?:quick\s*hit|short\s*edit)\b", wanted_title
+        ):
+            return True
+
+    if wanted_variant:
+        wv = wanted_variant.lower()
+        if "intro" in wv and "intro" not in cand_v:
+            return True
+        if ("acapella" in wv or "acappella" in wv) and not ("acapella" in cand_v or "acappella" in cand_v):
+            return True
+        if ("instrumental" in wv or "inst" in wv) and not ("instrumental" in cand_v or "inst" in cand_v):
+            return True
+        if "tool" in wv and "tool" not in cand_v:
+            return True
+        if ("quick hit" in wv or "short edit" in wv) and not ("quick hit" in cand_v or "short edit" in cand_v):
+            return True
+
+    return False
+
+
+def _match_sort_key(m: PackFileMatch, wanted_title: str) -> tuple[int, int, int, int]:
+    clean_wanted = bool(re.search(r"(?i)\bclean\b", wanted_title))
+    ek = (m.edit_kind or "").lower()
+    if clean_wanted:
+        dirty_score = 2 if "clean" in ek else 1
+    else:
+        if any(k in ek for k in ("dirty", "explicit")):
+            dirty_score = 2
+        elif "clean" in ek:
+            dirty_score = 1
+        else:
+            dirty_score = 2
+
+    extended_wanted = bool(re.search(r"(?i)\bextended\b", wanted_title))
+    cand_text = f"{m.parsed_title or ''} {m.path}".lower()
+    is_extended = "extended" in cand_text
+    is_radio = "radio" in cand_text
+
+    if extended_wanted:
+        ver_score = 2 if is_extended else (1 if not is_radio else 0)
+    else:
+        ver_score = 2 if is_radio else (0 if is_extended else 1)
+
+    seeders = m.seeders if m.seeders is not None else -1
+    size_bytes = m.size_bytes if m.size_bytes is not None else -1
+    return (dirty_score, ver_score, seeders, size_bytes)
 
 
 def _artist_matches(target_artist: str, candidate_artist_or_path: str) -> bool:
@@ -150,7 +220,8 @@ class PackIndexStoreMixin:
                 artist, title = parse_pack_file(f_path)
                 pack_files_data.append((pack_id, f_idx, f_path, f_size, ext, artist, title))
                 if ext in AUDIO_EXTS:
-                    fts_text = search_text(f_path, artist, title)
+                    _, extras = clean_pool_title(title or "")
+                    fts_text = search_text(f_path, artist, title, extras=extras)
                     fts_data.append((fts_text, pack_id, f_idx))
 
             if pack_files_data:
@@ -230,6 +301,15 @@ class PackIndexStoreMixin:
 
         match_query = " AND ".join(fts_tokens)
 
+        wanted_clean, wanted_extras = clean_pool_title(title)
+        if not wanted_clean:
+            wanted_clean = title
+        wanted_variant = wanted_extras.get("variant") or (
+            wanted_extras.get("edit_kind")
+            if wanted_extras.get("edit_kind") in ("Quick Hit", "Short Edit")
+            else None
+        )
+
         with self._lock:
             try:
                 cur = self.conn.execute(
@@ -265,8 +345,23 @@ class PackIndexStoreMixin:
         results: list[PackFileMatch] = []
         for r in rows:
             stem = Path(r["path"].replace("\\", "/")).stem
-            cand_title = r["parsed_title"] or stem
-            if not titles_match(cand_title, title):
+            _, path_extras = clean_pool_title(stem)
+            raw_title = r["parsed_title"] or stem
+            cand_title, title_extras = clean_pool_title(raw_title)
+            if not cand_title:
+                cand_title = stem
+
+            extras = {**path_extras, **title_extras}
+            variant = extras.get("variant")
+            edit_kind = extras.get("edit_kind")
+            bpm = extras.get("bpm")
+
+            # Check variant qualifier: intro / acapella / instrumental / dj tool / quick hit
+            # Only matches when the wanted title has the same kind of qualifier
+            if _variant_qualifier_blocks(variant, edit_kind, title, wanted_variant):
+                continue
+
+            if not titles_match(cand_title, wanted_clean):
                 continue
 
             cand_artist_source = r["parsed_artist"] or r["path"]
@@ -281,7 +376,7 @@ class PackIndexStoreMixin:
                     size_bytes=r["size_bytes"],
                     ext=r["ext"],
                     parsed_artist=r["parsed_artist"],
-                    parsed_title=r["parsed_title"],
+                    parsed_title=cand_title,
                     pack_title=r["pack_title"],
                     indexer_id=r["indexer_id"],
                     download_url=r["download_url"],
@@ -289,16 +384,13 @@ class PackIndexStoreMixin:
                     info_hash=r["info_hash"],
                     seeders=r["seeders"],
                     file_count=r["file_count"],
+                    variant=variant,
+                    edit_kind=edit_kind,
+                    bpm=bpm,
                 )
             )
 
-        results.sort(
-            key=lambda m: (
-                m.seeders if m.seeders is not None else -1,
-                m.size_bytes if m.size_bytes is not None else -1,
-            ),
-            reverse=True,
-        )
+        results.sort(key=lambda m: _match_sort_key(m, title), reverse=True)
         return results[:limit]
 
     def prune_pack_index(self, max_age_days: int = 90, max_packs: int = 20000) -> int:
@@ -358,3 +450,49 @@ class PackIndexStoreMixin:
                 "failed": int(failed),
                 "files": int(files),
             }
+
+    def reparse_pack_files(self, batch_size: int = 500) -> int:
+        """One-off recomputation of parsed_artist, parsed_title, and FTS for already-indexed packs."""
+        with self._lock:
+            if getattr(self, "get_kv", None) and self.get_kv("pack_names_v2"):
+                return 0
+
+            cur = self.conn.execute("SELECT pack_id, file_index, path, ext FROM pack_files")
+            rows = cur.fetchall()
+            total = 0
+            for i in range(0, len(rows), batch_size):
+                chunk = rows[i : i + batch_size]
+                update_files = []
+                fts_delete = []
+                fts_insert = []
+                for r in chunk:
+                    p_id, f_idx, f_path, ext = r[0], r[1], r[2], r[3]
+                    artist, title = parse_pack_file(f_path)
+                    update_files.append((artist, title, p_id, f_idx))
+                    if ext in AUDIO_EXTS:
+                        fts_delete.append((p_id, f_idx))
+                        _, extras = clean_pool_title(title or "")
+                        fts_text = search_text(f_path, artist, title, extras=extras)
+                        fts_insert.append((fts_text, p_id, f_idx))
+
+                if update_files:
+                    self.conn.executemany(
+                        "UPDATE pack_files SET parsed_artist = ?, parsed_title = ? WHERE pack_id = ? AND file_index = ?",
+                        update_files,
+                    )
+                if fts_delete:
+                    self.conn.executemany(
+                        "DELETE FROM pack_files_fts WHERE pack_id = ? AND file_index = ?",
+                        fts_delete,
+                    )
+                if fts_insert:
+                    self.conn.executemany(
+                        "INSERT INTO pack_files_fts (search, pack_id, file_index) VALUES (?, ?, ?)",
+                        fts_insert,
+                    )
+                self.conn.commit()
+                total += len(chunk)
+
+            if getattr(self, "set_kv", None):
+                self.set_kv("pack_names_v2", "1")
+            return total
