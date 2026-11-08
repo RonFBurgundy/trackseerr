@@ -376,7 +376,22 @@ class DownloadStoreMixin:
         res["placed_files"], res["placed_mode"] = self._parse_placed_files(res.get("placed_files"))
         res["cleanup_attempts"] = int(res.get("cleanup_attempts") or 0)
         res["hidden_from_queue"] = bool(res.get("hidden_from_queue"))
+        res["selected_files"] = self._parse_selected_files(res.get("selected_files"))
         return res
+
+    @staticmethod
+    def _parse_selected_files(raw: Any) -> Optional[list[dict[str, Any]]]:
+        """The persisted JSON list of selected files {file_index, path}; missing or corrupt reads as None."""
+        if not raw:
+            return None
+        if isinstance(raw, list):
+            return raw
+        try:
+            data = json.loads(raw)
+        except (TypeError, ValueError) as exc:
+            logger.warning("Ignoring corrupt selected_files value: %s", type(exc).__name__)
+            return None
+        return data if isinstance(data, list) else None
 
     @staticmethod
     def _parse_unmatched_files(raw: Any) -> list[str]:
@@ -499,6 +514,11 @@ class DownloadStoreMixin:
         error_message = d.get("error_message")
         track_id = d.get("track_id")
         album_id = d.get("album_id")
+        selected_files = d.get("selected_files")
+        if isinstance(selected_files, list):
+            selected_files = json.dumps(selected_files)
+        elif selected_files is not None:
+            selected_files = str(selected_files)
 
         with self._lock:
             self.conn.execute(
@@ -506,8 +526,8 @@ class DownloadStoreMixin:
                 INSERT INTO active_downloads (
                     id, request_id, client_id, download_hash, title, artist,
                     item_type, status, progress, size_bytes, source_path,
-                    target_path, error_message, track_id, album_id, updated_at, progress_updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    target_path, error_message, track_id, album_id, selected_files, updated_at, progress_updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO UPDATE SET
                     request_id = excluded.request_id,
                     client_id = excluded.client_id,
@@ -523,6 +543,7 @@ class DownloadStoreMixin:
                     error_message = excluded.error_message,
                     track_id = excluded.track_id,
                     album_id = excluded.album_id,
+                    selected_files = excluded.selected_files,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
@@ -541,6 +562,7 @@ class DownloadStoreMixin:
                     error_message,
                     track_id,
                     album_id,
+                    selected_files,
                 ),
             )
             self.conn.commit()

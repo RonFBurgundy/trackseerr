@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum, IntFlag, StrEnum
+import json
 from typing import Any, List, Optional, Union
 
 from trackseerr.security import mask_channel_config
@@ -311,6 +312,7 @@ class ActiveDownload:
     eta_seconds: Optional[int] = None
     track_id: Optional[str] = None
     album_id: Optional[str] = None
+    selected_files: Optional[Union[str, list[dict[str, Any]]]] = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -334,6 +336,7 @@ class ActiveDownload:
             "eta_seconds": self.eta_seconds,
             "track_id": self.track_id,
             "album_id": self.album_id,
+            "selected_files": json.dumps(self.selected_files) if isinstance(self.selected_files, list) else self.selected_files,
         }
 
 

@@ -477,6 +477,20 @@ def _record_skipped_files(job: _ImportJob, skipped: list[Path]) -> None:
             logger.warning("Failed to record skipped_files event: %s", ev_err)
 
 
+def _parse_job_selected_files(item: dict[str, Any]) -> Optional[list[Any]]:
+    """Extracts and parses selected_files from a download item if present."""
+    raw = item.get("selected_files")
+    if isinstance(raw, list):
+        return raw
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+            return data if isinstance(data, list) else None
+        except (ValueError, TypeError):
+            return None
+    return None
+
+
 def _select_files_for_track(job: _ImportJob) -> list[Path]:
     """Selects the single best audio file for a track-level download item."""
     if not job.audio_files:
@@ -491,6 +505,12 @@ def _select_files_for_track(job: _ImportJob) -> list[Path]:
 
     if not candidate_pool:
         if len(job.audio_files) <= 1:
+            if wanted_track and job.audio_files:
+                job.selected_track_match = (job.audio_files[0], wanted_track)
+                if not job.item.get("track_id"):
+                    job.item["track_id"] = str(wanted_track["id"])
+                if not job.target_album and wanted_track.get("album_id") and job.db:
+                    job.target_album = job.db.get_library_album(str(wanted_track["album_id"]))
             return job.audio_files
         job.held_files = [str(f) for f in job.audio_files]
         job.held_msg = f'No file in the download matches "{wanted_title}"'
@@ -723,14 +743,66 @@ class ImportPipelineMixin(ImportCatalogMixin):
         self._complete_request(db, ctx, job)
         self._settle_download(db, ctx, job, stats)
 
-    def _locate_audio_files(
+    def _locate_selected_files(
+        self,
+        db: Database,
+        job: _ImportJob,
+        candidate_src: Optional[str],
+        selected_files: list[Any],
+    ) -> bool:
+        """Locates only the files explicitly selected for a partial pack download."""
+        if not candidate_src:
+            logger.warning("Download %s has selected_files but candidate_src is missing", job.download_id)
+            db.update_download_status(
+                job.download_id,
+                status=DownloadStatus.WARNING.value,
+                error_message="Selected file not found: missing source path",
+            )
+            return False
+
+        base_dir = Path(candidate_src)
+        found: list[Path] = []
+        for item in selected_files:
+            rel = item.get("path") if isinstance(item, dict) else str(item)
+            rel_clean = str(rel).replace("\\", "/").lstrip("/")
+            rel_path = Path(rel_clean)
+            filename = rel_path.name
+
+            candidate_paths = [
+                base_dir / rel_clean,
+                base_dir.parent / rel_clean,
+                base_dir / filename,
+            ]
+            parts = rel_clean.split("/")
+            if len(parts) > 1 and base_dir.name == parts[0]:
+                candidate_paths.append(base_dir / "/".join(parts[1:]))
+
+            matched = None
+            for cp in candidate_paths:
+                if cp.is_file():
+                    matched = cp.resolve()
+                    break
+
+            if not matched:
+                logger.warning("Download %s selected file not found: %s", job.download_id, filename)
+                db.update_download_status(
+                    job.download_id,
+                    status=DownloadStatus.WARNING.value,
+                    error_message=f"Selected file not found: {filename}",
+                )
+                return False
+            found.append(matched)
+
+        job.audio_files = sorted(dict.fromkeys(found))
+        return True
+
+    def _resolve_candidate_source(
         self,
         db: Database,
         ctx: _PollContext,
         job: _ImportJob,
-        stats: dict[str, int],
-    ) -> bool:
-        """Locate downloaded audio files with remote path translation."""
+    ) -> Optional[str]:
+        """Resolves and validates download source path against allowed roots."""
         mappings: list[dict[str, str]] = []
         extra_json = job.client_config.get("extra_settings_json")
         if extra_json:
@@ -751,12 +823,29 @@ class ImportPipelineMixin(ImportCatalogMixin):
             logger.warning("Download %s cannot be imported yet: %s", job.download_id, err_msg)
             db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message=err_msg)
             self.allowed_roots = None
-            return False
+            return None
         if candidate_src:
             ok, reject_reason = self.allowed_roots.check(candidate_src)
             if not ok:
                 logger.warning("Rejecting source path %s from %s: %s", candidate_src, client_label, reject_reason)
                 candidate_src = None
+        return candidate_src
+
+    def _locate_audio_files(
+        self,
+        db: Database,
+        ctx: _PollContext,
+        job: _ImportJob,
+        stats: dict[str, int],
+    ) -> bool:
+        """Locate downloaded audio files with remote path translation."""
+        candidate_src = self._resolve_candidate_source(db, ctx, job)
+        if candidate_src is None and not self.allowed_roots:
+            return False
+
+        selected_files = _parse_job_selected_files(job.item)
+        if selected_files:
+            return self._locate_selected_files(db, job, candidate_src, selected_files)
 
         err_msg_orig = str(job.item.get("error_message") or "")
         held_unmatched = job.item.get("unmatched_files") or []

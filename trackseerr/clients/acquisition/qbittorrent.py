@@ -2,8 +2,10 @@
 
 import logging
 import ntpath
+from pathlib import Path
 import posixpath
 import re
+import time
 from typing import Any, Optional
 
 import httpx
@@ -137,13 +139,13 @@ class QbittorrentDriver(AcquisitionDriver):
         btih_match = _BTIH_RE.search(target_url)
         if btih_match:
             torrent_hash = btih_match.group(1).lower()
+        elif result.extra and result.extra.get("info_hash"):
+            torrent_hash = str(result.extra["info_hash"]).lower()
+        elif ":" in torrent_hash:
+            torrent_hash = torrent_hash.split(":")[0].lower()
 
-        add_url = f"{self.host_url}/api/v2/torrents/add"
-        payload = {
-            "urls": target_url,
-            "category": self.category,
-            "paused": "false",
-        }
+        extra = result.extra if isinstance(result.extra, dict) else {}
+        file_indices = extra.get("file_indices")
 
         with httpx.Client(timeout=self.timeout) as client:
             if self._cookie:
@@ -153,11 +155,165 @@ class QbittorrentDriver(AcquisitionDriver):
                 if self._cookie:
                     client.headers["Cookie"] = self._cookie
 
+            if file_indices:
+                return self._download_partial(client, result, target_url, torrent_hash)
+
+            add_url = f"{self.host_url}/api/v2/torrents/add"
+            payload = {
+                "urls": target_url,
+                "category": self.category,
+                "paused": "false",
+            }
             resp = client.post(add_url, data=payload)
             if resp.status_code != 200 or "Fails." in resp.text:
                 raise RuntimeError(f"qBittorrent torrents/add failed (HTTP {resp.status_code}): {resp.text[:120]}")
 
         return torrent_hash
+
+    def _download_partial(
+        self,
+        client: httpx.Client,
+        result: AcquisitionSearchResult,
+        target_url: str,
+        torrent_hash: str,
+    ) -> str:
+        """Downloads only selected files from a torrent pack."""
+        add_url = f"{self.host_url}/api/v2/torrents/add"
+        payload = {
+            "urls": target_url,
+            "category": self.category,
+            "paused": "true",
+            "stopped": "true",
+        }
+        resp = client.post(add_url, data=payload)
+        if resp.status_code != 200 or "Fails." in resp.text:
+            raise RuntimeError(f"qBittorrent torrents/add failed (HTTP {resp.status_code}): {resp.text[:120]}")
+
+        files_data = self._wait_for_file_list(client, torrent_hash)
+        self._set_file_priorities(client, result, torrent_hash, files_data)
+        self._resume_torrent(client, torrent_hash)
+        return torrent_hash
+
+    def _wait_for_file_list(
+        self, client: httpx.Client, torrent_hash: str, max_wait_seconds: int = 60
+    ) -> list[dict[str, Any]]:
+        """Polls for torrent file list, deleting torrent and raising on timeout."""
+        files_url = f"{self.host_url}/api/v2/torrents/files?hash={torrent_hash}"
+        for _ in range(max_wait_seconds):
+            try:
+                resp = client.get(files_url)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and isinstance(data, list):
+                        return data
+            except Exception:
+                pass
+            time.sleep(1)
+
+        self._delete_torrent(client, torrent_hash, delete_files=False)
+        raise RuntimeError("qBittorrent did not receive the torrent's file list in time")
+
+    def _delete_torrent(
+        self, client: httpx.Client, torrent_hash: str, delete_files: bool = False
+    ) -> None:
+        """Deletes a torrent from qBittorrent."""
+        del_url = f"{self.host_url}/api/v2/torrents/delete"
+        payload = {"hashes": torrent_hash, "deleteFiles": "true" if delete_files else "false"}
+        try:
+            client.post(del_url, data=payload)
+        except Exception as e:
+            logger.warning("Failed to delete torrent %s: %s", torrent_hash, e)
+
+    def _set_file_priorities(
+        self,
+        client: httpx.Client,
+        result: AcquisitionSearchResult,
+        torrent_hash: str,
+        files_data: list[dict[str, Any]],
+    ) -> None:
+        """Verifies indices and sets priority 0 for other files and 1 for wanted files."""
+        extra = result.extra if isinstance(result.extra, dict) else {}
+        wanted_indices = list(extra.get("file_indices") or [])
+        stored_paths = list(extra.get("file_paths") or [])
+
+        file_by_idx = {
+            f.get("index", idx): f
+            for idx, f in enumerate(files_data)
+        }
+
+        for w_idx, s_path in zip(wanted_indices, stored_paths):
+            f = file_by_idx.get(w_idx)
+            s_basename = Path(str(s_path).replace("\\", "/")).name
+            if not f:
+                self._delete_torrent(client, torrent_hash, delete_files=False)
+                raise RuntimeError(f"Wanted file index {w_idx} not found in qBittorrent file list")
+            f_name = str(f.get("name") or "").replace("\\", "/")
+            if not f_name.endswith(s_basename):
+                self._delete_torrent(client, torrent_hash, delete_files=False)
+                raise RuntimeError(
+                    f"Index drift: file {w_idx} name {f_name!r} does not match expected {s_basename!r}"
+                )
+
+        wanted_set = set(wanted_indices)
+        all_indices = [f.get("index", idx) for idx, f in enumerate(files_data)]
+        other_indices = [idx for idx in all_indices if idx not in wanted_set]
+
+        prio_url = f"{self.host_url}/api/v2/torrents/filePrio"
+        if other_indices:
+            for i in range(0, len(other_indices), 500):
+                chunk = other_indices[i : i + 500]
+                ids_str = "|".join(str(idx) for idx in chunk)
+                client.post(prio_url, data={"hash": torrent_hash, "id": ids_str, "priority": 0})
+
+        wanted_ids_str = "|".join(str(idx) for idx in wanted_indices)
+        client.post(prio_url, data={"hash": torrent_hash, "id": wanted_ids_str, "priority": 1})
+
+    def _resume_torrent(self, client: httpx.Client, torrent_hash: str) -> None:
+        """Resumes torrent via torrents/start with fallback to torrents/resume for qBittorrent 4."""
+        start_url = f"{self.host_url}/api/v2/torrents/start"
+        resp = client.post(start_url, data={"hashes": torrent_hash})
+        if resp.status_code == 404:
+            resume_url = f"{self.host_url}/api/v2/torrents/resume"
+            client.post(resume_url, data={"hashes": torrent_hash})
+
+    def _apply_partial_progress(
+        self, client: httpx.Client, download_id: str, progress: float, size: int
+    ) -> tuple[float, int]:
+        """Calculates progress and size based on selected files if partial torrent."""
+        files_url = f"{self.host_url}/api/v2/torrents/files?hash={download_id.lower()}"
+        try:
+            files_resp = client.get(files_url)
+            if files_resp.status_code != 200:
+                return progress, size
+            files = files_resp.json()
+            is_files_list = (
+                isinstance(files, list)
+                and files
+                and all(isinstance(f, dict) and "priority" in f for f in files)
+            )
+            if not is_files_list:
+                return progress, size
+            has_unwanted = any(f.get("priority") == 0 for f in files)
+            selected_files = [f for f in files if (f.get("priority") or 0) > 0]
+            if not (has_unwanted and selected_files):
+                return progress, size
+
+            sel_size = sum(int(f.get("size") or 0) for f in selected_files)
+            sel_done = sum(
+                float(f.get("size") or 0) * float(f.get("progress") or 0.0)
+                for f in selected_files
+            )
+            size = sel_size
+            if sel_size > 0:
+                part_prog = sel_done / sel_size
+            else:
+                part_prog = sum(float(f.get("progress") or 0.0) for f in selected_files) / len(selected_files)
+            progress = min(100.0, round(part_prog * 100.0, 1))
+            if all(float(f.get("progress") or 0.0) >= 1.0 for f in selected_files):
+                progress = 100.0
+        except Exception as exc:
+            logger.debug("Failed to check partial torrent files status for %s: %s", download_id, exc)
+        return progress, size
 
     def get_status(self, download_id: str) -> dict[str, Any]:
         """Polls qBittorrent for torrent download status and metrics."""
@@ -213,8 +369,11 @@ class QbittorrentDriver(AcquisitionDriver):
                 ratio = float(tor.get("ratio", 0.0))
                 seeding_time = int(tor.get("seeding_time") or tor.get("time_seeded") or 0)
 
+                # Check if this is a partial torrent via /torrents/files
+                progress, size = self._apply_partial_progress(client, download_id, progress, size)
+
                 status_str = DownloadStatus.DOWNLOADING.value
-                if any(s in state for s in ("uploading", "pausedup", "queuedup", "stalledup")):
+                if progress >= 100.0 or any(s in state for s in ("uploading", "pausedup", "queuedup", "stalledup")):
                     status_str = DownloadStatus.COMPLETED.value
                     progress = 100.0
                 elif any(s in state for s in ("pauseddl", "queueddl", "allocating", "checking")):
