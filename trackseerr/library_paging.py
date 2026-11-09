@@ -235,9 +235,9 @@ def page_library(
     )
     mapper = LIBRARY_LISTS[kind].mapper(db)
     # The lock covers only the two statements; row mapping (and everything after) runs without blocking other users.
-    with db._lock:
-        total = db.conn.execute(count_sql, count_params).fetchone()[0]
-        rows = db.conn.execute(page_sql, page_params).fetchall()
+    with db.reader() as conn:
+        total = conn.execute(count_sql, count_params).fetchone()[0]
+        rows = conn.execute(page_sql, page_params).fetchall()
     return [mapper(row) for row in rows], int(total)
 
 
@@ -258,5 +258,5 @@ def index_library(
     where, params = _where(
         spec, query, monitored_only, filters or {}, facets=facets, kind=kind, has_file=has_file
     )
-    with db._lock:
-        return build_index(db.conn, f"{_from(spec, where, sort)}{where}", params, sort, sort_dir)
+    with db.reader() as conn:
+        return build_index(conn, f"{_from(spec, where, sort)}{where}", params, sort, sort_dir)

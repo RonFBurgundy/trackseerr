@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
 import sqlite3
 import threading
-from typing import Any, Optional, Union
+from typing import Any, Iterator, Optional, Union
 
 from trackseerr.list_index import fold_search_text
 
@@ -120,6 +121,10 @@ class Database(
                 )
         self._lock = threading.RLock()
         self._conn: Optional[sqlite3.Connection] = None
+        self._read_local = threading.local()
+        self._readers: list[sqlite3.Connection] = []
+        self._readers_lock = threading.Lock()
+        self._reader_generation = 0
         self._ensure_connection()
         self._migrate()
 
@@ -163,20 +168,64 @@ class Database(
         else:
             conn = sqlite3.connect(":memory:", timeout=_BUSY_TIMEOUT_MS / 1000, check_same_thread=False)
 
+        self._configure(conn, cache_kib=65536, read_only=False)
+        return conn
+
+    def _configure(self, conn: sqlite3.Connection, *, cache_kib: int, read_only: bool) -> None:
         conn.row_factory = sqlite3.Row
         conn.create_function("fold_text", 1, fold_search_text, deterministic=True)
         # busy_timeout first: switching to WAL and every later statement must wait for a competing writer
         # instead of failing at once with "database is locked".
         conn.execute(f"PRAGMA busy_timeout = {_BUSY_TIMEOUT_MS};")
-        conn.execute("PRAGMA journal_mode=WAL;")
+        if not read_only:
+            conn.execute("PRAGMA journal_mode=WAL;")
         # NORMAL is SQLite's recommended pairing with WAL: no corruption risk, only the last commits can be lost on power loss.
         conn.execute("PRAGMA synchronous=NORMAL;")
         # Negative cache_size sets SQLite page cache in KiB; -65536 gives a 64 MiB cache for hot pages.
-        conn.execute("PRAGMA cache_size = -65536;")
+        conn.execute(f"PRAGMA cache_size = -{cache_kib};")
         # Keep temporary tables and indices in memory rather than spilling to disk.
         conn.execute("PRAGMA temp_store = MEMORY;")
         conn.execute("PRAGMA foreign_keys = ON;")
+        if read_only:
+            conn.execute("PRAGMA query_only = ON;")
+
+    def _open_reader(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(
+            str(self.db_path),
+            timeout=_BUSY_TIMEOUT_MS / 1000,
+            check_same_thread=False,
+            isolation_level=None,
+        )
+        self._configure(conn, cache_kib=16384, read_only=True)
+        with self._readers_lock:
+            self._readers.append(conn)
         return conn
+
+    @contextlib.contextmanager
+    def reader(self) -> Iterator[sqlite3.Connection]:
+        """Context manager yielding a thread-local read-only SQLite connection.
+
+        Contract: read-only SELECTs only; sees every committed write; never takes
+        self._lock for file databases.
+        """
+        if self.db_path == ":memory:":
+            with self._lock:
+                yield self.conn
+            return
+
+        conn = getattr(self._read_local, "conn", None)
+        gen = getattr(self._read_local, "generation", None)
+        if conn is None or gen != self._reader_generation:
+            conn = self._open_reader()
+            self._read_local.conn = conn
+            self._read_local.generation = self._reader_generation
+
+        try:
+            yield conn
+        except sqlite3.ProgrammingError:
+            self._read_local.conn = None
+            self._read_local.generation = None
+            raise
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -199,9 +248,17 @@ class Database(
             if self._conn is not None:
                 try:
                     self._conn.close()
-                except sqlite3.Error:
-                    pass
+                except sqlite3.Error as e:
+                    logger.debug("Failed to close primary connection: %s", e)
                 self._conn = None
+        with self._readers_lock:
+            for reader_conn in self._readers:
+                try:
+                    reader_conn.close()
+                except sqlite3.Error as e:
+                    logger.debug("Failed to close reader connection: %s", e)
+            self._readers.clear()
+            self._reader_generation += 1
 
     def record_nonce(self, nonce: str, now: int, ttl_seconds: int = 120) -> bool:
         """Records a nonce; returns False if it was already seen within ``ttl_seconds`` (a replay)."""
