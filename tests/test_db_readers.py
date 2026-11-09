@@ -159,3 +159,43 @@ def test_page_library_runs_while_writer_lock_held(db: Database) -> None:
     assert page_result is not None
     assert page_result[1] == 3
     assert len(page_result[0]) == 3
+
+
+def test_reader_closed_when_thread_ends(db: Database) -> None:
+    """Reader connections are garbage-collected and pruned when their thread ends."""
+    import gc
+
+    def worker() -> None:
+        with db.reader() as c:
+            c.execute("SELECT 1").fetchone()
+
+    t = threading.Thread(target=worker)
+    t.start()
+    t.join()
+
+    gc.collect()
+    assert len(db._readers) == 0
+
+
+def test_artist_profile_threads_do_not_leak_readers(db: Database) -> None:
+    """ThreadPoolExecutor threads do not permanently leak reader connections."""
+    import gc
+    from concurrent.futures import ThreadPoolExecutor
+
+    def worker() -> None:
+        with db.reader() as c:
+            c.execute("SELECT 1").fetchone()
+
+    for _ in range(20):
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            list(executor.map(lambda _: worker(), range(2)))
+
+    gc.collect()
+    assert len(db._readers) <= 2
+
+
+def test_close_does_not_raise_without_readers(tmp_path: Path) -> None:
+    """Closing a database that never opened a reader succeeds without NameError."""
+    database = Database(tmp_path / "unused.sqlite")
+    database.close()
+

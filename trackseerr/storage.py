@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import contextlib
+import logging
 import os
 from pathlib import Path
 import sqlite3
 import threading
 from typing import Any, Iterator, Optional, Union
+import weakref
+
+logger = logging.getLogger(__name__)
+
+
+class _ReaderConnection(sqlite3.Connection):
+    """Subclass of sqlite3.Connection allowing weak references so reader connections can close when threads end."""
+
 
 from trackseerr.list_index import fold_search_text
 
@@ -122,7 +131,7 @@ class Database(
         self._lock = threading.RLock()
         self._conn: Optional[sqlite3.Connection] = None
         self._read_local = threading.local()
-        self._readers: list[sqlite3.Connection] = []
+        self._readers: weakref.WeakSet[_ReaderConnection] = weakref.WeakSet()
         self._readers_lock = threading.Lock()
         self._reader_generation = 0
         self._ensure_connection()
@@ -195,10 +204,11 @@ class Database(
             timeout=_BUSY_TIMEOUT_MS / 1000,
             check_same_thread=False,
             isolation_level=None,
+            factory=_ReaderConnection,
         )
         self._configure(conn, cache_kib=16384, read_only=True)
         with self._readers_lock:
-            self._readers.append(conn)
+            self._readers.add(conn)
         return conn
 
     @contextlib.contextmanager
@@ -252,7 +262,7 @@ class Database(
                     logger.debug("Failed to close primary connection: %s", e)
                 self._conn = None
         with self._readers_lock:
-            for reader_conn in self._readers:
+            for reader_conn in list(self._readers):
                 try:
                     reader_conn.close()
                 except sqlite3.Error as e:
