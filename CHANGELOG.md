@@ -125,6 +125,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Adding a Spotify playlist works again. Spotify stopped sending cover art for some playlists, which made adding them fail.
 - Database backups no longer freeze the app while they run.
 - A scheduled backup no longer runs every time TrackSeerr restarts; it waits until the backup interval has passed since the last one. Temporary files left by an interrupted backup are cleaned up and no longer listed as backups.
 - The Pack Index now finds older packs too: besides reading the newest releases, its daily run searches the indexer for pack names ("Dj Pools Music Pack", pack, pool, megapack, chart, VA), so songs in last summer's pools can be found. Pressing **Run now** on the Pack Index task always does this full run instead of waiting a day.
