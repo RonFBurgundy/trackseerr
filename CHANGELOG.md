@@ -82,6 +82,8 @@ heading becomes the version and date.
 
 - The web app loads much faster, especially on phones. Pages load only the code they need (the first download is about a quarter of its old size), responses are compressed, and the app's files are cached by the browser between visits.
 - Artist pages open instantly. The nightly artist refresh now prepares each library artist's page (Deezer link, discography and top songs), and an artist page that isn't ready yet fetches its details and top songs at the same time instead of one after the other.
+- Pages no longer wait for background work. Browsing the library, artist pages, settings, requests and activity read the database alongside downloads, imports and scheduled tasks instead of queueing behind them.
+- The Albums list's A–Z and year scrubbers and the first page of the Tracks and Albums lists load several times faster on large libraries.
 - The Library page's totals load in a fraction of a second on large libraries instead of several seconds, and no longer hold up the rest of the app while they load. TrackSeerr also keeps more of its database in memory, so browsing large libraries is quicker.
 - Manual search for a song also searches its album when the album name is different, and when Soulseek returns nothing it tries again around Soulseek's banned search words, the same way automatic searches do.
 - Manual search is easier to find: an album's **⋯** menu on the artist page has **Manual search…**, and each song in an open album has a search button, like in the album details window.
