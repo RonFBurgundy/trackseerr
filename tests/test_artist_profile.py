@@ -669,3 +669,76 @@ def test_artist_profile_route_is_on_the_gateway_local_allowlist():
 
     assert tm._allowed(tm.GATEWAY_LOCAL_ALLOWLIST, "GET", "/api/discovery/artist-profile")
     assert not tm._allowed(tm.GATEWAY_LOCAL_ALLOWLIST, "POST", "/api/discovery/artist-profile")
+
+
+def test_warm_profile_cache_populates_link_details_and_top(db):
+    from trackseerr.artist_profile import warm_profile_cache
+
+    _artist(db, "a1", "Radiohead")
+    disc = _discovery(
+        search=[{"id": "deezer:artist:1", "name": "Radiohead", "nb_fan": 100}],
+        details=_details("Radiohead"),
+        top=[{"id": "t1", "title": "Creep", "album": "Pablo Honey", "duration": 236}],
+    )
+    assert warm_profile_cache(db, disc, "a1") is True
+    link = db.get_artist_link(library_artist_id="a1")
+    assert link is not None
+    assert link["discovery_id"] == "deezer:artist:1"
+    disc.get_artist_details.assert_called_once_with("deezer:artist:1")
+    disc.get_artist_top_tracks_detailed.assert_called_once_with("deezer:artist:1", limit=10)
+
+
+def test_warm_profile_cache_no_match_returns_false(db):
+    from trackseerr.artist_profile import warm_profile_cache
+
+    _artist(db, "a1", "Radiohead")
+    disc = _discovery(
+        search=[{"id": "deezer:artist:2", "name": "Someone Else", "nb_fan": 10}],
+    )
+    assert warm_profile_cache(db, disc, "a1") is False
+    disc.get_artist_details.assert_not_called()
+    disc.get_artist_top_tracks_detailed.assert_not_called()
+
+
+def test_warm_profile_cache_swallows_network_error(db):
+    from trackseerr.artist_profile import warm_profile_cache
+
+    _artist(db, "a1", "Radiohead")
+    disc = _discovery()
+    disc.search_artists.side_effect = requests.ConnectionError("offline")
+    assert warm_profile_cache(db, disc, "a1") is False
+
+
+def test_build_profile_fetches_details_and_top_concurrently(db):
+    import time
+    from trackseerr.artist_profile import build_profile, make_library_source
+
+    _artist(db, "a1", "Radiohead")
+    db.save_artist_link("a1", "deezer:artist:1", None, "name", name="Radiohead")
+
+    def slow_details(artist_id):
+        time.sleep(0.3)
+        return _details("Radiohead")
+
+    def slow_top(artist_id, limit=10):
+        time.sleep(0.3)
+        return [{"id": "t1", "title": "Creep", "album": "Pablo Honey", "duration": 236}]
+
+    disc = MagicMock(spec=DiscoveryClient)
+    disc.get_artist_details.side_effect = slow_details
+    disc.get_artist_top_tracks_detailed.side_effect = slow_top
+
+    source = make_library_source(db, None)
+    t0 = time.perf_counter()
+    res = build_profile(
+        db,
+        disc,
+        source=source,
+        annotate=lambda items: items,
+        library_artist_id="a1",
+    )
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 0.5
+    assert res is not None
+    assert len(res["top_tracks"]) > 0
+    assert res["top_tracks"][0]["title"] == "Creep"

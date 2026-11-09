@@ -26,7 +26,7 @@ TTL_NEGATIVE = 1 * 86400.0
 
 TTL_DEEZER_ALBUM = 30 * 86400.0
 TTL_DEEZER_ARTIST = 7 * 86400.0
-TTL_DEEZER_TOP = 1 * 86400.0
+TTL_DEEZER_TOP = 3 * 86400.0  # the nightly refresh re-warms it, so it never expires between sweeps
 
 
 def ttl_with_jitter(base: float) -> float:

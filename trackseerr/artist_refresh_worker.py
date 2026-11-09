@@ -12,6 +12,8 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
+import requests
+
 from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
 from trackseerr.mb_metadata_store import get_shared_discovery_client, get_shared_enricher
@@ -188,6 +190,7 @@ class ArtistRefreshWorker:
 
         ``only_stale`` (scheduled sweeps) skips artists refreshed within the last ``interval_seconds``.
         """
+        from trackseerr.artist_profile import warm_profile_cache
         from trackseerr.artist_refresh import refresh_single_artist
 
         def _stopping() -> bool:
@@ -260,6 +263,12 @@ class ArtistRefreshWorker:
                 except Exception as exc:
                     errs += 1
                     logger.warning("ArtistRefreshWorker: Exception refreshing artist %s (%s): %s", art_name, art_id, exc)
+
+                if not source_unavail_artist:
+                    try:
+                        warm_profile_cache(db, dc, art_id)
+                    except (requests.RequestException, ValueError, sqlite3.Error) as exc:
+                        logger.warning("ArtistRefreshWorker: profile cache warm failed for %s: %s", art_id, exc)
 
                 checked += 1
                 if not source_unavail_artist:

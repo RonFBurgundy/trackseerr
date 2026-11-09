@@ -586,6 +586,73 @@ def test_artist_refresh_worker_lifecycle_and_status(test_db: Database):
     assert stopped_status["running"] is False
 
 
+def test_refresh_once_warms_profile_cache(test_db: Database):
+    art_id = "art-warm-1"
+    test_db.upsert_library_artist(
+        LibraryArtist(
+            id=art_id,
+            name="Radiohead",
+            mbid="mbid-radiohead",
+            monitored=True,
+        )
+    )
+
+    enricher = MagicMock()
+    enricher.source_available.return_value = True
+    enricher.stats.return_value = {}
+
+    discovery = MagicMock()
+
+    worker = ArtistRefreshWorker()
+    worker.pace_delay = 0.0
+
+    with (
+        patch("trackseerr.artist_refresh.refresh_single_artist", return_value={"success": True}),
+        patch("trackseerr.artist_profile.warm_profile_cache") as mock_warm,
+    ):
+        res = worker.refresh_once(
+            test_db,
+            discovery_client=discovery,
+            enricher=enricher,
+            artist_ids=[art_id],
+        )
+
+    mock_warm.assert_called_once_with(test_db, discovery, art_id)
+    assert res.get("artists_checked") == 1
+
+
+def test_refresh_once_survives_warm_failure(test_db: Database):
+    art_id = "art-warm-2"
+    test_db.upsert_library_artist(
+        LibraryArtist(
+            id=art_id,
+            name="Radiohead",
+            mbid="mbid-radiohead",
+            monitored=True,
+        )
+    )
+
+    enricher = MagicMock()
+    enricher.source_available.return_value = True
+    enricher.stats.return_value = {}
+
+    worker = ArtistRefreshWorker()
+    worker.pace_delay = 0.0
+
+    with (
+        patch("trackseerr.artist_refresh.refresh_single_artist", return_value={"success": True}),
+        patch("trackseerr.artist_profile.warm_profile_cache", side_effect=requests.ConnectionError("fail")),
+    ):
+        res = worker.refresh_once(
+            test_db,
+            discovery_client=MagicMock(),
+            enricher=enricher,
+            artist_ids=[art_id],
+        )
+
+    assert res.get("artists_checked") == 1
+
+
 # =========================================================================
 # Test 6: system scheduled task artist_metadata_refresh
 # =========================================================================
