@@ -2,6 +2,7 @@
 
 import sqlite3
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -436,6 +437,83 @@ def test_user_store_reads_do_not_wait_for_writer(db: Database) -> None:
     assert session_result is not None
     assert session_result["session_id"] == "sess-1"
     assert session_result["data"] == {"foo": "bar"}
+
+
+def test_close_does_not_close_other_threads_reader(db: Database) -> None:
+    """db.close() does not close another thread's reader connection."""
+    ready_event = threading.Event()
+    continue_event = threading.Event()
+    worker_error = None
+    old_conn = None
+    new_conn = None
+
+    def worker() -> None:
+        nonlocal worker_error, old_conn, new_conn
+        try:
+            with db.reader() as c:
+                old_conn = c
+                ready_event.set()
+                continue_event.wait(timeout=5.0)
+                # Worker executes on connection held before main thread called db.close()
+                row = old_conn.execute("SELECT 1").fetchone()
+                assert row[0] == 1
+
+            # Subsequent reader() call gets a new connection and closes old stale connection
+            with db.reader() as c2:
+                new_conn = c2
+
+            assert new_conn is not old_conn
+            with pytest.raises(sqlite3.ProgrammingError):
+                old_conn.execute("SELECT 1")
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    t = threading.Thread(target=worker)
+    t.start()
+    assert ready_event.wait(timeout=5.0)
+
+    # Main thread closes the database while worker holds its reader
+    db.close()
+    continue_event.set()
+    t.join(timeout=5.0)
+
+    assert not t.is_alive()
+    assert worker_error is None
+
+
+def test_close_while_background_thread_reads_does_not_crash(db: Database) -> None:
+    """Calling db.close() while background thread loops reader queries does not crash."""
+    stop_event = threading.Event()
+    worker_error = None
+    read_count = 0
+
+    def worker() -> None:
+        nonlocal worker_error, read_count
+        try:
+            while not stop_event.is_set():
+                with db.reader() as c:
+                    c.execute("SELECT COUNT(*) FROM users").fetchall()
+                    read_count += 1
+                time.sleep(0.005)
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    t = threading.Thread(target=worker)
+    t.start()
+
+    # Allow worker to perform several reads
+    time.sleep(0.05)
+    # Close from main thread mid-loop
+    db.close()
+    time.sleep(0.05)
+
+    stop_event.set()
+    t.join(timeout=5.0)
+
+    assert not t.is_alive()
+    assert worker_error is None
+    assert read_count > 0
+
 
 
 
