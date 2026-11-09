@@ -211,14 +211,15 @@ def _snapshot_db(db: Database, dst_path: Path) -> None:
     try:
         if isinstance(db.db_path, Path):
             # WAL lets a second connection read a consistent snapshot while the app keeps working.
+            # Single step = one consistent WAL read snapshot; stepped copies restart whenever another
+            # connection writes, which the app does constantly.
+            if _backup_cancel_event.is_set():
+                _backup_cancel_event.clear()
+                raise TaskCancelled("Backup cancelled by admin")
+
             src = sqlite3.connect(str(db.db_path), timeout=30)
             try:
-                def _progress(_status: int, _remaining: int, _total: int) -> None:
-                    if _backup_cancel_event.is_set():
-                        _backup_cancel_event.clear()
-                        raise TaskCancelled("Backup cancelled by admin")
-
-                src.backup(dst_conn, pages=4096, sleep=0.01, progress=_progress)
+                src.backup(dst_conn)
             finally:
                 src.close()
         else:
@@ -830,11 +831,15 @@ class BackupWorker:
             except OSError as exc:
                 logger.warning("Failed to sweep stale backup files in %s: %s", b_dir, safe_exc(exc))
 
-            first_wait = _first_run_delay(
-                b_dir,
-                interval=cycle_interval(),
-                initial_delay=initial_delay,
-            )
+            try:
+                first_wait = _first_run_delay(
+                    b_dir,
+                    interval=cycle_interval(),
+                    initial_delay=initial_delay,
+                )
+            except OSError as exc:
+                logger.warning("Failed to determine first run delay: %s", safe_exc(exc))
+                first_wait = float(initial_delay)
             if not self._stop_event.wait(first_wait):
                 while not self._stop_event.is_set():
                     self.run_once(db)

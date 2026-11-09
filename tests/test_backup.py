@@ -302,6 +302,60 @@ def test_list_backups_ignores_temp_zips(test_db: Database, tmp_path: Path):
     assert "tmpx.tmp.zip" not in names
 
 
+def test_snapshot_completes_while_another_connection_writes(test_db: Database, tmp_path: Path):
+    """File-backed backup completes promptly and produces a valid archive even under concurrent writes."""
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    stop_writer = threading.Event()
+    writer_err = None
+
+    def writer_loop():
+        nonlocal writer_err
+        try:
+            conn = sqlite3.connect(str(test_db.db_path), timeout=10)
+            try:
+                conn.execute("CREATE TABLE IF NOT EXISTS concurrent_writes (id INTEGER PRIMARY KEY, ts REAL)")
+                while not stop_writer.is_set():
+                    conn.execute("INSERT INTO concurrent_writes (ts) VALUES (?)", (time.time(),))
+                    conn.commit()
+                    time.sleep(0.005)
+            finally:
+                conn.close()
+        except Exception as exc:
+            writer_err = exc
+
+    writer_thread = threading.Thread(target=writer_loop, daemon=True)
+    writer_thread.start()
+
+    backup_path = None
+    backup_err = None
+
+    def backup_runner():
+        nonlocal backup_path, backup_err
+        try:
+            backup_path = create_backup(test_db, kind="manual", backup_dir=backup_dir)
+        except Exception as exc:
+            backup_err = exc
+
+    backup_thread = threading.Thread(target=backup_runner, daemon=True)
+    t0 = time.time()
+    backup_thread.start()
+    backup_thread.join(timeout=10.0)
+
+    elapsed = time.time() - t0
+    stop_writer.set()
+    writer_thread.join(timeout=2.0)
+
+    assert not backup_thread.is_alive(), f"Backup did not finish within 10s (elapsed: {elapsed:.2f}s)"
+    assert backup_err is None, f"Backup failed with error: {backup_err}"
+    assert writer_err is None, f"Writer failed with error: {writer_err}"
+    assert backup_path is not None and backup_path.is_file()
+
+    manifest = validate_backup(backup_path)
+    assert manifest["kind"] == "manual"
+
+
 def test_first_run_delay_skips_recent_backup(tmp_path: Path):
     """_first_run_delay defers initial run when a recent scheduled backup exists."""
     backup_dir = tmp_path / "backups"
