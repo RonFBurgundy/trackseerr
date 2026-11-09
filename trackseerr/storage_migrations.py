@@ -84,6 +84,7 @@ class MigrationsMixin:
                 (94, self._migration_v94),
                 (95, self._migration_v95),
                 (96, self._migration_v96),
+                (97, self._migration_v97),
             ]
 
             applied = 0
@@ -303,6 +304,13 @@ class MigrationsMixin:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_exclusions_scope_mbid ON exclusions(scope, mbid)"
+        )
+
+    def _migration_v97(self, cur: sqlite3.Cursor) -> None:
+        """v97: Expression index on the album date key so the release-date scrubber and sort read an index."""
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lib_albums_date_key ON library_albums("
+            "NULLIF(COALESCE(NULLIF(release_date, ''), CAST(year AS TEXT)), ''))"
         )
 
     def _migration_v96(self, cur: sqlite3.Cursor) -> None:

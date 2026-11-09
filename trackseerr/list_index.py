@@ -240,11 +240,18 @@ def _date_groups(conn: sqlite3.Connection, frm: str, params: Sequence[Any], expr
     ).fetchone()
     width = _date_width(bounds)
     rows = conn.execute(
-        f"SELECT SUBSTR(NULLIF({expr}, ''), 1, {width}) AS k, COUNT(*) AS c {frm} GROUP BY k ORDER BY k",
+        f"SELECT NULLIF({expr}, '') AS d, COUNT(*) AS c {frm} GROUP BY NULLIF({expr}, '') ORDER BY d",
         list(params),
     ).fetchall()
+    bucketed: list[tuple[Optional[str], int]] = []
+    for d, count in rows:
+        key = None if d is None else str(d)[:width]
+        if bucketed and bucketed[-1][0] == key:
+            bucketed[-1] = (key, bucketed[-1][1] + int(count))
+        else:
+            bucketed.append((key, int(count)))
     groups: list[tuple[str, int]] = []
-    for key, count in rows:
+    for key, count in bucketed:
         label = NULL_LABEL if key is None else _date_label(str(key))
         if groups and groups[-1][0] == label:
             groups[-1] = (label, groups[-1][1] + int(count))

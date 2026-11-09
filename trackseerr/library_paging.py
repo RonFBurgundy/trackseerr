@@ -75,6 +75,10 @@ LIBRARY_LISTS: dict[str, LibraryListSpec] = {
         monitored_column="al.monitored",
         filter_columns={"artist_id": "al.artist_id"},
         mapper=lambda db: db._map_library_album,
+        base_frm="FROM library_albums al",
+        joins=(
+            ("ar", "LEFT JOIN library_artists ar ON ar.id = al.artist_id"),
+        ),
     ),
     "tracks": LibraryListSpec(
         select="SELECT t.*",
