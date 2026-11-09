@@ -5,6 +5,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from collections.abc import Iterator, Sequence
 from typing import Any, Callable, Optional
 
 from fastapi import Depends, HTTPException, Query, status
@@ -519,42 +520,54 @@ def _with_discovery_ids(db: Database, records: list[dict[str, Any]]) -> list[dic
         linked = {}
     return [{**r, "discovery_id": linked.get(str(r.get("id")))} for r in records]
 
+def _chunked(items: Sequence[Any], chunk_size: int = 500) -> Iterator[Sequence[Any]]:
+    """Yields successive chunks of at most chunk_size elements from items."""
+    for i in range(0, len(items), chunk_size):
+        yield items[i : i + chunk_size]
+
 def _artist_track_counts(db: Database, artist_ids: list[str]) -> dict[str, tuple[int, int, int]]:
     """Per artist: Lidarr-style track count (monitored albums or with a file), total track count, track file count."""
     if not artist_ids:
         return {}
-    placeholders = ",".join("?" for _ in artist_ids)
-    query = (
-        "SELECT t.artist_id, "
-        "SUM(CASE WHEN al.monitored = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
-        "THEN 1 ELSE 0 END), "
-        "COUNT(*), "
-        "SUM(CASE WHEN EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) THEN 1 ELSE 0 END) "
-        "FROM library_tracks t LEFT JOIN library_albums al ON al.id = t.album_id "
-        f"WHERE t.artist_id IN ({placeholders}) GROUP BY t.artist_id"
-    )
-    with db._lock:
-        rows = db.conn.execute(query, artist_ids).fetchall()
-    return {
-        r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0))
-        for r in rows
-    }
+    results: dict[str, tuple[int, int, int]] = {}
+    with db.reader() as conn:
+        for chunk in _chunked(artist_ids, 500):
+            placeholders = ",".join("?" for _ in chunk)
+            query = (
+                "SELECT t.artist_id, "
+                "SUM(CASE WHEN al.monitored = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
+                "THEN 1 ELSE 0 END), "
+                "COUNT(*), "
+                "SUM(CASE WHEN EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) THEN 1 ELSE 0 END) "
+                "FROM library_tracks t LEFT JOIN library_albums al ON al.id = t.album_id "
+                f"WHERE t.artist_id IN ({placeholders}) GROUP BY t.artist_id"
+            )
+            rows = conn.execute(query, list(chunk)).fetchall()
+            for r in rows:
+                results[r[0]] = (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0))
+    return results
 
 def _enrich_artists(db: Database, artists: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attaches album/track counts and a resolved image URL to library artists."""
-    artist_ids = [a["id"] for a in artists]
-    placeholders = ",".join("?" for _ in artist_ids)
-    with db._lock:
-        album_cur = db.conn.execute(
-            f"SELECT artist_id, COUNT(*) FROM library_albums WHERE artist_id IN ({placeholders}) GROUP BY artist_id",
-            artist_ids,
-        )
-        album_counts = dict(album_cur.fetchall())
-        cover_cur = db.conn.execute(
-            f"SELECT artist_id, cover_url FROM library_albums WHERE artist_id IN ({placeholders}) AND cover_url IS NOT NULL AND cover_url != '' GROUP BY artist_id",
-            artist_ids,
-        )
-        cover_urls = dict(cover_cur.fetchall())
+    if not artists:
+        return []
+    artist_ids = [a["id"] for a in artists if a.get("id") is not None]
+    album_counts: dict[Any, int] = {}
+    cover_urls: dict[Any, str] = {}
+    if artist_ids:
+        with db.reader() as conn:
+            for chunk in _chunked(artist_ids, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                album_cur = conn.execute(
+                    f"SELECT artist_id, COUNT(*) FROM library_albums WHERE artist_id IN ({placeholders}) GROUP BY artist_id",
+                    list(chunk),
+                )
+                album_counts.update(dict(album_cur.fetchall()))
+                cover_cur = conn.execute(
+                    f"SELECT artist_id, cover_url FROM library_albums WHERE artist_id IN ({placeholders}) AND cover_url IS NOT NULL AND cover_url != '' GROUP BY artist_id",
+                    list(chunk),
+                )
+                cover_urls.update(dict(cover_cur.fetchall()))
     track_counts = _artist_track_counts(db, artist_ids)
     tag_ids = db.get_artist_tags_map(artist_ids)
 
@@ -627,59 +640,133 @@ def _unlink_library_file(db: Database, file_row: dict[str, Any]) -> None:
 
 def _enrich_albums(db: Database, albums: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attaches the artist name and track count to library albums."""
-    album_ids = [a["id"] for a in albums]
-    placeholders = ",".join("?" for _ in album_ids)
-    with db._lock:
-        cur = db.conn.execute(
-            f"SELECT album_id, COUNT(*) FROM library_tracks WHERE album_id IN ({placeholders}) GROUP BY album_id",
-            album_ids,
-        )
-        track_counts = dict(cur.fetchall())
+    if not albums:
+        return []
+    album_ids = [a["id"] for a in albums if a.get("id") is not None]
+    distinct_artist_ids = [aid for aid in {a.get("artist_id") for a in albums} if aid]
+
+    track_counts: dict[Any, int] = {}
+    artist_names: dict[Any, str] = {}
+
+    with db.reader() as conn:
+        if album_ids:
+            for chunk in _chunked(album_ids, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"SELECT album_id, COUNT(*) FROM library_tracks WHERE album_id IN ({placeholders}) GROUP BY album_id",
+                    list(chunk),
+                )
+                track_counts.update(dict(cur.fetchall()))
+
+        if distinct_artist_ids:
+            for chunk in _chunked(distinct_artist_ids, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"SELECT id, name FROM library_artists WHERE id IN ({placeholders})",
+                    list(chunk),
+                )
+                for r in cur.fetchall():
+                    val = r[1] if r[1] is not None else "Unknown Artist"
+                    artist_names[r[0]] = val
+                    artist_names[str(r[0])] = val
 
     results: list[dict[str, Any]] = []
-    artist_cache: dict[str, str] = {}
     for album in albums:
         a_dict = dict(album)
         art_id = album.get("artist_id")
-        if art_id not in artist_cache:
-            art = db.get_library_artist(art_id) if art_id else None
-            artist_cache[art_id] = art["name"] if art else "Unknown Artist"
-        a_dict["artist_name"] = artist_cache[art_id]
+        if art_id:
+            a_dict["artist_name"] = artist_names.get(art_id, artist_names.get(str(art_id), "Unknown Artist"))
+        else:
+            a_dict["artist_name"] = "Unknown Artist"
         a_dict["track_count"] = track_counts.get(album["id"], 0)
         a_dict["cover_url"] = _versioned_art_url("album", album["id"], a_dict.get("art_version"), a_dict.get("cover_url"))
         results.append(a_dict)
     return results
 
+def _batch_load_track_enrichment(
+    db: Database, tracks: list[dict[str, Any]]
+) -> tuple[dict[Any, str], dict[Any, str], dict[Any, dict[str, Any]]]:
+    """Batch-loads artist names, album titles, and library files for a page of tracks."""
+    distinct_artist_ids = [aid for aid in {t.get("artist_id") for t in tracks} if aid]
+    distinct_album_ids = [aid for aid in {t.get("album_id") for t in tracks} if aid]
+    track_ids = list(dict.fromkeys(t["id"] for t in tracks if t.get("id") is not None))
+
+    artist_cache: dict[Any, str] = {}
+    album_cache: dict[Any, str] = {}
+    files_by_track: dict[Any, dict[str, Any]] = {}
+
+    with db.reader() as conn:
+        if distinct_artist_ids:
+            for chunk in _chunked(distinct_artist_ids, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"SELECT id, name FROM library_artists WHERE id IN ({placeholders})",
+                    list(chunk),
+                )
+                for r in cur.fetchall():
+                    val = r[1] if r[1] is not None else "Unknown Artist"
+                    artist_cache[r[0]] = val
+                    artist_cache[str(r[0])] = val
+
+        if distinct_album_ids:
+            for chunk in _chunked(distinct_album_ids, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"SELECT id, title FROM library_albums WHERE id IN ({placeholders})",
+                    list(chunk),
+                )
+                for r in cur.fetchall():
+                    val = r[1] if r[1] is not None else "Unknown Album"
+                    album_cache[r[0]] = val
+                    album_cache[str(r[0])] = val
+
+        if track_ids:
+            for chunk in _chunked(track_ids, 500):
+                placeholders = ",".join("?" for _ in chunk)
+                cur = conn.execute(
+                    f"SELECT * FROM library_files WHERE track_id IN ({placeholders}) ORDER BY track_id, rowid",
+                    list(chunk),
+                )
+                for row in cur.fetchall():
+                    tid = row["track_id"]
+                    str_tid = str(tid)
+                    if str_tid not in files_by_track and tid not in files_by_track:
+                        mapped = db._map_library_file(row)
+                        files_by_track[str_tid] = mapped
+                        files_by_track[tid] = mapped
+
+    return artist_cache, album_cache, files_by_track
+
 def _enrich_tracks(db: Database, tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Attaches artist name, album title and the linked library file to library tracks."""
-    artist_cache: dict[str, str] = {}
-    album_cache: dict[str, str] = {}
+    if not tracks:
+        return []
+
+    artist_cache, album_cache, files_by_track = _batch_load_track_enrichment(db, tracks)
     filed_tracks_cache: dict[str, list[dict[str, Any]]] = {}
+
     for t in tracks:
         art_id = t.get("artist_id")
         if art_id:
-            if art_id not in artist_cache:
-                art = db.get_library_artist(art_id)
-                artist_cache[art_id] = art["name"] if art else "Unknown Artist"
-            t["artist_name"] = artist_cache[art_id]
+            t["artist_name"] = artist_cache.get(art_id, artist_cache.get(str(art_id), "Unknown Artist"))
         else:
             t["artist_name"] = "Unknown Artist"
 
         alb_id = t.get("album_id")
         if alb_id:
-            if alb_id not in album_cache:
-                alb = db.get_library_album(alb_id)
-                album_cache[alb_id] = alb["title"] if alb else "Unknown Album"
-            t["album_title"] = album_cache[alb_id]
+            t["album_title"] = album_cache.get(alb_id, album_cache.get(str(alb_id), "Unknown Album"))
         else:
             t["album_title"] = "Unknown Album"
 
-        t["file"] = db.get_library_file_for_track(t["id"])
+        tid = t.get("id")
+        t["file"] = files_by_track.get(tid, files_by_track.get(str(tid))) if tid is not None else None
+
         if t["file"] is None and art_id:
-            if art_id not in filed_tracks_cache:
-                filed_tracks_cache[art_id] = db.list_filed_tracks_for_artist(str(art_id))
+            art_id_str = str(art_id)
+            if art_id_str not in filed_tracks_cache:
+                filed_tracks_cache[art_id_str] = db.list_filed_tracks_for_artist(art_id_str)
             equiv = match_owned_equivalent(
-                candidates=filed_tracks_cache[art_id],
+                candidates=filed_tracks_cache[art_id_str],
                 title=t.get("title") or "",
                 duration_seconds=t.get("duration_seconds"),
                 exclude_track_id=t["id"],
@@ -688,10 +775,12 @@ def _enrich_tracks(db: Database, tracks: list[dict[str, Any]]) -> list[dict[str,
                 eq_alb_id = equiv.get("album_id")
                 eq_alb_title: Optional[str] = None
                 if eq_alb_id:
-                    if eq_alb_id not in album_cache:
+                    if eq_alb_id not in album_cache and str(eq_alb_id) not in album_cache:
                         alb = db.get_library_album(eq_alb_id)
-                        album_cache[eq_alb_id] = alb["title"] if alb else "Unknown Album"
-                    eq_alb_title = album_cache[eq_alb_id]
+                        title = alb["title"] if alb else "Unknown Album"
+                        album_cache[eq_alb_id] = title
+                        album_cache[str(eq_alb_id)] = title
+                    eq_alb_title = album_cache.get(eq_alb_id, album_cache.get(str(eq_alb_id)))
                 t["owned_elsewhere"] = {
                     "track_id": equiv["id"],
                     "album_id": eq_alb_id,
