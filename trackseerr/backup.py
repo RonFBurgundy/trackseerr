@@ -169,6 +169,66 @@ def delete_backup(name: str, backup_dir: Optional[Path] = None) -> None:
     logger.info("Deleted backup %s", name)
 
 
+def sweep_stale_temp_files(backup_dir: Path, max_age_seconds: float = 3600.0) -> list[str]:
+    """Deletes temporary files left by interrupted backups older than max_age_seconds."""
+    if not backup_dir.is_dir():
+        return []
+
+    now = time.time()
+    removed: list[str] = []
+    try:
+        entries = list(backup_dir.iterdir())
+    except OSError as exc:
+        logger.warning("Could not list backup directory %s: %s", backup_dir, safe_exc(exc))
+        return []
+
+    for entry in entries:
+        try:
+            if not entry.is_file():
+                continue
+            name = entry.name
+            is_temp = (
+                name.endswith(".tmp.zip")
+                or name.endswith(".tmp.sqlite")
+                or name.endswith(".tmp.marker")
+                or (name.startswith("tmp") and name.endswith(".sqlite"))
+            )
+            if not is_temp:
+                continue
+            if (now - entry.stat().st_mtime) > max_age_seconds:
+                entry.unlink()
+                logger.info("Removed stale temporary backup file: %s", name)
+                removed.append(name)
+        except OSError as exc:
+            logger.warning("Failed to remove stale backup file %s: %s", entry, safe_exc(exc))
+
+    return removed
+
+
+def _snapshot_db(db: Database, dst_path: Path) -> None:
+    """Takes an online SQLite backup snapshot into dst_path without holding db._lock for file DBs."""
+    dst_conn = sqlite3.connect(str(dst_path))
+    try:
+        if isinstance(db.db_path, Path):
+            # WAL lets a second connection read a consistent snapshot while the app keeps working.
+            src = sqlite3.connect(str(db.db_path), timeout=30)
+            try:
+                def _progress(_status: int, _remaining: int, _total: int) -> None:
+                    if _backup_cancel_event.is_set():
+                        _backup_cancel_event.clear()
+                        raise TaskCancelled("Backup cancelled by admin")
+
+                src.backup(dst_conn, pages=4096, sleep=0.01, progress=_progress)
+            finally:
+                src.close()
+        else:
+            with db._lock:
+                src_conn = db._ensure_connection()
+                src_conn.backup(dst_conn)
+    finally:
+        dst_conn.close()
+
+
 def create_backup(
     db: Database,
     kind: str = "manual",
@@ -223,13 +283,7 @@ def create_backup(
 
     try:
         # 1. Snapshot database using SQLite online backup API (WAL-safe)
-        dst_conn = sqlite3.connect(str(temp_db_path))
-        try:
-            with db._lock:
-                src_conn = db._ensure_connection()
-                src_conn.backup(dst_conn)
-        finally:
-            dst_conn.close()
+        _snapshot_db(db, temp_db_path)
 
         if _backup_cancel_event.is_set():
             _backup_cancel_event.clear()
@@ -275,7 +329,7 @@ def list_backups(backup_dir: Optional[Path] = None) -> list[dict[str, Any]]:
 
     items: list[dict[str, Any]] = []
     for entry in b_dir.iterdir():
-        if not entry.is_file() or not entry.name.endswith(".zip"):
+        if not entry.is_file() or not entry.name.endswith(".zip") or entry.name.endswith(".tmp.zip"):
             continue
         # Check against base naming or accept any zip in backup directory
         is_backup_name = bool(BACKUP_FILENAME_RE.match(entry.name))
@@ -695,6 +749,46 @@ def apply_pending_restore(
         return False
 
 
+def _first_run_delay(
+    backup_dir: Path,
+    interval: float,
+    initial_delay: float,
+    now: Optional[datetime] = None,
+) -> float:
+    """Computes the delay before the first scheduled backup run.
+
+    If a scheduled backup was taken recently, defers the first run so that
+    the total elapsed time since the previous backup matches the cycle interval.
+    If no scheduled backup exists or the last one is older than the interval,
+    waits initial_delay.
+    """
+    ref_now = now if now is not None else datetime.now(timezone.utc)
+    if ref_now.tzinfo is None:
+        ref_now = ref_now.replace(tzinfo=timezone.utc)
+
+    backups = list_backups(backup_dir=backup_dir)
+    scheduled_dts: list[datetime] = []
+    for item in backups:
+        if item.get("kind") == "scheduled" and item.get("created_at"):
+            try:
+                dt_str = str(item["created_at"])
+                if dt_str.endswith("Z"):
+                    dt_str = dt_str[:-1] + "+00:00"
+                dt = datetime.fromisoformat(dt_str)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                scheduled_dts.append(dt)
+            except (ValueError, TypeError):
+                continue
+
+    if not scheduled_dts:
+        return float(initial_delay)
+
+    latest = max(scheduled_dts)
+    age = (ref_now - latest).total_seconds()
+    return float(max(initial_delay, interval - age))
+
+
 class BackupWorker:
     """Scheduled backup worker thread running in the background."""
 
@@ -725,7 +819,23 @@ class BackupWorker:
         cycle_interval = interval_fn or (lambda: float(interval_seconds))
 
         def _loop() -> None:
-            if not self._stop_event.wait(initial_delay):
+            db_path = getattr(db, "db_path", None)
+            if isinstance(db_path, Path):
+                b_dir = get_backup_dir(base_dir=db_path.parent)
+            else:
+                b_dir = get_backup_dir()
+
+            try:
+                sweep_stale_temp_files(b_dir)
+            except OSError as exc:
+                logger.warning("Failed to sweep stale backup files in %s: %s", b_dir, safe_exc(exc))
+
+            first_wait = _first_run_delay(
+                b_dir,
+                interval=cycle_interval(),
+                initial_delay=initial_delay,
+            )
+            if not self._stop_event.wait(first_wait):
                 while not self._stop_event.is_set():
                     self.run_once(db)
                     if wait_for_next_cycle(self._stop_event, cycle_interval):

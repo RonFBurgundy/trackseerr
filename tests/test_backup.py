@@ -6,9 +6,10 @@ import io
 import json
 import os
 import sqlite3
+import threading
 import time
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -27,6 +28,7 @@ from trackseerr.backup import (
     PENDING_RESTORE_MARKER_NAME,
     BackupValidationError,
     InvalidBackupNameError,
+    _first_run_delay,
     apply_pending_restore,
     create_backup,
     delete_backup,
@@ -38,6 +40,7 @@ from trackseerr.backup import (
     set_backup_retention,
     set_restart_killer,
     stage_restore,
+    sweep_stale_temp_files,
     validate_backup,
 )
 from trackseerr.config import Config
@@ -188,6 +191,175 @@ def test_retention_prunes_only_scheduled(test_db: Database, tmp_path: Path):
     assert s5.exists()
     assert manual.exists()
     assert pre_restore.exists()
+
+
+def test_create_backup_does_not_hold_db_lock(test_db: Database, tmp_path: Path):
+    """create_backup on file-backed database does not hold db._lock during online backup."""
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    in_backup = threading.Event()
+    release_backup = threading.Event()
+    orig_connect = sqlite3.connect
+
+    class BlockingConn(sqlite3.Connection):
+        def backup(self, target, *args, **kwargs):
+            in_backup.set()
+            release_backup.wait(timeout=5.0)
+            return super().backup(target, *args, **kwargs)
+
+    def custom_connect(*args, **kwargs):
+        kwargs["factory"] = BlockingConn
+        return orig_connect(*args, **kwargs)
+
+    backup_path = None
+    backup_err = None
+
+    def run_backup():
+        nonlocal backup_path, backup_err
+        try:
+            backup_path = create_backup(test_db, kind="manual", backup_dir=backup_dir)
+        except Exception as exc:
+            backup_err = exc
+
+    with patch("trackseerr.backup.sqlite3.connect", side_effect=custom_connect):
+        t = threading.Thread(target=run_backup)
+        t.start()
+        try:
+            assert in_backup.wait(timeout=5.0), "Backup did not start"
+            # While backup is copying in separate connection, db._lock must be free to acquire
+            lock_acquired = test_db._lock.acquire(timeout=1.0)
+            assert lock_acquired is True, "db._lock was held during backup"
+            test_db._lock.release()
+        finally:
+            release_backup.set()
+            t.join(timeout=5.0)
+
+    assert backup_err is None
+    assert backup_path is not None
+    manifest = validate_backup(backup_path)
+    assert manifest["kind"] == "manual"
+
+
+def test_create_backup_contains_writes_committed_before_start(test_db: Database, tmp_path: Path):
+    """create_backup captures rows committed to database prior to snapshot."""
+    test_db.set_kv("pre_backup_marker", "committed_value_123")
+    backup_dir = tmp_path / "backups"
+    path = create_backup(test_db, kind="manual", backup_dir=backup_dir)
+
+    with zipfile.ZipFile(path, "r") as zf:
+        extracted = tmp_path / "extracted_committed.sqlite"
+        extracted.write_bytes(zf.read(DB_MEMBER_NAME))
+        conn = sqlite3.connect(str(extracted))
+        try:
+            cur = conn.execute("SELECT value FROM kv_store WHERE key = 'pre_backup_marker'")
+            row = cur.fetchone()
+            assert row is not None
+            assert row[0] == "committed_value_123"
+        finally:
+            conn.close()
+
+
+def test_sweep_stale_temp_files(tmp_path: Path):
+    """sweep_stale_temp_files removes old temp files while keeping fresh temp files and real backups."""
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    two_hours_ago = time.time() - 7200
+
+    old_temp = backup_dir / "tmpabc.tmp.zip"
+    old_temp.write_text("old temp data")
+    os.utime(old_temp, (two_hours_ago, two_hours_ago))
+
+    fresh_temp = backup_dir / "tmpdef.tmp.zip"
+    fresh_temp.write_text("fresh temp data")
+
+    real_backup = backup_dir / "trackseerr_backup_20260101_000000_scheduled.zip"
+    real_backup.write_text("real backup archive")
+    os.utime(real_backup, (two_hours_ago, two_hours_ago))
+
+    removed = sweep_stale_temp_files(backup_dir, max_age_seconds=3600.0)
+
+    assert removed == ["tmpabc.tmp.zip"]
+    assert not old_temp.exists()
+    assert fresh_temp.exists()
+    assert real_backup.exists()
+
+
+def test_list_backups_ignores_temp_zips(test_db: Database, tmp_path: Path):
+    """list_backups skips .tmp.zip files from in-flight or interrupted backups."""
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    real_path = create_backup(test_db, kind="manual", backup_dir=backup_dir)
+
+    temp_zip = backup_dir / "tmpx.tmp.zip"
+    temp_zip.write_text("temporary zip payload")
+
+    listed = list_backups(backup_dir=backup_dir)
+    names = [b["name"] for b in listed]
+    assert real_path.name in names
+    assert "tmpx.tmp.zip" not in names
+
+
+def test_first_run_delay_skips_recent_backup(tmp_path: Path):
+    """_first_run_delay defers initial run when a recent scheduled backup exists."""
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    def _make_backup(name: str, created_at: str, kind: str) -> Path:
+        p = backup_dir / name
+        manifest = {
+            "app_version": __version__,
+            "schema_version": SCHEMA_VERSION,
+            "created_at": created_at,
+            "kind": kind,
+        }
+        with zipfile.ZipFile(p, "w") as zf:
+            zf.writestr(MANIFEST_MEMBER_NAME, json.dumps(manifest))
+            zf.writestr(DB_MEMBER_NAME, b"dummy")
+        return p
+
+    ref_now = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
+    interval = 7 * 86400.0  # 7 days
+    initial_delay = 60.0
+
+    # 1. No scheduled backups (manual only) -> 60
+    _make_backup(
+        "trackseerr_backup_20260609_120000_manual.zip",
+        "2026-06-09T12:00:00+00:00",
+        "manual",
+    )
+    delay_manual_only = _first_run_delay(
+        backup_dir, interval=interval, initial_delay=initial_delay, now=ref_now
+    )
+    assert delay_manual_only == 60.0
+
+    # 2. Latest scheduled backup created 1 day ago -> ~6 days (assert within 5 s)
+    one_day_ago = ref_now - timedelta(days=1)
+    scheduled_1d = _make_backup(
+        "trackseerr_backup_20260609_120000_scheduled.zip",
+        one_day_ago.isoformat(),
+        "scheduled",
+    )
+    delay_recent = _first_run_delay(
+        backup_dir, interval=interval, initial_delay=initial_delay, now=ref_now
+    )
+    expected_delay = 6 * 86400.0
+    assert abs(delay_recent - expected_delay) <= 5.0
+
+    # 3. Latest scheduled backup created 8 days ago -> 60
+    scheduled_1d.unlink()
+    eight_days_ago = ref_now - timedelta(days=8)
+    _make_backup(
+        "trackseerr_backup_20260602_120000_scheduled.zip",
+        eight_days_ago.isoformat(),
+        "scheduled",
+    )
+    delay_old = _first_run_delay(
+        backup_dir, interval=interval, initial_delay=initial_delay, now=ref_now
+    )
+    assert delay_old == 60.0
 
 
 def test_delete_and_resolve_reject_traversal_names(tmp_path: Path):
