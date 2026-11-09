@@ -27,8 +27,8 @@ class IssueStoreMixin:
 
     def get_media_server_path_mapping(self) -> Optional[dict[str, Any]]:
         """Saved ``{server_prefix, local_prefix, auto, server_kind}`` or None."""
-        with self._lock:
-            row = self.conn.execute("SELECT path_mapping_json FROM media_server_settings WHERE id = 1").fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT path_mapping_json FROM media_server_settings WHERE id = 1").fetchone()
         raw = (row["path_mapping_json"] if row else "") or ""
         if not raw:
             return None
@@ -142,8 +142,8 @@ class IssueStoreMixin:
         if not include_dismissed:
             sql += " WHERE dismissed = 0"
         sql += " ORDER BY group_key, path"
-        with self._lock:
-            rows = self.conn.execute(sql).fetchall()
+        with self.reader() as conn:
+            rows = conn.execute(sql).fetchall()
         out: list[dict[str, Any]] = []
         for r in rows:
             d = dict(r)
@@ -155,8 +155,8 @@ class IssueStoreMixin:
         return out
 
     def get_library_health_finding(self, finding_id: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM library_health_findings WHERE id = ?", (str(finding_id),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM library_health_findings WHERE id = ?", (str(finding_id),)).fetchone()
         if row is None:
             return None
         d = dict(row)
@@ -167,8 +167,8 @@ class IssueStoreMixin:
         return d
 
     def count_library_health_findings(self) -> int:
-        with self._lock:
-            row = self.conn.execute("SELECT COUNT(*) FROM library_health_findings WHERE dismissed = 0").fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM library_health_findings WHERE dismissed = 0").fetchone()
         return int(row[0]) if row else 0
 
     def delete_library_health_finding_by_path(self, path: str, kind: Optional[str] = None) -> int:
@@ -201,8 +201,8 @@ class IssueStoreMixin:
             self.conn.commit()
 
     def list_library_health_dismissals(self) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self.conn.execute("SELECT id, scope, path, created_at FROM library_health_dismissals").fetchall()
+        with self.reader() as conn:
+            rows = conn.execute("SELECT id, scope, path, created_at FROM library_health_dismissals").fetchall()
         return [dict(r) for r in rows]
 
     def record_library_health_run(self, run: dict[str, Any]) -> dict[str, Any]:
@@ -226,8 +226,8 @@ class IssueStoreMixin:
             return {**run, "id": cur.lastrowid}
 
     def get_last_library_health_run(self) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM library_health_runs ORDER BY id DESC LIMIT 1").fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM library_health_runs ORDER BY id DESC LIMIT 1").fetchone()
         return dict(row) if row else None
 
     # -------------------------------------------------------------------------
@@ -305,14 +305,14 @@ class IssueStoreMixin:
 
     def get_issue(self, issue_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single media issue by ID with reporter username, comment counts and unread flag joined."""
-        with self._lock:
-            row = self.conn.execute(self._ISSUE_SELECT + " WHERE i.id = ?", (str(issue_id),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute(self._ISSUE_SELECT + " WHERE i.id = ?", (str(issue_id),)).fetchone()
             return dict(row) if row else None
 
     def count_recent_issues(self, user_id: str, hours: int = 24) -> int:
         """Counts issues created by ``user_id`` within the rolling window (from the DB, restart-safe)."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT COUNT(*) FROM media_issues WHERE user_id = ? AND created_at >= datetime('now', ?)",
                 (str(user_id), f"-{int(hours)} hours"),
             )
@@ -342,8 +342,8 @@ class IssueStoreMixin:
             if value:
                 clauses.append(f"{column} = ?")
                 params.append(str(value))
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 f"""
                 SELECT id, status FROM media_issues
                 WHERE user_id = ? AND status IN ('open', 'in_progress') AND issue_type = ?
@@ -379,8 +379,8 @@ class IssueStoreMixin:
             params.append(str(artist))
         query += " ORDER BY i.created_at DESC, i.rowid DESC"
 
-        with self._lock:
-            cur = self.conn.execute(query, params)
+        with self.reader() as conn:
+            cur = conn.execute(query, params)
             return [dict(r) for r in cur.fetchall()]
 
     def update_issue(
@@ -511,8 +511,8 @@ class IssueStoreMixin:
         if not include_system:
             sql += " AND c.is_system = 0"
         sql += " ORDER BY c.created_at ASC, c.rowid ASC"
-        with self._lock:
-            return [dict(r) for r in self.conn.execute(sql, (str(issue_id),)).fetchall()]
+        with self.reader() as conn:
+            return [dict(r) for r in conn.execute(sql, (str(issue_id),)).fetchall()]
 
     def mark_issue_seen(self, issue_id: str) -> bool:
         """Stamps the reporter's last-seen time on an issue."""
@@ -526,8 +526,8 @@ class IssueStoreMixin:
 
     def count_unread_issues(self, user_id: str) -> int:
         """Issues the user reported that have admin activity newer than their last visit."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*) FROM media_issues WHERE user_id = ? AND last_staff_activity_at IS NOT NULL "
                 "AND (reporter_seen_at IS NULL OR last_staff_activity_at > reporter_seen_at)",
                 (str(user_id),),
@@ -536,8 +536,8 @@ class IssueStoreMixin:
 
     def count_issues_by_status(self, status: str) -> int:
         """Number of issues currently in ``status``."""
-        with self._lock:
-            row = self.conn.execute("SELECT COUNT(*) FROM media_issues WHERE status = ?", (str(status),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM media_issues WHERE status = ?", (str(status),)).fetchone()
             return int(row[0])
 
     def get_imported_release_source(

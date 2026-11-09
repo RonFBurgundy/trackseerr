@@ -76,8 +76,8 @@ class RequestStoreMixin:
 
     def get_request(self, request_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single request by ID with user info joined."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
                        r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
@@ -160,8 +160,8 @@ class RequestStoreMixin:
             query += " LIMIT -1 OFFSET ?"
             params.append(int(offset))
 
-        with self._lock:
-            cur = self.conn.execute(query, params)
+        with self.reader() as conn:
+            cur = conn.execute(query, params)
             return [dict(row) for row in cur.fetchall()]
 
     def count_requests(
@@ -178,8 +178,8 @@ class RequestStoreMixin:
             FROM music_requests r
             WHERE {where_sql}
         """
-        with self._lock:
-            cur = self.conn.execute(query, params)
+        with self.reader() as conn:
+            cur = conn.execute(query, params)
             row = cur.fetchone()
             return int(row[0]) if row else 0
 
@@ -194,8 +194,8 @@ class RequestStoreMixin:
         """(total, groups) for music_requests ordered by created_at DESC, matching list_requests."""
         where_sql, params = self._build_requests_where(user_id=user_id, status=status, source=source)
         frm = f"FROM music_requests r WHERE {where_sql}"
-        with self._lock:
-            return build_index(self.conn, frm, params, SortDef("r.created_at", "event"), sort_dir)
+        with self.reader() as conn:
+            return build_index(conn, frm, params, SortDef("r.created_at", "event"), sort_dir)
 
     def count_request_sources(
         self, user_id: str | None = None
@@ -216,8 +216,8 @@ class RequestStoreMixin:
             query += " AND r.user_id = ?"
             params.append(str(user_id))
         query += " GROUP BY source ORDER BY count DESC, source ASC"
-        with self._lock:
-            cur = self.conn.execute(query, params)
+        with self.reader() as conn:
+            cur = conn.execute(query, params)
             return [dict(row) for row in cur.fetchall()]
 
     def get_cutoff_unmet_requests(self) -> list[dict[str, Any]]:
@@ -238,8 +238,8 @@ class RequestStoreMixin:
                   ) = 1
             ORDER BY r.created_at ASC
         """
-        with self._lock:
-            cur = self.conn.execute(query)
+        with self.reader() as conn:
+            cur = conn.execute(query)
             return [dict(row) for row in cur.fetchall()]
 
     def update_request_quality(
@@ -347,8 +347,8 @@ class RequestStoreMixin:
         """
         current = (now or datetime.now(timezone.utc)).strftime(_RETRY_TS_FORMAT)
         reasons = (*REQUEST_FAST_RETRY_REASONS, "not_in_metadata_profile")
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 f"""
                 SELECT id, artist, album, title, item_type, status_reason, retry_attempts, next_attempt_at
                 FROM music_requests
@@ -362,8 +362,8 @@ class RequestStoreMixin:
 
     def list_requests_needing_catalog(self, limit: int = 50) -> list[dict[str, Any]]:
         """Approved requests in processing state whose catalog seeding has not run, oldest first."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
                        r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,
@@ -434,8 +434,8 @@ class RequestStoreMixin:
         clean_album = (album or "").strip().lower() if album else None
         clean_title = (title or "").strip().lower() if title else None
 
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT r.id, r.user_id, r.item_type, r.title, r.artist, r.album,
                        r.cover_url, r.preview_url, r.status, r.release_date, r.foreign_id,

@@ -161,8 +161,8 @@ class UserStoreMixin:
         return user
 
     def get_user(self, user_id: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT id, username, email, is_admin, permissions,
                        quota_albums AS request_limit_quota,
@@ -186,8 +186,8 @@ class UserStoreMixin:
             return d
 
     def list_users(self) -> list[dict[str, Any]]:
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT id, username, email, is_admin, permissions,
                        quota_albums AS request_limit_quota,
@@ -306,8 +306,8 @@ class UserStoreMixin:
 
     def get_last_seen_changelog_version(self, user_id: str) -> Optional[str]:
         """Returns the changelog version last seen by this user, or None if never recorded."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT last_seen_changelog_version FROM users WHERE id = ?",
                 (str(user_id),),
             )
@@ -327,8 +327,8 @@ class UserStoreMixin:
 
     def count_active_admins(self, exclude_user_id: Optional[str] = None) -> int:
         """Admins that are not disabled, optionally excluding one user id."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND disabled = 0 AND id != ?",
                 (str(exclude_user_id) if exclude_user_id is not None else "",),
             ).fetchone()
@@ -336,8 +336,8 @@ class UserStoreMixin:
 
     def count_local_login_admins(self) -> int:
         """Enabled admins that can sign in without a media server: local accounts holding a password hash."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*) FROM users WHERE is_admin = 1 AND disabled = 0 AND auth_type = 'local' "
                 "AND password_hash IS NOT NULL AND password_hash != ''"
             ).fetchone()
@@ -382,8 +382,8 @@ class UserStoreMixin:
 
     def list_users_admin(self) -> list[dict[str, Any]]:
         """Admin listing rows: profile, state, quota overrides and MFA flag. Never selects any secret value."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 """
                 SELECT id, username, email, is_admin, permissions, auth_type, disabled, last_login_at, created_at,
                        totp_secret IS NOT NULL AS mfa_enabled,
@@ -465,9 +465,9 @@ class UserStoreMixin:
         self, user_id: str, days: Optional[int] = None
     ) -> int:
         """Counts active/recent requests for a user within a rolling day window or all time."""
-        with self._lock:
+        with self.reader() as conn:
             if days is not None and int(days) > 0:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     """
                     SELECT COUNT(*) FROM music_requests
                     WHERE user_id = ?
@@ -477,7 +477,7 @@ class UserStoreMixin:
                     (str(user_id), int(days)),
                 )
             else:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     """
                     SELECT COUNT(*) FROM music_requests
                     WHERE user_id = ?
@@ -533,8 +533,8 @@ class UserStoreMixin:
         return session
 
     def get_session(self, session_id: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT session_id, user_id, data, expires_at, created_at
                 FROM sessions
