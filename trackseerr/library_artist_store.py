@@ -213,14 +213,14 @@ class LibraryArtistStoreMixin:
         self, library_artist_id: Optional[str] = None, discovery_id: Optional[str] = None
     ) -> Optional[dict[str, Any]]:
         """The cached link row keyed by library artist id or discovery id (library id wins); None when absent."""
-        with self._lock:
+        with self.reader() as conn:
             row = None
             if library_artist_id:
-                row = self.conn.execute(
+                row = conn.execute(
                     "SELECT * FROM artist_links WHERE library_artist_id = ?", (str(library_artist_id),)
                 ).fetchone()
             if row is None and discovery_id:
-                row = self.conn.execute(
+                row = conn.execute(
                     "SELECT * FROM artist_links WHERE discovery_id = ?", (str(discovery_id),)
                 ).fetchone()
             return dict(row) if row else None
@@ -274,8 +274,8 @@ class LibraryArtistStoreMixin:
 
     def get_library_artist(self, artist_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single library artist by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_artists WHERE id = ?",
                 (str(artist_id),),
             )
@@ -303,8 +303,8 @@ class LibraryArtistStoreMixin:
         ``cover_url`` for albums, aliased to ``url``) for the art backfill and art resolver."""
         table = self._ART_TABLES[kind]
         url_col = "image_url" if kind == "artist" else "cover_url"
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 f"SELECT id, path, {url_col} AS url, art_version FROM {table} WHERE id > ? ORDER BY id LIMIT ?",
                 (str(after_id), int(limit)),
             )
@@ -313,8 +313,8 @@ class LibraryArtistStoreMixin:
     def get_library_artist_by_name(self, name: str) -> Optional[dict[str, Any]]:
         """Retrieves an artist by exact name or cleaned normalized name."""
         clean = clean_library_name(name)
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_artists WHERE clean_name = ? OR LOWER(name) = LOWER(?) LIMIT 1",
                 (clean, str(name).strip()),
             )
@@ -325,8 +325,8 @@ class LibraryArtistStoreMixin:
         self, foreign_id: str
     ) -> Optional[dict[str, Any]]:
         """Retrieves a library artist by foreign_artist_id."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_artists WHERE foreign_artist_id = ? LIMIT 1",
                 (str(foreign_id),),
             )
@@ -335,8 +335,8 @@ class LibraryArtistStoreMixin:
 
     def get_library_artist_by_mbid(self, mbid: str) -> Optional[dict[str, Any]]:
         """Retrieves a library artist by MusicBrainz artist id."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT * FROM library_artists WHERE mbid = ? LIMIT 1", (str(mbid),)
             ).fetchone()
             return self._map_library_artist(row) if row else None
@@ -376,8 +376,8 @@ class LibraryArtistStoreMixin:
         sql += " ORDER BY name COLLATE NOCASE ASC LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset)])
 
-        with self._lock:
-            cur = self.conn.execute(sql, params)
+        with self.reader() as conn:
+            cur = conn.execute(sql, params)
             return [self._map_library_artist(row) for row in cur.fetchall()]
 
     def delete_library_artist(self, artist_id: str) -> bool:
@@ -431,16 +431,16 @@ class LibraryArtistStoreMixin:
 
     def list_metadata_profiles(self) -> list[dict[str, Any]]:
         """All metadata profiles (oldest first) with ``artist_count``, how many artists use each."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT p.*, (SELECT COUNT(*) FROM library_artists ar WHERE ar.metadata_profile_id = p.id) "
                 "AS artist_count FROM native_metadata_profiles p ORDER BY p.id"
             ).fetchall()
         return [{**self._map_metadata_profile(r), "artist_count": int(r["artist_count"])} for r in rows]
 
     def get_metadata_profile(self, profile_id: int) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM native_metadata_profiles WHERE id = ?", (int(profile_id),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM native_metadata_profiles WHERE id = ?", (int(profile_id),)).fetchone()
         return self._map_metadata_profile(row) if row else None
 
     def create_metadata_profile(self, name: str, primary_types: Any, secondary_types: Any) -> dict[str, Any]:
@@ -535,17 +535,17 @@ class LibraryArtistStoreMixin:
             "FROM library_artists WHERE id = ?) ar"
         )
         ar_params = [int(profile_id) if profile_id is not None else None, str(artist_id)]
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT album_type, secondary_types FROM library_albums WHERE artist_id = ?", (str(artist_id),)
             ).fetchall()
-            alb = self.conn.execute(
+            alb = conn.execute(
                 "SELECT COALESCE(SUM(a.monitored = 0 AND n = 1), 0), COALESCE(SUM(a.monitored = 1 AND n = 0), 0) FROM ("
                 f"SELECT a.monitored AS monitored, ({album_expr}) AS n FROM library_albums a "
                 f"JOIN {ar_sub} ON ar.id = a.artist_id WHERE a.artist_id = ?) a",
                 [*ar_params, str(artist_id)],
             ).fetchone()
-            trk = self.conn.execute(
+            trk = conn.execute(
                 "SELECT COALESCE(SUM(m = 0 AND n = 1), 0), COALESCE(SUM(m = 1 AND n = 0), 0) FROM ("
                 "SELECT library_tracks.monitored AS m, CASE WHEN ar.monitor_option = 'existing' "
                 f"THEN ({album_expr}) AND {TRACK_HAS_FILE_SQL} ELSE ({album_expr}) END AS n "

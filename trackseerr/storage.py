@@ -223,6 +223,12 @@ class Database(
                 yield self.conn
             return
 
+        # A caller inside a write must read its own uncommitted rows, so it
+        # keeps using the writer connection (it already holds the lock).
+        if self._lock._is_owned():
+            yield self.conn
+            return
+
         conn = getattr(self._read_local, "conn", None)
         gen = getattr(self._read_local, "generation", None)
         if conn is None or gen != self._reader_generation:

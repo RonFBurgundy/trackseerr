@@ -166,8 +166,8 @@ class LibraryCatalogStoreMixin:
 
     def get_library_album(self, album_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single library album by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_albums WHERE id = ?",
                 (str(album_id),),
             )
@@ -183,8 +183,8 @@ class LibraryCatalogStoreMixin:
         (an album and a single can share a normalised title); an exact RG match is preferred over an unlinked row.
         """
         clean = clean_library_name(title)
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_albums WHERE artist_id = ? AND clean_title = ?",
                 (str(artist_id), clean),
             )
@@ -207,8 +207,8 @@ class LibraryCatalogStoreMixin:
         self, foreign_id: str
     ) -> Optional[dict[str, Any]]:
         """Retrieves a library album by foreign_album_id."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_albums WHERE foreign_album_id = ? LIMIT 1",
                 (str(foreign_id),),
             )
@@ -219,8 +219,8 @@ class LibraryCatalogStoreMixin:
         self, mb_release_group_id: str
     ) -> Optional[dict[str, Any]]:
         """Retrieves a library album by MusicBrainz release group ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_albums WHERE mb_release_group_id = ? LIMIT 1",
                 (str(mb_release_group_id),),
             )
@@ -251,8 +251,8 @@ class LibraryCatalogStoreMixin:
         sql += " ORDER BY year DESC, title COLLATE NOCASE ASC LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset)])
 
-        with self._lock:
-            cur = self.conn.execute(sql, params)
+        with self.reader() as conn:
+            cur = conn.execute(sql, params)
             return [self._map_library_album(row) for row in cur.fetchall()]
 
     def delete_library_album(self, album_id: str) -> bool:
@@ -484,8 +484,8 @@ class LibraryCatalogStoreMixin:
             params.append(str(after_id))
         sql += " ORDER BY a.id LIMIT ?"
         params.append(int(limit))
-        with self._lock:
-            rows = self.conn.execute(sql, params).fetchall()
+        with self.reader() as conn:
+            rows = conn.execute(sql, params).fetchall()
         return [
             {"id": r[0], "title": r[1], "mb_release_group_id": r[2], "artist_id": r[3]} for r in rows
         ]
@@ -500,8 +500,8 @@ class LibraryCatalogStoreMixin:
             "AND EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
             "ORDER BY t.disc_number, t.track_number, t.id"
         )
-        with self._lock:
-            rows = self.conn.execute(sql, (str(album_id),)).fetchall()
+        with self.reader() as conn:
+            rows = conn.execute(sql, (str(album_id),)).fetchall()
         return [
             {
                 "id": r[0], "title": r[1], "disc_number": r[2], "track_number": r[3],
@@ -512,8 +512,8 @@ class LibraryCatalogStoreMixin:
 
     def max_owned_disc(self, album_id: str) -> int:
         """Highest disc number among the album's tracks that have a file, minimum 1."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT MAX(t.disc_number) FROM library_tracks t "
                 "WHERE t.album_id = ? AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id))",
                 (str(album_id),),
@@ -538,8 +538,8 @@ class LibraryCatalogStoreMixin:
 
     def list_track_artists(self, track_id: str) -> list[dict[str, Any]]:
         """Returns a track's artist credits ordered by position."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 f"SELECT {self._CREDIT_COLUMNS} FROM library_track_artists WHERE track_id = ? ORDER BY position",
                 (str(track_id),),
             ).fetchall()
@@ -547,8 +547,8 @@ class LibraryCatalogStoreMixin:
 
     def list_track_artists_for_album(self, album_id: str) -> dict[str, list[dict[str, Any]]]:
         """Returns ``{track_id: credits}`` for every credited track of an album (one query)."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT a.track_id, a.position, a.artist_name, a.artist_mbid, a.role, a.join_phrase, a.source "
                 "FROM library_track_artists a JOIN library_tracks t ON t.id = a.track_id "
                 "WHERE t.album_id = ? ORDER BY a.track_id, a.position",
@@ -561,8 +561,8 @@ class LibraryCatalogStoreMixin:
 
     def get_library_track(self, track_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single library track by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_tracks WHERE id = ?",
                 (str(track_id),),
             )
@@ -583,8 +583,8 @@ class LibraryCatalogStoreMixin:
         if album_id is not None:
             query += " AND album_id = ?"
             params.append(str(album_id))
-        with self._lock:
-            cur = self.conn.execute(query + " LIMIT 1", params)
+        with self.reader() as conn:
+            cur = conn.execute(query + " LIMIT 1", params)
             row = cur.fetchone()
             return self._map_library_track(row) if row else None
 
@@ -592,14 +592,14 @@ class LibraryCatalogStoreMixin:
         self, foreign_id: str, album_id: Optional[str] = None
     ) -> Optional[dict[str, Any]]:
         """Retrieves a library track by foreign_track_id and optional album_id."""
-        with self._lock:
+        with self.reader() as conn:
             if album_id:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT * FROM library_tracks WHERE foreign_track_id = ? AND album_id = ? LIMIT 1",
                     (str(foreign_id), str(album_id)),
                 )
             else:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT * FROM library_tracks WHERE foreign_track_id = ? LIMIT 1",
                     (str(foreign_id),),
                 )
@@ -641,8 +641,8 @@ class LibraryCatalogStoreMixin:
             f"ORDER BY {has_file} DESC, {met} DESC LIMIT ?"
         )
         params.append(int(limit))
-        with self._lock:
-            rows = self.conn.execute(query, params).fetchall()
+        with self.reader() as conn:
+            rows = conn.execute(query, params).fetchall()
             out: list[dict[str, Any]] = []
             for row in rows:
                 track = self._map_library_track(row)
@@ -662,8 +662,8 @@ class LibraryCatalogStoreMixin:
             "WHERE t.artist_id = ? AND EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
             "ORDER BY t.id LIMIT ?"
         )
-        with self._lock:
-            rows = self.conn.execute(query, (str(artist_id), int(limit))).fetchall()
+        with self.reader() as conn:
+            rows = conn.execute(query, (str(artist_id), int(limit))).fetchall()
             out: list[dict[str, Any]] = []
             for row in rows:
                 track = self._map_library_track(row)
@@ -683,8 +683,8 @@ class LibraryCatalogStoreMixin:
             "WHERE t.artist_id = ? AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
             "ORDER BY t.id LIMIT ?"
         )
-        with self._lock:
-            rows = self.conn.execute(query, (str(artist_id), int(limit))).fetchall()
+        with self.reader() as conn:
+            rows = conn.execute(query, (str(artist_id), int(limit))).fetchall()
             out: list[dict[str, Any]] = []
             for row in rows:
                 track = self._map_library_track(row)
@@ -769,8 +769,8 @@ class LibraryCatalogStoreMixin:
         clean = clean_library_name(title)
         if not clean or duration_seconds is None:
             return None
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT t.* FROM library_tracks t WHERE t.album_id = ? AND t.clean_title = ? "
                 "AND EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id) "
                 "AND t.duration_seconds IS NOT NULL",
@@ -905,8 +905,8 @@ class LibraryCatalogStoreMixin:
         sql += " ORDER BY disc_number ASC, track_number ASC LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset)])
 
-        with self._lock:
-            cur = self.conn.execute(sql, params)
+        with self.reader() as conn:
+            cur = conn.execute(sql, params)
             return [self._map_library_track(row) for row in cur.fetchall()]
 
     _ALBUMS_MISSING_RELEASE_WHERE = (
@@ -955,8 +955,8 @@ class LibraryCatalogStoreMixin:
     def count_albums_missing_release(self) -> int:
         """Counts albums that have files, a release group ID, and no release ID."""
         sql = f"SELECT COUNT(*) FROM library_albums a WHERE {self._ALBUMS_MISSING_RELEASE_WHERE}"
-        with self._lock:
-            cur = self.conn.execute(sql)
+        with self.reader() as conn:
+            cur = conn.execute(sql)
             row = cur.fetchone()
             return int(row[0]) if row else 0
 
@@ -1020,11 +1020,11 @@ class LibraryCatalogStoreMixin:
             LIMIT ? OFFSET ?
         """
 
-        with self._lock:
-            cur = self.conn.execute(count_sql, params)
+        with self.reader() as conn:
+            cur = conn.execute(count_sql, params)
             total = int(cur.fetchone()[0] or 0)
 
-            cur = self.conn.execute(select_sql, params + [size, offset])
+            cur = conn.execute(select_sql, params + [size, offset])
             rows = cur.fetchall()
 
         items = [
@@ -1093,8 +1093,8 @@ class LibraryCatalogStoreMixin:
     def count_library_files_with_track(self) -> int:
         """Counts library files associated with a track."""
         sql = "SELECT COUNT(*) FROM library_files f JOIN library_tracks t ON f.track_id = t.id"
-        with self._lock:
-            cur = self.conn.execute(sql)
+        with self.reader() as conn:
+            cur = conn.execute(sql)
             row = cur.fetchone()
             return int(row[0]) if row else 0
 
@@ -1341,8 +1341,8 @@ class LibraryCatalogStoreMixin:
 
     def get_library_file(self, file_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a library file by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_files WHERE id = ?",
                 (str(file_id),),
             )
@@ -1351,8 +1351,8 @@ class LibraryCatalogStoreMixin:
 
     def get_library_file_by_path(self, file_path: str) -> Optional[dict[str, Any]]:
         """Retrieves a library file by full file path."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_files WHERE file_path = ? LIMIT 1",
                 (str(file_path),),
             )
@@ -1404,8 +1404,8 @@ class LibraryCatalogStoreMixin:
 
     def get_library_file_for_track(self, track_id: str) -> Optional[dict[str, Any]]:
         """Retrieves the file associated with a specific track ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_files WHERE track_id = ? LIMIT 1",
                 (str(track_id),),
             )
@@ -1414,16 +1414,16 @@ class LibraryCatalogStoreMixin:
 
     def list_library_files_for_track(self, track_id: str) -> list[dict[str, Any]]:
         """Every file row attached to a track (a track normally has one; replacements briefly have two)."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT * FROM library_files WHERE track_id = ?", (str(track_id),)
             ).fetchall()
             return [self._map_library_file(r) for r in rows]
 
     def list_library_artist_track_index(self, artist_id: str) -> list[dict[str, Any]]:
         """One artist's tracks for import matching: id, clean_title, album clean title, duration, file presence."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 """
                 SELECT t.id, t.clean_title, t.track_number, t.duration_seconds,
                        COALESCE(a.clean_title, '') AS album_clean_title,
@@ -1438,16 +1438,16 @@ class LibraryCatalogStoreMixin:
 
     def list_library_file_paths(self, limit: int = 500000) -> list[tuple[str, str]]:
         """(absolute path, track id) of library files (bounded), for import path matching and mapping suggestions."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT file_path, track_id FROM library_files LIMIT ?", (int(limit),)
             ).fetchall()
             return [(str(r["file_path"]), str(r["track_id"])) for r in rows]
 
     def list_artist_file_paths(self, artist_id: str, limit: int = 5000) -> list[str]:
         """File paths for an artist's tracks, bounded."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 """
                 SELECT f.file_path
                 FROM library_files f
@@ -1483,8 +1483,8 @@ class LibraryCatalogStoreMixin:
         self, limit: int = 500, offset: int = 0
     ) -> list[dict[str, Any]]:
         """Lists library files ordered by date added with pagination."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_files ORDER BY date_added DESC LIMIT ? OFFSET ?",
                 (int(limit), int(offset)),
             )
@@ -1618,8 +1618,8 @@ class LibraryCatalogStoreMixin:
 
     def get_library_collection(self, collection_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single library collection by ID with album count and preview covers."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT c.*, (
                     SELECT COUNT(*) FROM library_collection_albums ca WHERE ca.collection_id = c.id
@@ -1633,7 +1633,7 @@ class LibraryCatalogStoreMixin:
             if not row:
                 return None
             col = self._map_library_collection(row)
-            p_cur = self.conn.execute(
+            p_cur = conn.execute(
                 """
                 SELECT a.cover_url
                 FROM library_albums a
@@ -1666,12 +1666,12 @@ class LibraryCatalogStoreMixin:
         sql += " ORDER BY c.name COLLATE NOCASE ASC LIMIT ? OFFSET ?"
         params.extend([int(limit), int(offset)])
 
-        with self._lock:
-            cur = self.conn.execute(sql, params)
+        with self.reader() as conn:
+            cur = conn.execute(sql, params)
             collections = [self._map_library_collection(row) for row in cur.fetchall()]
             for col in collections:
                 col_id = col["id"]
-                p_cur = self.conn.execute(
+                p_cur = conn.execute(
                     """
                     SELECT a.cover_url
                     FROM library_albums a
@@ -1724,8 +1724,8 @@ class LibraryCatalogStoreMixin:
 
     def get_collection_albums(self, collection_id: str) -> list[dict[str, Any]]:
         """Retrieves all albums associated with a collection, ordered by order_index, year, title."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT a.*, ca.order_index
                 FROM library_collection_albums ca
