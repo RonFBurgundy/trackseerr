@@ -1,6 +1,6 @@
 export * from './ui';
 export * from './layout';
-export * from './views';
+// Page views are lazy-loaded by App.tsx and must not be re-exported here
 export * from './plex';
 export * from './scrobbling';
 export * from './listening';
