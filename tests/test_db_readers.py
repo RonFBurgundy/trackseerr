@@ -199,3 +199,60 @@ def test_close_does_not_raise_without_readers(tmp_path: Path) -> None:
     database = Database(tmp_path / "unused.sqlite")
     database.close()
 
+
+def test_reader_inside_write_lock_sees_uncommitted_rows(db: Database) -> None:
+    """A reader called from a thread holding the write lock reads uncommitted rows via the writer connection."""
+    with db._lock:
+        db.conn.execute(
+            "INSERT INTO library_artists (id, name, clean_name) VALUES (?, ?, ?)",
+            ("uncommitted-artist-1", "Uncommitted Artist", "uncommitted artist"),
+        )
+        artist = db.get_library_artist("uncommitted-artist-1")
+        assert artist is not None
+        assert artist["id"] == "uncommitted-artist-1"
+        assert artist["name"] == "Uncommitted Artist"
+        db.conn.rollback()
+
+    assert db.get_library_artist("uncommitted-artist-1") is None
+
+
+def test_library_getters_do_not_wait_for_writer(db: Database) -> None:
+    """Library getter and list methods run in a worker thread without waiting for a held write lock."""
+    db.upsert_library_artist({"id": "artist-1", "name": "Artist 1", "monitored": True})
+    db.upsert_library_album({
+        "id": "album-1",
+        "artist_id": "artist-1",
+        "title": "Album 1",
+        "monitored": True,
+    })
+
+    artist_result = None
+    album_result = None
+    albums_list_result = None
+    worker_error = None
+
+    def worker() -> None:
+        nonlocal artist_result, album_result, albums_list_result, worker_error
+        try:
+            artist_result = db.get_library_artist("artist-1")
+            albums_list_result = db.list_library_albums(artist_id="artist-1")
+            album_result = db.get_library_album("album-1")
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    with db._lock:
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "Worker thread timed out waiting on db._lock"
+
+    assert worker_error is None
+    assert artist_result is not None
+    assert artist_result["id"] == "artist-1"
+    assert album_result is not None
+    assert album_result["id"] == "album-1"
+    assert albums_list_result is not None
+    assert len(albums_list_result) == 1
+    assert albums_list_result[0]["id"] == "album-1"
+
+
