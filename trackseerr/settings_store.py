@@ -438,8 +438,8 @@ class SettingsStoreMixin:
             return current
 
     def get_last_role(self) -> str:
-        with self._lock:
-            row = self.conn.execute("SELECT last_role FROM general_settings WHERE id = 1").fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT last_role FROM general_settings WHERE id = 1").fetchone()
             return str(row["last_role"] or "") if row else ""
 
     def set_last_role(self, role: str) -> None:
@@ -450,8 +450,8 @@ class SettingsStoreMixin:
 
     def get_role_change_notice(self) -> Optional[dict[str, Any]]:
         """The pending role-change record ({from_role, to_role, changed_at, dismissed}) or None."""
-        with self._lock:
-            row = self.conn.execute("SELECT role_change_notice FROM general_settings WHERE id = 1").fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT role_change_notice FROM general_settings WHERE id = 1").fetchone()
             raw = str(row["role_change_notice"] or "") if row else ""
         if not raw:
             return None
@@ -471,8 +471,8 @@ class SettingsStoreMixin:
             self.conn.commit()
 
     def has_any_users(self) -> bool:
-        with self._lock:
-            return self.conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
+        with self.reader() as conn:
+            return conn.execute("SELECT 1 FROM users LIMIT 1").fetchone() is not None
 
     # -------------------------------------------------------------------------
     # Task run history (task manager)
@@ -505,8 +505,8 @@ class SettingsStoreMixin:
 
     def list_task_runs(self, task_id: str, since: str, limit: int = 200) -> list[dict[str, Any]]:
         """Runs of one task started at or after ``since`` (ISO), newest first."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT * FROM task_runs WHERE task_id = ? AND started_at >= ? ORDER BY started_at DESC, id DESC LIMIT ?",
                 (str(task_id), str(since), int(limit)),
             ).fetchall()
@@ -514,31 +514,31 @@ class SettingsStoreMixin:
 
     def latest_task_runs(self) -> dict[str, dict[str, Any]]:
         """The newest run row of every task that has one, keyed by task id (one query)."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT * FROM task_runs WHERE id IN (SELECT MAX(id) FROM task_runs GROUP BY task_id)"
             ).fetchall()
         return {str(r["task_id"]): dict(r) for r in rows}
 
     def latest_finished_task_runs(self) -> dict[str, dict[str, Any]]:
         """The newest finished (non-running) run row of every task, keyed by task id (one query)."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT * FROM task_runs WHERE id IN "
                 "(SELECT MAX(id) FROM task_runs WHERE status != 'running' GROUP BY task_id)"
             ).fetchall()
         return {str(r["task_id"]): dict(r) for r in rows}
 
     def list_running_task_runs(self) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT * FROM task_runs WHERE status = 'running' ORDER BY started_at ASC, id ASC"
             ).fetchall()
         return [dict(r) for r in rows]
 
     def list_recent_finished_task_runs(self, limit: int = 5) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT * FROM task_runs WHERE status != 'running' ORDER BY finished_at DESC, id DESC LIMIT ?",
                 (int(limit),),
             ).fetchall()
@@ -564,8 +564,8 @@ class SettingsStoreMixin:
             return int(cur.rowcount or 0)
 
     def get_kv(self, key: str) -> Optional[str]:
-        with self._lock:
-            row = self.conn.execute("SELECT value FROM kv_store WHERE key = ?", (str(key),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT value FROM kv_store WHERE key = ?", (str(key),)).fetchone()
             return str(row["value"]) if row else None
 
     def set_kv(self, key: str, value: str) -> None:
@@ -583,8 +583,8 @@ class SettingsStoreMixin:
             self.conn.commit()
 
     def get_last_finished_task_run(self, task_id: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT * FROM task_runs WHERE task_id = ? AND status != 'running' ORDER BY id DESC LIMIT 1",
                 (str(task_id),),
             ).fetchone()
@@ -592,8 +592,8 @@ class SettingsStoreMixin:
 
     def list_kv_prefix(self, prefix: str) -> dict[str, str]:
         """All kv_store entries whose key starts with ``prefix`` (literal match, no LIKE wildcards)."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT key, value FROM kv_store WHERE substr(key, 1, ?) = ?", (len(prefix), str(prefix))
             ).fetchall()
             return {str(r["key"]): str(r["value"]) for r in rows}
@@ -601,8 +601,8 @@ class SettingsStoreMixin:
     def count_active_sessions(self) -> int:
         """Number of unexpired sessions (a count only; nothing identifying)."""
         now_iso = datetime.now(timezone.utc).isoformat()
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*) AS n FROM sessions WHERE expires_at IS NULL OR expires_at > ?", (now_iso,)
             ).fetchone()
             return int(row["n"]) if row else 0
@@ -737,8 +737,8 @@ class SettingsStoreMixin:
 
     def get_media_server_settings(self) -> dict[str, str]:
         """The saved media-server choice; every key is present, all empty when nothing was ever saved."""
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM media_server_settings WHERE id = 1").fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM media_server_settings WHERE id = 1").fetchone()
         stored = dict(row) if row else {}
         return {k: str(stored.get(k) or "") for k in self._MEDIA_SERVER_SETTING_KEYS}
 
@@ -763,8 +763,8 @@ class SettingsStoreMixin:
 
     def list_quality_profiles(self) -> list[dict[str, Any]]:
         """Lists all quality profiles ordered by default first, then name."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM quality_profiles ORDER BY is_default DESC, name ASC"
             )
             rows = cur.fetchall()

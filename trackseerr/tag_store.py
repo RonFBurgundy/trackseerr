@@ -189,9 +189,10 @@ class TagMixin:
     def _tag_row(row: sqlite3.Row) -> dict[str, Any]:
         return {"id": int(row["id"]), "label": row["label"], "created_at": row["created_at"]}
 
-    def _label_users(self, table: str, label: str) -> list[dict[str, Any]]:
-        """``[{id, name}]`` of the rows of ``table`` whose ``tags_json`` holds ``label`` (caller holds the lock)."""
-        rows = self.conn.execute(f"SELECT id, name, tags_json FROM {table} ORDER BY id").fetchall()
+    def _label_users(self, table: str, label: str, conn: Optional[sqlite3.Connection] = None) -> list[dict[str, Any]]:
+        """``[{id, name}]`` of the rows of ``table`` whose ``tags_json`` holds ``label``."""
+        c = conn if conn is not None else self.conn
+        rows = c.execute(f"SELECT id, name, tags_json FROM {table} ORDER BY id").fetchall()
         return [
             {"id": r["id"], "name": r["name"]}
             for r in rows
@@ -201,8 +202,8 @@ class TagMixin:
     def list_tags(self) -> list[dict[str, Any]]:
         """Every tag (by label) with ``artist_count``, ``delay_profile_count``, ``release_profile_count`` and
         ``import_list_count``."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT t.id, t.label, t.created_at, (SELECT COUNT(*) FROM artist_tags a WHERE a.tag_id = t.id) AS n "
                 "FROM tags t ORDER BY t.label COLLATE NOCASE"
             ).fetchall()
@@ -212,7 +213,7 @@ class TagMixin:
                 ("release_profiles", "release_profile_count"),
                 ("import_lists", "import_list_count"),
             ):
-                for r in self.conn.execute(f"SELECT tags_json FROM {table}").fetchall():
+                for r in conn.execute(f"SELECT tags_json FROM {table}").fetchall():
                     for label in {str(t).strip().lower() for t in _loads_labels(r[0])}:
                         usage.setdefault(label, {}).setdefault(key, 0)
                         usage[label][key] += 1
@@ -231,13 +232,13 @@ class TagMixin:
         return out
 
     def get_tag(self, tag_id: int) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM tags WHERE id = ?", (int(tag_id),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM tags WHERE id = ?", (int(tag_id),)).fetchone()
         return self._tag_row(row) if row else None
 
     def get_tag_by_label(self, label: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM tags WHERE label = ?", (normalize_label(label),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM tags WHERE label = ?", (normalize_label(label),)).fetchone()
         return self._tag_row(row) if row else None
 
     def create_tag(self, label: str) -> dict[str, Any]:
@@ -339,13 +340,13 @@ class TagMixin:
     def get_tag_usage(self, tag_id: int) -> Optional[dict[str, Any]]:
         """Where a tag is used: artists (capped at ``USAGE_ARTIST_LIMIT``, with the full count), delay profiles,
         release profiles and import lists. None when the tag does not exist."""
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM tags WHERE id = ?", (int(tag_id),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM tags WHERE id = ?", (int(tag_id),)).fetchone()
             if row is None:
                 return None
             label = str(row["label"]).lower()
-            count = int(self.conn.execute("SELECT COUNT(*) FROM artist_tags WHERE tag_id = ?", (int(tag_id),)).fetchone()[0])
-            artists = self.conn.execute(
+            count = int(conn.execute("SELECT COUNT(*) FROM artist_tags WHERE tag_id = ?", (int(tag_id),)).fetchone()[0])
+            artists = conn.execute(
                 "SELECT a.id, a.name FROM artist_tags t JOIN library_artists a ON a.id = t.artist_id "
                 "WHERE t.tag_id = ? ORDER BY a.name COLLATE NOCASE LIMIT ?",
                 (int(tag_id), USAGE_ARTIST_LIMIT),
@@ -354,9 +355,9 @@ class TagMixin:
                 "tag": self._tag_row(row),
                 "artist_count": count,
                 "artists": [{"id": str(a["id"]), "name": a["name"]} for a in artists],
-                "delay_profiles": self._label_users("delay_profiles", label),
-                "release_profiles": self._label_users("release_profiles", label),
-                "import_lists": self._label_users("import_lists", label),
+                "delay_profiles": self._label_users("delay_profiles", label, conn=conn),
+                "release_profiles": self._label_users("release_profiles", label, conn=conn),
+                "import_lists": self._label_users("import_lists", label, conn=conn),
             }
 
     # ------------------------------------------------------------------------------------------------------------
@@ -371,10 +372,10 @@ class TagMixin:
         """``{artist_id: [tag ids ordered by label]}`` for the artists that carry tags."""
         ids = list(dict.fromkeys(str(i) for i in artist_ids))
         out: dict[str, list[int]] = {}
-        with self._lock:
+        with self.reader() as conn:
             for chunk in _chunks(ids):
                 marks = ", ".join("?" for _ in chunk)
-                rows = self.conn.execute(
+                rows = conn.execute(
                     f"SELECT at.artist_id, at.tag_id FROM artist_tags at JOIN tags t ON t.id = at.tag_id "
                     f"WHERE at.artist_id IN ({marks}) ORDER BY t.label COLLATE NOCASE",
                     chunk,
@@ -385,13 +386,13 @@ class TagMixin:
 
     def get_artist_tag_labels(self, artist_id: Optional[str] = None, artist_name: Optional[str] = None) -> list[str]:
         """Labels of an artist by id, falling back to the library artist matching ``artist_name`` (empty if unknown)."""
-        with self._lock:
+        with self.reader() as conn:
             if not artist_id and artist_name and artist_name.strip():
                 found = self.get_library_artist_by_name(artist_name)  # type: ignore[attr-defined]
                 artist_id = str(found["id"]) if found else None
             if not artist_id:
                 return []
-            rows = self.conn.execute(
+            rows = conn.execute(
                 "SELECT t.label FROM artist_tags at JOIN tags t ON t.id = at.tag_id WHERE at.artist_id = ? "
                 "ORDER BY t.label COLLATE NOCASE",
                 (str(artist_id),),

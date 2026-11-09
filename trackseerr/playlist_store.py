@@ -77,8 +77,8 @@ class PlaylistStoreMixin:
         return playlist
 
     def get_playlist(self, playlist_id: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
                        last_synced_at, sync_status, monitor_mode, source_kind, source_ref, auto_request, created_at, updated_at
@@ -100,10 +100,10 @@ class PlaylistStoreMixin:
         user_id: Optional[str] = None,
         enabled_only: bool = False,
     ) -> list[dict[str, Any]]:
-        with self._lock:
+        with self.reader() as conn:
             if user_id is not None:
                 if enabled_only:
-                    cur = self.conn.execute(
+                    cur = conn.execute(
                         """
                         SELECT DISTINCT p.id, p.name, p.service, p.description, p.poster_url, p.enabled, p.creator_id, p.tracks_json,
                                p.last_synced_at, p.sync_status, p.monitor_mode, p.source_kind, p.source_ref, p.auto_request, p.created_at, p.updated_at
@@ -115,7 +115,7 @@ class PlaylistStoreMixin:
                         (str(user_id), str(user_id)),
                     )
                 else:
-                    cur = self.conn.execute(
+                    cur = conn.execute(
                         """
                         SELECT DISTINCT p.id, p.name, p.service, p.description, p.poster_url, p.enabled, p.creator_id, p.tracks_json,
                                p.last_synced_at, p.sync_status, p.monitor_mode, p.source_kind, p.source_ref, p.auto_request, p.created_at, p.updated_at
@@ -128,7 +128,7 @@ class PlaylistStoreMixin:
                     )
             else:
                 if enabled_only:
-                    cur = self.conn.execute(
+                    cur = conn.execute(
                         """
                         SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
                                last_synced_at, sync_status, monitor_mode, source_kind, source_ref, auto_request, created_at, updated_at
@@ -138,7 +138,7 @@ class PlaylistStoreMixin:
                         """
                     )
                 else:
-                    cur = self.conn.execute(
+                    cur = conn.execute(
                         """
                         SELECT id, name, service, description, poster_url, enabled, creator_id, tracks_json,
                                last_synced_at, sync_status, monitor_mode, source_kind, source_ref, auto_request, created_at, updated_at
@@ -195,8 +195,8 @@ class PlaylistStoreMixin:
             self.conn.commit()
 
     def get_playlist_targets(self, playlist_id: str) -> list[str]:
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT user_id FROM playlist_targets WHERE playlist_id = ? ORDER BY user_id ASC",
                 (str(playlist_id),),
             )
@@ -207,24 +207,24 @@ class PlaylistStoreMixin:
     # -------------------------------------------------------------------------
 
     def get_plex_registry_row(self, plex_user: str, rating_key: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT * FROM plex_playlist_registry WHERE plex_user = ? AND rating_key = ?",
                 (str(plex_user).lower(), str(rating_key)),
             ).fetchone()
         return self._registry_to_dict(row) if row else None
 
     def list_plex_registry(self, plex_user: str) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT * FROM plex_playlist_registry WHERE plex_user = ? ORDER BY title COLLATE NOCASE ASC",
                 (str(plex_user).lower(),),
             ).fetchall()
         return [self._registry_to_dict(r) for r in rows]
 
     def get_plex_registry_by_adopted(self, playlist_id: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT * FROM plex_playlist_registry WHERE trackseerr_playlist_id = ? LIMIT 1",
                 (str(playlist_id),),
             ).fetchone()
@@ -309,8 +309,8 @@ class PlaylistStoreMixin:
 
     def find_playlist_by_name_for_username(self, name: str, username: str) -> Optional[dict[str, Any]]:
         """Find a TrackSeerr playlist with this exact name that targets the given Plex username."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 """
                 SELECT p.id, p.name, p.service, p.last_synced_at, p.created_at
                 FROM playlists p
@@ -384,8 +384,8 @@ class PlaylistStoreMixin:
         return snap
 
     def get_mix_snapshot(self, snapshot_id: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT * FROM plex_mix_snapshots WHERE id = ?", (str(snapshot_id),)
             ).fetchone()
         return self._snapshot_to_dict(row) if row else None
@@ -404,8 +404,8 @@ class PlaylistStoreMixin:
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         sql += " ORDER BY mix_title COLLATE NOCASE ASC"
-        with self._lock:
-            rows = self.conn.execute(sql, params).fetchall()
+        with self.reader() as conn:
+            rows = conn.execute(sql, params).fetchall()
         return [self._snapshot_to_dict(r) for r in rows]
 
     def set_mix_snapshot_auto_refresh(self, snapshot_id: str, auto_refresh: bool) -> bool:
@@ -441,8 +441,8 @@ class PlaylistStoreMixin:
 
     def get_playlist_sync_fingerprint(self, playlist_id: str) -> tuple[Optional[str], Optional[str]]:
         """Returns ``(sync_fingerprint, last_synced_at)`` for a playlist; ``(None, None)`` if it does not exist."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT sync_fingerprint, last_synced_at FROM playlists WHERE id = ?", (str(playlist_id),)
             ).fetchone()
         if row is None:
@@ -451,8 +451,8 @@ class PlaylistStoreMixin:
 
     def latest_library_file_change(self) -> Optional[str]:
         """Newest ``library_files.updated_at`` (SQLite CURRENT_TIMESTAMP text), or None for an empty library."""
-        with self._lock:
-            row = self.conn.execute("SELECT MAX(updated_at) FROM library_files").fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT MAX(updated_at) FROM library_files").fetchone()
         return row[0] if row and row[0] else None
 
     def _normalize_incoming_missing_tracks(
@@ -586,9 +586,9 @@ class PlaylistStoreMixin:
     def get_missing_tracks(
         self, playlist_id: Optional[str] = None
     ) -> list[dict[str, Any]]:
-        with self._lock:
+        with self.reader() as conn:
             if playlist_id is not None:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     """
                     SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, attempts, next_attempt_at, created_at
                     FROM missing_tracks
@@ -598,7 +598,7 @@ class PlaylistStoreMixin:
                     (str(playlist_id),),
                 )
             else:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     """
                     SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, attempts, next_attempt_at, created_at
                     FROM missing_tracks
@@ -609,8 +609,8 @@ class PlaylistStoreMixin:
 
     def get_missing_track(self, track_id: int) -> Optional[dict[str, Any]]:
         """Retrieves a single missing track by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT id, playlist_id, title, artist, album, url, lidarr_status, list_applied_at, artist_added_by_item, attempts, next_attempt_at, created_at
                 FROM missing_tracks
@@ -708,8 +708,8 @@ class PlaylistStoreMixin:
     ) -> Optional[dict[str, Any]]:
         s_title = str(source_title).strip()
         s_artist = str(source_artist).strip()
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT id, source_title, source_artist, plex_rating_key, plex_title, plex_artist, created_by, created_at FROM match_overrides WHERE LOWER(source_title) = LOWER(?) AND LOWER(source_artist) = LOWER(?)",
                 (s_title, s_artist),
             )
@@ -717,8 +717,8 @@ class PlaylistStoreMixin:
             return dict(row) if row else None
 
     def list_match_overrides(self) -> list[dict[str, Any]]:
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT id, source_title, source_artist, plex_rating_key, plex_title, plex_artist, created_by, created_at FROM match_overrides ORDER BY created_at DESC"
             )
             return [dict(r) for r in cur.fetchall()]
