@@ -39,8 +39,8 @@ class AccountStoreMixin:
     def get_user_by_username(self, username: str) -> Optional[dict[str, Any]]:
         """Case-insensitive lookup across ALL users. When several share a name the result is deterministic: a local
         account wins (it is the one that can sign in with a password), then the oldest, then the lowest id."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT id FROM users WHERE lower(username) = lower(?) "
                 "ORDER BY (auth_type = 'local') DESC, created_at ASC, id ASC LIMIT 1",
                 (str(username or ""),),
@@ -49,8 +49,8 @@ class AccountStoreMixin:
 
     def list_users_by_username(self, username: str) -> list[dict[str, Any]]:
         """EVERY user whose name matches case-insensitively, in the same order as ``get_user_by_username``."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT id FROM users WHERE lower(username) = lower(?) "
                 "ORDER BY (auth_type = 'local') DESC, created_at ASC, id ASC",
                 (str(username or ""),),
@@ -59,8 +59,8 @@ class AccountStoreMixin:
 
     def get_local_credentials(self, user_id: str) -> Optional[dict[str, Any]]:
         """Secret-bearing columns for one user. Server-side use only; never serialise this dict."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 f"SELECT {self._CREDENTIAL_COLUMNS} FROM users WHERE id = ?", (str(user_id),)
             ).fetchone()
         if not row:
@@ -72,11 +72,11 @@ class AccountStoreMixin:
     def get_auth_state(self, user_id: str) -> dict[str, Any]:
         """Revocation inputs for one id: disabled, tombstoned, ``sessions_revoked_at_us`` and MFA state."""
         uid = str(user_id)
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT auth_type, disabled, sessions_revoked_at, totp_secret FROM users WHERE id = ?", (uid,)
             ).fetchone()
-            tomb = self.conn.execute("SELECT 1 FROM user_tombstones WHERE user_id = ?", (uid,)).fetchone()
+            tomb = conn.execute("SELECT 1 FROM user_tombstones WHERE user_id = ?", (uid,)).fetchone()
         state: dict[str, Any] = {
             "exists": row is not None,
             "tombstoned": tomb is not None,
@@ -185,8 +185,8 @@ class AccountStoreMixin:
         """``{username, purpose, expires_at, user_id}`` for an unused, unexpired token of a local user."""
         if not local_auth.token_is_well_formed(raw):
             return None
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 """
                 SELECT i.user_id, i.purpose, i.expires_at, i.used_at, u.username, u.auth_type
                 FROM user_invites i JOIN users u ON u.id = i.user_id
@@ -386,8 +386,8 @@ class AccountStoreMixin:
 
     def login_attempt_stats(self, key: str, since: int) -> tuple[int, int]:
         """``(count, latest_attempted_at)`` of ``key`` events at or after ``since`` (unix seconds)."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*), COALESCE(MAX(attempted_at), 0) FROM login_attempts WHERE key = ? AND attempted_at >= ?",
                 (str(key), int(since)),
             ).fetchone()
@@ -409,9 +409,9 @@ class AccountStoreMixin:
             self.conn.commit()
 
     def is_tombstoned(self, user_id: str) -> bool:
-        with self._lock:
+        with self.reader() as conn:
             return (
-                self.conn.execute("SELECT 1 FROM user_tombstones WHERE user_id = ?", (str(user_id),)).fetchone()
+                conn.execute("SELECT 1 FROM user_tombstones WHERE user_id = ?", (str(user_id),)).fetchone()
                 is not None
             )
 
@@ -480,8 +480,8 @@ class AccountStoreMixin:
             return cur.rowcount == 1
 
     def count_recovery_codes(self, user_id: str) -> int:
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*) FROM user_recovery_codes WHERE user_id = ? AND used_at IS NULL", (str(user_id),)
             ).fetchone()
         return int(row[0])
@@ -499,8 +499,8 @@ class AccountStoreMixin:
         }
 
     def get_user_quota_overrides(self, user_id: str) -> dict[str, Optional[int]]:
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT quota_tracks, quota_albums, quota_discographies, quota_window_days FROM users WHERE id = ?",
                 (str(user_id),),
             ).fetchone()
@@ -516,8 +516,8 @@ class AccountStoreMixin:
         used by enforcement and by every quota report.
         """
         counts = {"track": 0, "album": 0, "discography": 0}
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 """
                 SELECT item_type, COUNT(*) AS n FROM music_requests
                 WHERE user_id = ? AND status NOT IN ('rejected', 'cancelled')
@@ -527,7 +527,7 @@ class AccountStoreMixin:
                 """,
                 (str(user_id), int(days)),
             ).fetchall()
-            disco = self.conn.execute(
+            disco = conn.execute(
                 """
                 SELECT COUNT(DISTINCT batch_id) FROM music_requests
                 WHERE user_id = ? AND status NOT IN ('rejected', 'cancelled')

@@ -310,15 +310,15 @@ class QualityCatalogMixin:
         return d
 
     def list_quality_definitions(self) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self.conn.execute("SELECT * FROM quality_definitions").fetchall()
+        with self.reader() as conn:
+            rows = conn.execute("SELECT * FROM quality_definitions").fetchall()
         out = [self._definition_row(r) for r in rows]
         out.sort(key=lambda d: QUALITY_ORDER.index(d["quality"]) if d["quality"] in QUALITY_ORDER else 99)
         return out
 
     def get_quality_definition(self, quality: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM quality_definitions WHERE quality = ?", (quality,)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM quality_definitions WHERE quality = ?", (quality,)).fetchone()
         return self._definition_row(row) if row else None
 
     def update_quality_definition(
@@ -370,18 +370,18 @@ class QualityCatalogMixin:
         return d
 
     def list_custom_formats(self) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self.conn.execute("SELECT * FROM custom_formats ORDER BY name COLLATE NOCASE").fetchall()
+        with self.reader() as conn:
+            rows = conn.execute("SELECT * FROM custom_formats ORDER BY name COLLATE NOCASE").fetchall()
         return [self._format_row(r) for r in rows]
 
     def get_custom_format(self, format_id: int) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM custom_formats WHERE id = ?", (int(format_id),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM custom_formats WHERE id = ?", (int(format_id),)).fetchone()
         return self._format_row(row) if row else None
 
     def get_custom_format_by_name(self, name: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM custom_formats WHERE name = ?", (name,)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM custom_formats WHERE name = ?", (name,)).fetchone()
         return self._format_row(row) if row else None
 
     def create_custom_format(self, fmt: dict[str, Any]) -> dict[str, Any]:
@@ -447,13 +447,13 @@ class QualityCatalogMixin:
         }
 
     def list_release_profiles(self) -> list[dict[str, Any]]:
-        with self._lock:
-            rows = self.conn.execute("SELECT * FROM release_profiles ORDER BY id").fetchall()
+        with self.reader() as conn:
+            rows = conn.execute("SELECT * FROM release_profiles ORDER BY id").fetchall()
         return [self._release_profile_row(r) for r in rows]
 
     def get_release_profile(self, profile_id: int) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM release_profiles WHERE id = ?", (int(profile_id),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM release_profiles WHERE id = ?", (int(profile_id),)).fetchone()
         return self._release_profile_row(row) if row else None
 
     def create_release_profile(self, data: dict[str, Any]) -> dict[str, Any]:
@@ -534,18 +534,18 @@ class QualityCatalogMixin:
 
     def get_album_track_durations(self, album_id: str) -> tuple[list[Optional[float]], Optional[int]]:
         """(per-track durations, album total_tracks) for the duration/estimate logic."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT duration_seconds FROM library_tracks WHERE album_id = ?", (str(album_id),)
             ).fetchall()
-            alb = self.conn.execute("SELECT total_tracks FROM library_albums WHERE id = ?", (str(album_id),)).fetchone()
+            alb = conn.execute("SELECT total_tracks FROM library_albums WHERE id = ?", (str(album_id),)).fetchone()
         total = int(alb[0]) if alb and alb[0] is not None else None
         return [float(r[0]) if r[0] is not None else None for r in rows], total
 
     def get_album_track_titles(self, album_id: str) -> list[tuple[int, int, str]]:
         """(disc, track number, title) for each library track of the album, in disc/track order."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 "SELECT disc_number, track_number, title FROM library_tracks WHERE album_id = ? "
                 "ORDER BY disc_number, track_number",
                 (str(album_id),),
@@ -553,8 +553,8 @@ class QualityCatalogMixin:
         return [(int(r[0]), int(r[1]), str(r[2])) for r in rows]
 
     def get_track_duration(self, track_id: str) -> Optional[float]:
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT duration_seconds FROM library_tracks WHERE id = ?", (str(track_id),)
             ).fetchone()
         return float(row[0]) if row and row[0] is not None else None
@@ -589,8 +589,8 @@ class QualityCatalogMixin:
 
     def get_quality_profile(self, profile_id: str, include_catalog: bool = True) -> Optional[dict[str, Any]]:
         """One quality profile; ``include_catalog`` attaches the resolved decision catalog under ``catalog``."""
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM quality_profiles WHERE id = ?", (str(profile_id),)).fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM quality_profiles WHERE id = ?", (str(profile_id),)).fetchone()
         if not row:
             return None
         res = self._format_quality_profile_row(row)
@@ -599,10 +599,10 @@ class QualityCatalogMixin:
         return res
 
     def get_default_quality_profile(self, include_catalog: bool = True) -> dict[str, Any]:
-        with self._lock:
-            row = self.conn.execute("SELECT * FROM quality_profiles WHERE is_default = 1 LIMIT 1").fetchone()
+        with self.reader() as conn:
+            row = conn.execute("SELECT * FROM quality_profiles WHERE is_default = 1 LIMIT 1").fetchone()
             if not row:
-                row = self.conn.execute("SELECT * FROM quality_profiles ORDER BY name ASC LIMIT 1").fetchone()
+                row = conn.execute("SELECT * FROM quality_profiles ORDER BY name ASC LIMIT 1").fetchone()
         if not row:
             raise ValueError("No quality profiles configured in the database")
         res = self._format_quality_profile_row(row)

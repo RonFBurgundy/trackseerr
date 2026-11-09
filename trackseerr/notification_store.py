@@ -93,8 +93,8 @@ class NotificationStoreMixin:
 
     def get_notification_channel(self, channel_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a notification channel by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM notification_channels WHERE id = ?", (str(channel_id),)
             )
             row = cur.fetchone()
@@ -121,15 +121,15 @@ class NotificationStoreMixin:
 
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         query = f"SELECT * FROM notification_channels {where} ORDER BY created_at ASC"
-        with self._lock:
-            cur = self.conn.execute(query, params)
+        with self.reader() as conn:
+            cur = conn.execute(query, params)
             rows = cur.fetchall()
         return [self._row_to_channel_dict(r) for r in rows]
 
     def count_user_notification_channels(self, user_id: str) -> int:
         """Returns the number of notification channels owned by a user."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT COUNT(*) FROM notification_channels WHERE owner_user_id = ?",
                 (str(user_id),),
             )
@@ -254,16 +254,16 @@ class NotificationStoreMixin:
         page = max(1, page)
         page_size = max(1, min(200, page_size))
         offset = (page - 1) * page_size
-        with self._lock:
-            total = self.conn.execute(
+        with self.reader() as conn:
+            total = conn.execute(
                 "SELECT COUNT(*) FROM user_notifications WHERE user_id = ?",
                 (str(user_id),),
             ).fetchone()[0]
-            unread = self.conn.execute(
+            unread = conn.execute(
                 "SELECT COUNT(*) FROM user_notifications WHERE user_id = ? AND read_at IS NULL",
                 (str(user_id),),
             ).fetchone()[0]
-            cur = self.conn.execute(
+            cur = conn.execute(
                 """
                 SELECT * FROM user_notifications
                 WHERE user_id = ?
@@ -277,8 +277,8 @@ class NotificationStoreMixin:
 
     def get_user_notification_unread_count(self, user_id: str) -> int:
         """Returns the count of unread notifications for a user."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT COUNT(*) FROM user_notifications WHERE user_id = ? AND read_at IS NULL",
                 (str(user_id),),
             ).fetchone()
@@ -370,8 +370,8 @@ class NotificationStoreMixin:
 
     def count_user_web_push_subscriptions(self, user_id: str) -> int:
         """Returns count of active push subscriptions for user."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT COUNT(*) FROM web_push_subscriptions WHERE user_id = ?",
                 (str(user_id),),
             )
@@ -379,8 +379,8 @@ class NotificationStoreMixin:
 
     def get_user_web_push_subscriptions(self, user_id: str) -> list[dict[str, Any]]:
         """Returns all push subscriptions for user."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM web_push_subscriptions WHERE user_id = ? ORDER BY created_at ASC",
                 (str(user_id),),
             )
@@ -440,8 +440,8 @@ class NotificationStoreMixin:
         self, user_id: str, event: str, default: tuple[bool, bool] = (True, True)
     ) -> tuple[bool, bool]:
         """Returns (in_app, push) for (user_id, event). Missing row defaults to default."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT in_app, push FROM user_notification_prefs WHERE user_id = ? AND event = ?",
                 (str(user_id), str(event)),
             ).fetchone()
@@ -451,8 +451,8 @@ class NotificationStoreMixin:
 
     def get_all_user_notification_prefs(self, user_id: str) -> dict[str, dict[str, bool]]:
         """Returns user notification prefs by event for user_id."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT event, in_app, push FROM user_notification_prefs WHERE user_id = ?",
                 (str(user_id),),
             )

@@ -256,3 +256,186 @@ def test_library_getters_do_not_wait_for_writer(db: Database) -> None:
     assert albums_list_result[0]["id"] == "album-1"
 
 
+def test_issue_store_reads_do_not_wait_for_writer(db: Database) -> None:
+    """IssueStore reads run concurrently without waiting for a held write lock."""
+    db.create_local_user("testuser", "test@test.local", 1, "admin")
+    u = db.get_user_by_username("testuser")
+    assert u is not None
+
+    db.conn.execute(
+        "INSERT INTO media_issues (id, user_id, media_title, artist, issue_type, problem_details, status) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        ("issue-test-1", u["id"], "Test Title", "Test Artist", "audio_quality", "Glitch", "open"),
+    )
+    db.conn.commit()
+
+    issue_result = None
+    worker_error = None
+
+    def worker() -> None:
+        nonlocal issue_result, worker_error
+        try:
+            issue_result = db.get_issue("issue-test-1")
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    with db._lock:
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "Worker thread timed out waiting on db._lock"
+
+    assert worker_error is None
+    assert issue_result is not None
+    assert issue_result["id"] == "issue-test-1"
+    assert issue_result["media_title"] == "Test Title"
+
+
+def test_quality_store_reads_do_not_wait_for_writer(db: Database) -> None:
+    """QualityStore reads run concurrently without waiting for a held write lock."""
+    # Seeded data already contains quality definitions
+    quality_result = None
+    worker_error = None
+
+    def worker() -> None:
+        nonlocal quality_result, worker_error
+        try:
+            quality_result = db.get_quality_definition("FLAC 24bit")
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    with db._lock:
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "Worker thread timed out waiting on db._lock"
+
+    assert worker_error is None
+    assert quality_result is not None
+    assert quality_result["quality"] == "FLAC 24bit"
+
+
+def test_account_store_reads_do_not_wait_for_writer(db: Database) -> None:
+    """AccountStore reads run concurrently without waiting for a held write lock."""
+    db.create_local_user("acctuser", "acct@test.local", 1, "admin")
+
+    user_result = None
+    worker_error = None
+
+    def worker() -> None:
+        nonlocal user_result, worker_error
+        try:
+            user_result = db.get_user_by_username("acctuser")
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    with db._lock:
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "Worker thread timed out waiting on db._lock"
+
+    assert worker_error is None
+    assert user_result is not None
+    assert user_result["username"] == "acctuser"
+
+
+def test_request_store_reads_do_not_wait_for_writer(db: Database) -> None:
+    """RequestStore reads run concurrently without waiting for a held write lock."""
+    db.create_local_user("reqowner", "reqowner@test.local", 1, "admin")
+    u = db.get_user_by_username("reqowner")
+    assert u is not None
+
+    db.conn.execute(
+        "INSERT INTO music_requests (id, user_id, item_type, title, artist, status) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        ("req-test-1", u["id"], "album", "Test Album", "Test Artist", "pending"),
+    )
+    db.conn.commit()
+
+    request_result = None
+    worker_error = None
+
+    def worker() -> None:
+        nonlocal request_result, worker_error
+        try:
+            request_result = db.get_request("req-test-1")
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    with db._lock:
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "Worker thread timed out waiting on db._lock"
+
+    assert worker_error is None
+    assert request_result is not None
+    assert request_result["id"] == "req-test-1"
+    assert request_result["title"] == "Test Album"
+
+
+def test_notification_store_reads_do_not_wait_for_writer(db: Database) -> None:
+    """NotificationStore reads run concurrently without waiting for a held write lock."""
+    db.create_notification_channel({
+        "id": "chan-1",
+        "name": "Test Channel",
+        "channel_type": "discord",
+        "enabled": True,
+        "config": {},
+        "events": [],
+    })
+
+    channel_result = None
+    worker_error = None
+
+    def worker() -> None:
+        nonlocal channel_result, worker_error
+        try:
+            channel_result = db.get_notification_channel("chan-1")
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    with db._lock:
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "Worker thread timed out waiting on db._lock"
+
+    assert worker_error is None
+    assert channel_result is not None
+    assert channel_result["id"] == "chan-1"
+    assert channel_result["name"] == "Test Channel"
+
+
+def test_user_store_reads_do_not_wait_for_writer(db: Database) -> None:
+    """UserStore reads run concurrently without waiting for a held write lock."""
+    db.create_local_user("sessuser", "sess@test.local", 1, "admin")
+    u = db.get_user_by_username("sessuser")
+    assert u is not None
+
+    db.create_session("sess-1", user_id=u["id"], data={"foo": "bar"})
+
+    session_result = None
+    worker_error = None
+
+    def worker() -> None:
+        nonlocal session_result, worker_error
+        try:
+            session_result = db.get_session("sess-1")
+        except Exception as exc:  # noqa: BLE001
+            worker_error = exc
+
+    with db._lock:
+        t = threading.Thread(target=worker)
+        t.start()
+        t.join(timeout=2.0)
+        assert not t.is_alive(), "Worker thread timed out waiting on db._lock"
+
+    assert worker_error is None
+    assert session_result is not None
+    assert session_result["session_id"] == "sess-1"
+    assert session_result["data"] == {"foo": "bar"}
+
+
+
