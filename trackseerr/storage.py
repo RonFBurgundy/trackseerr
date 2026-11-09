@@ -231,7 +231,16 @@ class Database(
 
         conn = getattr(self._read_local, "conn", None)
         gen = getattr(self._read_local, "generation", None)
-        if conn is None or gen != self._reader_generation:
+        if conn is not None and gen != self._reader_generation:
+            try:
+                conn.close()
+            except sqlite3.Error as e:
+                logger.debug("Failed to close stale reader connection: %s", e)
+            conn = None
+            self._read_local.conn = None
+            self._read_local.generation = None
+
+        if conn is None:
             conn = self._open_reader()
             self._read_local.conn = conn
             self._read_local.generation = self._reader_generation
@@ -268,13 +277,21 @@ class Database(
                     logger.debug("Failed to close primary connection: %s", e)
                 self._conn = None
         with self._readers_lock:
-            for reader_conn in list(self._readers):
-                try:
-                    reader_conn.close()
-                except sqlite3.Error as e:
-                    logger.debug("Failed to close reader connection: %s", e)
-            self._readers.clear()
+            # Closing a connection another thread may be executing on crashes the
+            # interpreter (SIGSEGV / exit 139). Do NOT iterate and close self._readers.
+            # Instead, increment self._reader_generation so every other thread replaces
+            # its stale reader on its next reader() call, and readers of finished threads
+            # are closed when the thread's locals are collected. Only close the calling
+            # thread's own reader connection here.
             self._reader_generation += 1
+            calling_conn = getattr(self._read_local, "conn", None)
+            if calling_conn is not None:
+                try:
+                    calling_conn.close()
+                except sqlite3.Error as e:
+                    logger.debug("Failed to close calling thread reader connection: %s", e)
+                self._read_local.conn = None
+                self._read_local.generation = None
 
     def record_nonce(self, nonce: str, now: int, ttl_seconds: int = 120) -> bool:
         """Records a nonce; returns False if it was already seen within ``ttl_seconds`` (a replay)."""
