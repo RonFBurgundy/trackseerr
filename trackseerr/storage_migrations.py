@@ -83,6 +83,7 @@ class MigrationsMixin:
                 (93, self._migration_v93),
                 (94, self._migration_v94),
                 (95, self._migration_v95),
+                (96, self._migration_v96),
             ]
 
             applied = 0
@@ -303,6 +304,10 @@ class MigrationsMixin:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_exclusions_scope_mbid ON exclusions(scope, mbid)"
         )
+
+    def _migration_v96(self, cur: sqlite3.Cursor) -> None:
+        """v96: Index library_albums.monitored so library stats count monitored albums without a full scan."""
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_lib_albums_monitored ON library_albums(monitored)")
 
     def _migration_v95(self, cur: sqlite3.Cursor) -> None:
         """v95: Add active_downloads.selected_files (JSON list of {file_index, path}; NULL = whole torrent)."""

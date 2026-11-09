@@ -171,6 +171,10 @@ class Database(
         conn.execute("PRAGMA journal_mode=WAL;")
         # NORMAL is SQLite's recommended pairing with WAL: no corruption risk, only the last commits can be lost on power loss.
         conn.execute("PRAGMA synchronous=NORMAL;")
+        # Negative cache_size sets SQLite page cache in KiB; -65536 gives a 64 MiB cache for hot pages.
+        conn.execute("PRAGMA cache_size = -65536;")
+        # Keep temporary tables and indices in memory rather than spilling to disk.
+        conn.execute("PRAGMA temp_store = MEMORY;")
         conn.execute("PRAGMA foreign_keys = ON;")
         return conn
 

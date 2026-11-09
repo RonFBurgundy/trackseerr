@@ -1503,13 +1503,20 @@ class LibraryCatalogStoreMixin:
             cur.execute("SELECT COUNT(*) FROM library_tracks")
             total_track_count = int(cur.fetchone()[0] or 0)
 
-            # Lidarr semantics: ``track_count`` covers tracks on monitored albums or that already have a file
-            # (unmonitored, file-less discography stays stored, as ``total_track_count``).
+            # Lidarr semantics: track_count covers tracks on monitored albums or that already have a file.
+            # has_file is trigger-maintained on library_tracks; inclusion-exclusion via three scalar subqueries
+            # avoids a full table scan and correlated EXISTS subquery.
             cur.execute(
-                "SELECT COUNT(*) FROM library_tracks t JOIN library_albums al ON al.id = t.album_id "
-                "WHERE al.monitored = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)"
+                "SELECT "
+                "(SELECT COUNT(*) FROM library_tracks t JOIN library_albums al ON al.id = t.album_id WHERE al.monitored = 1), "
+                "(SELECT COUNT(*) FROM library_tracks WHERE has_file = 1), "
+                "(SELECT COUNT(*) FROM library_tracks t JOIN library_albums al ON al.id = t.album_id WHERE al.monitored = 1 AND t.has_file = 1)"
             )
-            track_count = int(cur.fetchone()[0] or 0)
+            stats_row = cur.fetchone()
+            monitored_album_tracks = int(stats_row[0] or 0) if stats_row else 0
+            has_file_total = int(stats_row[1] or 0) if stats_row else 0
+            has_file_on_monitored_albums = int(stats_row[2] or 0) if stats_row else 0
+            track_count = monitored_album_tracks + has_file_total - has_file_on_monitored_albums
 
             cur.execute("SELECT COUNT(*), COALESCE(SUM(size_bytes), 0) FROM library_files")
             row = cur.fetchone()
@@ -1532,7 +1539,7 @@ class LibraryCatalogStoreMixin:
                 "SELECT COUNT(*) FROM library_tracks t JOIN library_albums al ON al.id = t.album_id "
                 "JOIN library_artists ar ON ar.id = t.artist_id "
                 "WHERE t.monitored = 1 AND al.monitored = 1 AND ar.monitored = 1 "
-                "AND NOT EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id)"
+                "AND t.has_file = 0"
             )
             missing_track_count = int(cur.fetchone()[0] or 0)
 
