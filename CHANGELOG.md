@@ -80,6 +80,9 @@ heading becomes the version and date.
 
 ### Changed
 
+- The web app loads much faster, especially on phones. Pages load only the code they need (the first download is about a quarter of its old size), responses are compressed, and the app's files are cached by the browser between visits.
+- Artist pages open instantly. The nightly artist refresh now prepares each library artist's page (Deezer link, discography and top songs), and an artist page that isn't ready yet fetches its details and top songs at the same time instead of one after the other.
+- The Library page's totals load in a fraction of a second on large libraries instead of several seconds, and no longer hold up the rest of the app while they load. TrackSeerr also keeps more of its database in memory, so browsing large libraries is quicker.
 - Manual search for a song also searches its album when the album name is different, and when Soulseek returns nothing it tries again around Soulseek's banned search words, the same way automatic searches do.
 - Manual search is easier to find: an album's **⋯** menu on the artist page has **Manual search…**, and each song in an open album has a search button, like in the album details window.
 - TrackSeerr is gentler on the MusicBrainz mirror: at most 3 requests per second and 2 at a time (set with `MUSICBRAINZ_MIRROR_RPS` and `MUSICBRAINZ_MIRROR_CONCURRENCY`). When the mirror asks it to slow down, it waits as long as asked, and it stops asking a mirror that keeps refusing it.
@@ -122,6 +125,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Database backups no longer freeze the app while they run.
+- A scheduled backup no longer runs every time TrackSeerr restarts; it waits until the backup interval has passed since the last one. Temporary files left by an interrupted backup are cleaned up and no longer listed as backups.
 - The Pack Index now finds older packs too: besides reading the newest releases, its daily run searches the indexer for pack names ("Dj Pools Music Pack", pack, pool, megapack, chart, VA), so songs in last summer's pools can be found. Pressing **Run now** on the Pack Index task always does this full run instead of waiting a day.
 - Songs imported from DJ pools no longer keep the BPM in their title ("Gotta Be Cool 124" becomes "Gotta Be Cool"), file names like "Coolio Feat. L.V. - Gangsta's Paradise" give the right song title, and a file with no album tag goes into "Unknown Album" instead of a folder named only by its year.
 - When a song download contains several files and none of them is the wanted song, TrackSeerr now marks it failed, blocklists that release and searches again, instead of leaving it in the Queue waiting for a manual import. The files can still be imported by hand.
