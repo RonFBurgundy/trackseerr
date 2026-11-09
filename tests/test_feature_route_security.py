@@ -16,7 +16,9 @@ from trackseerr.api.routes.scrobbles import MAX_WEBHOOK_BYTES, _base_url
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.cli import RedactAccessLogFilter, install_access_log_redaction, redact_sensitive_query
 from trackseerr.clients.scrobbler import LastFmClient, LastFmError
+from trackseerr.clients.spotify_scraper import SpotifyWebScraper
 from trackseerr.config import Config
+from trackseerr.models import Track
 from trackseerr.storage import Database
 
 SP_ID = "37i9dQZF1DXcBWIGoYBM5M"
@@ -58,7 +60,16 @@ def tc(db, config):
     app = create_app(db=db, config=config)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_config] = lambda: config
-    return TestClient(app)
+
+    fake_loaded = {
+        "id": SP_ID,
+        "name": "Today's Top Hits",
+        "description": "Popular tracks",
+        "poster": "",
+        "tracks": [Track(title="Song 1", artist="Artist 1", album="")],
+    }
+    with patch.object(SpotifyWebScraper, "_load_playlist", return_value=fake_loaded):
+        yield TestClient(app)
 
 
 # --- playlist takeover ------------------------------------------------------------------------

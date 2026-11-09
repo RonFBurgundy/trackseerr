@@ -72,6 +72,88 @@ def test_scraper_embed_success(scraper):
         assert tracks[1].artist == "Taylor Swift"
 
 
+def test_embed_with_null_cover_art(scraper):
+    embed_payload = {
+        "props": {
+            "pageProps": {
+                "status": 200,
+                "state": {
+                    "data": {
+                        "entity": {
+                            "title": "Summer Hits 2026",
+                            "subtitle": "The hottest summer tracks",
+                            "coverArt": None,
+                            "trackList": [
+                                {
+                                    "title": "Sunshine Reggae",
+                                    "subtitle": "Laid Back",
+                                    "duration": 210000,
+                                    "uri": "spotify:track:12345",
+                                },
+                            ],
+                        }
+                    }
+                },
+            }
+        }
+    }
+    fake_html = f'<html><head><script id="__NEXT_DATA__" type="application/json">{json.dumps(embed_payload)}</script></head><body></body></html>'.encode("utf-8")
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = fake_html
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        pl = scraper.get_playlist_by_id("37i9dQZF1DXnullcover")
+        assert pl is not None
+        assert isinstance(pl, Playlist)
+        assert pl.name == "Summer Hits 2026"
+        assert pl.description == "The hottest summer tracks"
+        assert pl.poster == ""
+
+        tracks = scraper.get_playlist_tracks("37i9dQZF1DXnullcover")
+        assert len(tracks) == 1
+        assert tracks[0].title == "Sunshine Reggae"
+        assert tracks[0].artist == "Laid Back"
+
+
+def test_embed_with_null_track_list(scraper):
+    embed_payload = {
+        "props": {
+            "pageProps": {
+                "status": 200,
+                "state": {
+                    "data": {
+                        "entity": {
+                            "title": "Empty Tracklist Hits",
+                            "subtitle": "No tracks",
+                            "coverArt": {
+                                "sources": [
+                                    {"url": "https://i.scdn.co/image/empty.jpg", "width": 300}
+                                ]
+                            },
+                            "trackList": None,
+                        }
+                    }
+                },
+            }
+        }
+    }
+    fake_html = f'<html><head><script id="__NEXT_DATA__" type="application/json">{json.dumps(embed_payload)}</script></head><body></body></html>'.encode("utf-8")
+    mock_resp = MagicMock()
+    mock_resp.read.return_value = fake_html
+    mock_resp.__enter__.return_value = mock_resp
+
+    with patch("urllib.request.urlopen", return_value=mock_resp):
+        pl = scraper.get_playlist_by_id("37i9dQZF1DXnulltracklist")
+        assert pl is not None
+        assert isinstance(pl, Playlist)
+        assert pl.name == "Empty Tracklist Hits"
+        assert pl.poster == "https://i.scdn.co/image/empty.jpg"
+
+        tracks = scraper.get_playlist_tracks("37i9dQZF1DXnulltracklist")
+        assert len(tracks) == 0
+
+
 def test_scraper_initial_state_fallback(scraper):
     initial_state_payload = {
         "entities": {

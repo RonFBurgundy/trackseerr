@@ -73,10 +73,10 @@ class SpotifyWebScraper:
 
         try:
             data = json.loads(match.group(1))
-            props = data.get("props", {}).get("pageProps", {})
+            props = (data.get("props") or {}).get("pageProps") or {}
             if props.get("status") == 404:
                 return None
-            entity = props.get("state", {}).get("data", {}).get("entity", {})
+            entity = ((props.get("state") or {}).get("data") or {}).get("entity") or {}
             if not entity:
                 return None
             return entity
@@ -205,7 +205,7 @@ class SpotifyWebScraper:
             raw_b64 = match.group(1).strip()
             data = json.loads(base64.b64decode(raw_b64).decode("utf-8"))
             pl_key = f"spotify:playlist:{playlist_id}"
-            entity = data.get("entities", {}).get("items", {}).get(pl_key)
+            entity = ((data.get("entities") or {}).get("items") or {}).get(pl_key)
             return entity
         except Exception as e:
             logger.debug("Failed to decode initialState for %s: %s", playlist_id, e)
@@ -229,11 +229,11 @@ class SpotifyWebScraper:
         if embed_entity:
             name = embed_entity.get("title") or embed_entity.get("name")
             desc = embed_entity.get("subtitle") or ""
-            cover_sources = embed_entity.get("coverArt", {}).get("sources", [])
-            if cover_sources and len(cover_sources) > 0 and cover_sources[0].get("url"):
+            cover_sources = (embed_entity.get("coverArt") or {}).get("sources") or []
+            if cover_sources and len(cover_sources) > 0 and isinstance(cover_sources[0], dict) and cover_sources[0].get("url"):
                 poster_url = cover_sources[0]["url"]
 
-            for item in embed_entity.get("trackList", []):
+            for item in (embed_entity.get("trackList") or []):
                 t_title = (item.get("title") or "").strip()
                 t_artist = _primary_embed_artist(item.get("subtitle") or "")
                 if t_title:
@@ -255,19 +255,19 @@ class SpotifyWebScraper:
             if page_entity:
                 name = name or page_entity.get("name")
                 desc = desc or page_entity.get("description", "")
-                images = page_entity.get("images", [])
-                if not poster_url and images and len(images) > 0 and images[0].get("url"):
+                images = page_entity.get("images") or []
+                if not poster_url and images and len(images) > 0 and isinstance(images[0], dict) and images[0].get("url"):
                     poster_url = images[0]["url"]
 
-                content = page_entity.get("content", {})
-                for item in content.get("items", []):
-                    data = item.get("itemV2", {}).get("data", {})
+                content = page_entity.get("content") or {}
+                for item in (content.get("items") or []):
+                    data = (item.get("itemV2") or {}).get("data") or {}
                     t_title = (data.get("name") or "").strip()
-                    artists_items = data.get("artists", {}).get("items", [])
+                    artists_items = (data.get("artists") or {}).get("items") or []
                     t_artist = ""
-                    if artists_items and artists_items[0].get("profile"):
-                        t_artist = artists_items[0]["profile"].get("name", "").strip()
-                    album_data = data.get("albumOfTrack", {})
+                    if artists_items and isinstance(artists_items[0], dict) and artists_items[0].get("profile"):
+                        t_artist = (artists_items[0]["profile"].get("name") or "").strip()
+                    album_data = data.get("albumOfTrack") or {}
                     t_album = album_data.get("name", "").strip() if album_data else ""
 
                     if t_title and not any(t.title == t_title and t.artist == t_artist for t in tracks):
