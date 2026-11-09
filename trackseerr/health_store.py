@@ -28,8 +28,8 @@ class HealthStoreMixin:
 
     def get_health_check(self, key: str) -> dict[str, Any] | None:
         """Returns the health check row for ``key``, or None if not found."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 f"SELECT {_HEALTH_CHECK_COLUMNS} FROM health_checks WHERE check_key = ?",
                 (str(key),),
             ).fetchone()
@@ -37,8 +37,8 @@ class HealthStoreMixin:
 
     def list_health_checks(self) -> list[dict[str, Any]]:
         """Returns all health check rows ordered by kind, label."""
-        with self._lock:
-            rows = self.conn.execute(
+        with self.reader() as conn:
+            rows = conn.execute(
                 f"SELECT {_HEALTH_CHECK_COLUMNS} FROM health_checks ORDER BY kind ASC, label ASC"
             ).fetchall()
             return [dict(r) for r in rows]
@@ -106,8 +106,8 @@ class HealthStoreMixin:
 
     def has_health_item_alert(self, event: str, ref: str) -> bool:
         """Returns True if an item alert has been recorded for (event, ref)."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT 1 FROM health_item_alerts WHERE event = ? AND ref = ? LIMIT 1",
                 (str(event), str(ref)),
             ).fetchone()

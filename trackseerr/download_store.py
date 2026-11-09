@@ -85,8 +85,8 @@ class DownloadStoreMixin:
 
     def get_download_client(self, client_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single download client by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM download_clients WHERE id = ?", (str(client_id),)
             )
             row = cur.fetchone()
@@ -99,13 +99,13 @@ class DownloadStoreMixin:
 
     def list_download_clients(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         """Lists download clients, optionally filtering for enabled only."""
-        with self._lock:
+        with self.reader() as conn:
             if enabled_only:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT * FROM download_clients WHERE enabled = 1 ORDER BY priority ASC, created_at ASC"
                 )
             else:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT * FROM download_clients ORDER BY priority ASC, created_at ASC"
                 )
             rows = [dict(r) for r in cur.fetchall()]
@@ -225,8 +225,8 @@ class DownloadStoreMixin:
 
     def get_indexer(self, indexer_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single indexer by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM indexers WHERE id = ?", (str(indexer_id),)
             )
             row = cur.fetchone()
@@ -240,13 +240,13 @@ class DownloadStoreMixin:
 
     def list_indexers(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         """Lists indexers, optionally filtering for enabled only."""
-        with self._lock:
+        with self.reader() as conn:
             if enabled_only:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT * FROM indexers WHERE enabled = 1 ORDER BY priority ASC, created_at ASC"
                 )
             else:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT * FROM indexers ORDER BY priority ASC, created_at ASC"
                 )
             rows = [dict(r) for r in cur.fetchall()]
@@ -315,8 +315,8 @@ class DownloadStoreMixin:
     # (stable: the app never VACUUMs and backups use the sqlite backup API)
     def get_indexer_by_rowid(self, rowid: int) -> Optional[dict[str, Any]]:
         """Retrieves a single indexer by SQLite rowid."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT rowid, * FROM indexers WHERE rowid = ?", (int(rowid),)
             )
             row = cur.fetchone()
@@ -329,8 +329,8 @@ class DownloadStoreMixin:
 
     def get_indexer_rowid(self, indexer_id: str) -> Optional[int]:
         """Returns the SQLite rowid for an indexer by its UUID id."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT rowid FROM indexers WHERE id = ?", (str(indexer_id),)
             )
             row = cur.fetchone()
@@ -338,13 +338,13 @@ class DownloadStoreMixin:
 
     def list_indexers_with_rowid(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         """Lists indexers with rowid included, ordered by priority ASC, created_at ASC."""
-        with self._lock:
+        with self.reader() as conn:
             if enabled_only:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT rowid, * FROM indexers WHERE enabled = 1 ORDER BY priority ASC, created_at ASC"
                 )
             else:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     "SELECT rowid, * FROM indexers ORDER BY priority ASC, created_at ASC"
                 )
             rows = [dict(r) for r in cur.fetchall()]
@@ -473,8 +473,8 @@ class DownloadStoreMixin:
 
     def get_active_download_by_hash(self, download_hash: str) -> Optional[dict[str, Any]]:
         """Newest download row (any status) whose client hash matches, case-insensitively."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 """
                 SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
                 FROM active_downloads d
@@ -492,9 +492,9 @@ class DownloadStoreMixin:
         """Downloads sharing this torrent hash whose status is neither 'imported' nor 'failed'."""
         if not download_hash:
             return []
-        with self._lock:
+        with self.reader() as conn:
             if exclude_id:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     """
                     SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
                     FROM active_downloads d
@@ -507,7 +507,7 @@ class DownloadStoreMixin:
                     (str(download_hash).lower(), str(exclude_id)),
                 )
             else:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     """
                     SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
                     FROM active_downloads d
@@ -522,8 +522,8 @@ class DownloadStoreMixin:
 
     def history_has_hash(self, download_hash: str) -> bool:
         """True when ``download_history`` knows a release with this torrent hash (import history match)."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT 1 FROM download_history WHERE lower(info_hash) = ? LIMIT 1", (str(download_hash).lower(),)
             ).fetchone()
         return row is not None
@@ -604,8 +604,8 @@ class DownloadStoreMixin:
 
     def get_active_download(self, download_id: str) -> Optional[dict[str, Any]]:
         """Retrieves active download by ID with client details joined."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 """
                 SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
                 FROM active_downloads d
@@ -623,10 +623,10 @@ class DownloadStoreMixin:
         self, statuses: Optional[list[str]] = None
     ) -> list[dict[str, Any]]:
         """Lists active downloads, optionally filtered by a list of statuses."""
-        with self._lock:
+        with self.reader() as conn:
             if statuses:
                 placeholders = ", ".join(["?"] * len(statuses))
-                cur = self.conn.execute(
+                cur = conn.execute(
                     f"""
                     SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
                     FROM active_downloads d
@@ -637,7 +637,7 @@ class DownloadStoreMixin:
                     [str(s).lower() for s in statuses],
                 )
             else:
-                cur = self.conn.execute(
+                cur = conn.execute(
                     """
                     SELECT d.*, c.name AS client_name, c.driver_type AS client_driver_type
                     FROM active_downloads d
@@ -852,8 +852,8 @@ class DownloadStoreMixin:
 
     def get_blocklist_item(self, blocklist_id: str) -> Optional[dict[str, Any]]:
         """Retrieves a single blocklist entry by ID."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM download_blocklist WHERE id = ?",
                 (str(blocklist_id),),
             )
@@ -868,9 +868,9 @@ class DownloadStoreMixin:
     ) -> Optional[dict[str, Any]]:
         """The blocklist row matching a release by info_hash (case-insensitive), guid, exact title, then cleaned title."""
         cols = "id, source_title, reason, indexer, created_at"
-        with self._lock:
+        with self.reader() as conn:
             if info_hash:
-                row = self.conn.execute(
+                row = conn.execute(
                     f"SELECT {cols} FROM download_blocklist WHERE LOWER(info_hash) = LOWER(?) LIMIT 1",
                     (str(info_hash).strip(),),
                 ).fetchone()
@@ -878,7 +878,7 @@ class DownloadStoreMixin:
                     return dict(row)
 
             if release_guid:
-                row = self.conn.execute(
+                row = conn.execute(
                     f"SELECT {cols} FROM download_blocklist WHERE release_guid = ? LIMIT 1",
                     (str(release_guid).strip(),),
                 ).fetchone()
@@ -887,7 +887,7 @@ class DownloadStoreMixin:
 
             if release_title:
                 clean_rt = str(release_title).strip()
-                row = self.conn.execute(
+                row = conn.execute(
                     f"SELECT {cols} FROM download_blocklist WHERE LOWER(source_title) = LOWER(?) LIMIT 1",
                     (clean_rt,),
                 ).fetchone()
@@ -896,7 +896,7 @@ class DownloadStoreMixin:
 
                 target_clean = clean_library_name(clean_rt)
                 if target_clean:
-                    for cand in self.conn.execute(
+                    for cand in conn.execute(
                         f"SELECT {cols} FROM download_blocklist WHERE source_title IS NOT NULL"
                     ).fetchall():
                         if clean_library_name(cand["source_title"] or "") == target_clean:
@@ -914,16 +914,16 @@ class DownloadStoreMixin:
 
     def find_active_download_by_release(self, title: str, info_hash: Optional[str]) -> Optional[dict[str, Any]]:
         """A live (not failed/imported) download of this release: same hash (case-insensitive), else same title."""
-        with self._lock:
+        with self.reader() as conn:
             row = None
             if info_hash:
-                row = self.conn.execute(
+                row = conn.execute(
                     "SELECT id, title, status FROM active_downloads WHERE status NOT IN ('failed', 'imported') "
                     "AND LOWER(download_hash) = LOWER(?) LIMIT 1",
                     (str(info_hash).strip(),),
                 ).fetchone()
             if row is None and title:
-                row = self.conn.execute(
+                row = conn.execute(
                     "SELECT id, title, status FROM active_downloads WHERE status NOT IN ('failed', 'imported') "
                     "AND LOWER(title) = LOWER(?) LIMIT 1",
                     (str(title).strip(),),
@@ -934,8 +934,8 @@ class DownloadStoreMixin:
         """The delay-profile hold on a release with this title, if any (``release_at`` is when it will be grabbed)."""
         if not title:
             return None
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 "SELECT id, release_at, reason FROM pending_releases WHERE LOWER(title) = LOWER(?) "
                 "ORDER BY release_at LIMIT 1",
                 (str(title).strip(),),
@@ -944,8 +944,8 @@ class DownloadStoreMixin:
 
     def list_blocklist(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]:
         """Returns paginated download blocklist items ordered by created_at DESC."""
-        with self._lock:
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM download_blocklist ORDER BY created_at DESC LIMIT ? OFFSET ?",
                 (int(limit), int(offset)),
             )

@@ -181,11 +181,11 @@ class ActivityStoreMixin:
     ) -> Optional[str]:
         """Release title of the most recent ``imported`` history event for a request, track or album (first key that
         has one wins), or None when unknown. Used to score the current file's format score exactly like a candidate."""
-        with self._lock:
+        with self.reader() as conn:
             for column, value in (("request_id", request_id), ("track_id", track_id), ("album_id", album_id)):
                 if not value:
                     continue
-                row = self.conn.execute(
+                row = conn.execute(
                     f"SELECT release_title FROM download_history WHERE event = 'imported' AND {column} = ? "
                     "AND release_title IS NOT NULL AND release_title <> '' ORDER BY rowid DESC LIMIT 1",
                     (str(value),),
@@ -261,9 +261,9 @@ class ActivityStoreMixin:
             " AND COALESCE(d.hidden_from_queue, 0) = 0"
         ).format(", ".join("?" for _ in self.NATIVE_QUEUE_STATUSES))
         params = list(self.NATIVE_QUEUE_STATUSES)
-        with self._lock:
-            total = self.conn.execute("SELECT COUNT(*) " + self._QUEUE_FROM + where, params).fetchone()[0]
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            total = conn.execute("SELECT COUNT(*) " + self._QUEUE_FROM + where, params).fetchone()[0]
+            cur = conn.execute(
                 self._QUEUE_SELECT + self._QUEUE_FROM + where + f" {order} LIMIT ? OFFSET ?",
                 [*params, int(page_size), (int(page) - 1) * int(page_size)],
             )
@@ -271,8 +271,8 @@ class ActivityStoreMixin:
 
     def get_native_queue_item(self, download_id: str) -> Optional[dict[str, Any]]:
         """A single queue row with its resolved item/album titles, or None."""
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 self._QUEUE_SELECT + self._QUEUE_FROM + " WHERE d.id = ? AND COALESCE(d.hidden_from_queue, 0) = 0",
                 (str(download_id),),
             ).fetchone()
@@ -305,9 +305,9 @@ class ActivityStoreMixin:
         where, params = "", []
         if event:
             where, params = " WHERE h.event = ?", [str(event)]
-        with self._lock:
-            total = self.conn.execute("SELECT COUNT(*) FROM download_history h" + where, params).fetchone()[0]
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM download_history h" + where, params).fetchone()[0]
+            cur = conn.execute(
                 f"SELECT h.*, {self._CAN_MARK_FAILED_SQL} AS can_mark_failed, {self._HISTORY_LIBRARY_IDS_SQL}"
                 " FROM download_history h"
                 + where
@@ -317,8 +317,8 @@ class ActivityStoreMixin:
             return [dict(r) for r in cur.fetchall()], int(total)
 
     def get_download_history_item(self, history_id: str) -> Optional[dict[str, Any]]:
-        with self._lock:
-            row = self.conn.execute(
+        with self.reader() as conn:
+            row = conn.execute(
                 f"SELECT h.*, {self._CAN_MARK_FAILED_SQL} AS can_mark_failed FROM download_history h WHERE h.id = ?",
                 (str(history_id),),
             ).fetchone()
@@ -329,9 +329,9 @@ class ActivityStoreMixin:
     ) -> tuple[list[dict[str, Any]], int]:
         """One page of the download blocklist plus the total."""
         order = self._order_clause(self.BLOCKLIST_SORT_KEYS, sort_key, sort_dir, "b.id")
-        with self._lock:
-            total = self.conn.execute("SELECT COUNT(*) FROM download_blocklist").fetchone()[0]
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            total = conn.execute("SELECT COUNT(*) FROM download_blocklist").fetchone()[0]
+            cur = conn.execute(
                 f"SELECT b.* FROM download_blocklist b {order} LIMIT ? OFFSET ?",
                 (int(page_size), (int(page) - 1) * int(page_size)),
             )
@@ -375,9 +375,9 @@ class ActivityStoreMixin:
         select = self._WANTED_SELECT
         if kind == "cutoff":
             select += ", f.quality_name AS current_quality, COALESCE(qp.cutoff, dp.cutoff) AS cutoff_quality"
-        with self._lock:
-            total = self.conn.execute("SELECT COUNT(*) " + frm).fetchone()[0]
-            cur = self.conn.execute(
+        with self.reader() as conn:
+            total = conn.execute("SELECT COUNT(*) " + frm).fetchone()[0]
+            cur = conn.execute(
                 select + frm + f" {order} LIMIT ? OFFSET ?",
                 (int(page_size), (int(page) - 1) * int(page_size)),
             )
@@ -390,23 +390,23 @@ class ActivityStoreMixin:
         if sort_key not in self.WANTED_INDEX_SORTS:
             raise ValueError(f"Unknown sort key: {sort_key!r}")
         frm = self._WANTED_MISSING_FROM if kind == "missing" else self._WANTED_CUTOFF_FROM
-        with self._lock:
-            return build_index(self.conn, frm, [], self.WANTED_INDEX_SORTS[sort_key], sort_dir)
+        with self.reader() as conn:
+            return build_index(conn, frm, [], self.WANTED_INDEX_SORTS[sort_key], sort_dir)
 
     def download_history_index(self, sort_dir: str, event: Optional[str] = None) -> tuple[int, list[dict[str, Any]]]:
         """``(total, groups)`` for ``download_history`` ordered by date, matching ``list_download_history``."""
         frm, params = "FROM download_history h", []
         if event:
             frm, params = frm + " WHERE h.event = ?", [str(event)]
-        with self._lock:
-            return build_index(self.conn, frm, params, SortDef("h.created_at", "event"), sort_dir)
+        with self.reader() as conn:
+            return build_index(conn, frm, params, SortDef("h.created_at", "event"), sort_dir)
 
     def blocklist_index(self, sort_dir: str, sort_key: str = "date") -> tuple[int, list[dict[str, Any]]]:
         """``(total, groups)`` for ``download_blocklist`` matching ``list_blocklist_page``."""
         if sort_key not in self.BLOCKLIST_INDEX_SORTS:
             raise ValueError(f"Unknown sort key: {sort_key!r}")
-        with self._lock:
-            return build_index(self.conn, "FROM download_blocklist b", [], self.BLOCKLIST_INDEX_SORTS[sort_key], sort_dir)
+        with self.reader() as conn:
+            return build_index(conn, "FROM download_blocklist b", [], self.BLOCKLIST_INDEX_SORTS[sort_key], sort_dir)
 
     def list_wanted_search_targets(
         self, kind: Optional[str] = None, track_ids: Optional[list[str]] = None, limit: int = 1000
@@ -420,13 +420,13 @@ class ActivityStoreMixin:
             + ", (SELECT f2.quality_name FROM library_files f2 WHERE f2.track_id = t.id ORDER BY f2.cutoff_met ASC LIMIT 1)"
             " AS current_quality, (SELECT MIN(f3.cutoff_met) FROM library_files f3 WHERE f3.track_id = t.id) AS cutoff_met"
         )
-        with self._lock:
+        with self.reader() as conn:
             if track_ids is not None:
                 ids = [str(i) for i in track_ids][:limit]
                 if not ids:
                     return []
                 marks = ", ".join("?" for _ in ids)
-                cur = self.conn.execute(
+                cur = conn.execute(
                     select
                     + " FROM library_tracks t JOIN library_albums al ON al.id = t.album_id"
                     " JOIN library_artists ar ON ar.id = t.artist_id"
@@ -437,7 +437,7 @@ class ActivityStoreMixin:
                 if kind not in ("missing", "cutoff"):
                     raise ValueError(f"Unknown wanted list: {kind!r}")
                 frm = self._WANTED_MISSING_FROM if kind == "missing" else self._WANTED_CUTOFF_FROM
-                cur = self.conn.execute(
+                cur = conn.execute(
                     select + frm + " ORDER BY ar.name COLLATE NOCASE ASC, t.id ASC LIMIT ?", (int(limit),)
                 )
             return [dict(r) for r in cur.fetchall()]
@@ -492,8 +492,8 @@ class ActivityStoreMixin:
                      ar.name ASC, al.year ASC, t.disc_number ASC, t.track_number ASC
             LIMIT ?
         """
-        with self._lock:
-            cur = self.conn.execute(sql, (int(limit),))
+        with self.reader() as conn:
+            cur = conn.execute(sql, (int(limit),))
             rows = []
             for r in cur.fetchall():
                 d = dict(r)
@@ -536,8 +536,8 @@ class ActivityStoreMixin:
                      ar.name ASC, al.year ASC, t.disc_number ASC, t.track_number ASC
             LIMIT ?
         """
-        with self._lock:
-            cur = self.conn.execute(sql, (int(limit),))
+        with self.reader() as conn:
+            cur = conn.execute(sql, (int(limit),))
             return [dict(r) for r in cur.fetchall()]
 
     # -------------------------------------------------------------------------
@@ -602,15 +602,15 @@ class ActivityStoreMixin:
 
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        with self._lock:
-            count_cur = self.conn.execute(
+        with self.reader() as conn:
+            count_cur = conn.execute(
                 f"SELECT COUNT(*) FROM system_events{where_sql}",
                 tuple(params),
             )
             total = int(count_cur.fetchone()[0])
 
             item_params = list(params) + [limit, offset]
-            cur = self.conn.execute(
+            cur = conn.execute(
                 f"""
                 SELECT id, event_type, severity, source, message, details_json, created_at
                 FROM system_events{where_sql}
