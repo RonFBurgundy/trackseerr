@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef, lazy, Suspense } from 'react';
 import { Loader2, LogIn } from 'lucide-react';
 import type { ArtistDiscographyAlbum, DiscoveryItem, Playlist, User } from '@/types/models';
 import type { ListMonitorMode } from '@/types/importLists';
@@ -39,13 +39,6 @@ import {
   gateRoute,
   routesEqual,
   AudioPlayerBar,
-  DiscoverView,
-  RequestsView,
-  LibraryView,
-  PlaylistsView,
-  ActivityView,
-  WantedView,
-  SettingsView,
   ObsidianModal,
   TapeDeckButton,
   MachinedCard,
@@ -72,6 +65,32 @@ import { apiRequest } from '@/services/apiClient';
 import { setPlaylistAutoRequest } from '@/services/listeningService';
 import { createDiscographyRequest, MAX_BATCH_ITEMS } from '@/services/requestService';
 import { peekPendingImport } from '@/services/bookmarkletImport';
+
+const loadDiscoverView = () => import('@/components/views/DiscoverView').then((m) => ({ default: m.DiscoverView }));
+const loadRequestsView = () => import('@/components/views/RequestsView').then((m) => ({ default: m.RequestsView }));
+const loadLibraryView = () => import('@/components/views/LibraryView').then((m) => ({ default: m.LibraryView }));
+const loadPlaylistsView = () => import('@/components/views/PlaylistsView').then((m) => ({ default: m.PlaylistsView }));
+const loadActivityView = () => import('@/components/views/ActivityView').then((m) => ({ default: m.ActivityView }));
+const loadWantedView = () => import('@/components/views/WantedView').then((m) => ({ default: m.WantedView }));
+const loadSettingsView = () => import('@/components/views/SettingsView').then((m) => ({ default: m.SettingsView }));
+
+const VIEW_LOADERS = [
+  loadDiscoverView,
+  loadRequestsView,
+  loadLibraryView,
+  loadPlaylistsView,
+  loadActivityView,
+  loadWantedView,
+  loadSettingsView,
+] as const;
+
+const DiscoverView = lazy(loadDiscoverView);
+const RequestsView = lazy(loadRequestsView);
+const LibraryView = lazy(loadLibraryView);
+const PlaylistsView = lazy(loadPlaylistsView);
+const ActivityView = lazy(loadActivityView);
+const WantedView = lazy(loadWantedView);
+const SettingsView = lazy(loadSettingsView);
 
 /** Manual path routing: only /invite/:token is a distinct page; everything else is the SPA shell. */
 export function parseInviteToken(pathname: string): string | null {
@@ -189,6 +208,26 @@ const MainApp: React.FC = () => {
       }
     }
   }, [auth.isAuthenticated, loadPlaylistsAndUsers, handleNavigate]);
+
+  // Warms the other pages so switching tabs never waits on the network.
+  useEffect(() => {
+    if (!auth.isAuthenticated) return;
+    const preload = () => {
+      VIEW_LOADERS.forEach((load) => void load());
+    };
+    const idleWindow = window as Window & {
+      requestIdleCallback?: (cb: () => void) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof idleWindow.requestIdleCallback === 'function' && typeof idleWindow.cancelIdleCallback === 'function') {
+      const handle = idleWindow.requestIdleCallback(preload);
+      return () => {
+        idleWindow.cancelIdleCallback?.(handle);
+      };
+    }
+    const timer = window.setTimeout(preload, 1500);
+    return () => window.clearTimeout(timer);
+  }, [auth.isAuthenticated]);
 
   // Header keys jump to a tab's landing page; the tab already open keeps its sub-page.
   const handleTabChange = (tab: MainTab) => {
@@ -460,118 +499,120 @@ const MainApp: React.FC = () => {
               <RefreshBinding onRefresh={libraryHook.reloadCatalog} />
             )}
             {activeRoute.tab === 'playlists' && <RefreshBinding onRefresh={loadPlaylistsAndUsers} />}
-            {activeRoute.tab === 'discover' && (
-              <DiscoverView
-                discovery={discovery}
-                route={activeRoute}
-                onNavigate={handleNavigate}
-                onNavigateUp={navigateUp}
-                isAdmin={auth.canUseAdminUi}
-                onPlayTrack={audioPlayer.play}
-                currentPreviewTrackId={audioPlayer.currentTrack?.id}
-                isPreviewPlaying={audioPlayer.isPlaying}
-                onRequest={handleRequestItem}
-                onRequestDiscography={handleRequestDiscography}
-                requestedIds={requestedIds}
-                issuesHook={issuesHook}
-              />
-            )}
+            <Suspense fallback={<PageLoader />}>
+              {activeRoute.tab === 'discover' && (
+                <DiscoverView
+                  discovery={discovery}
+                  route={activeRoute}
+                  onNavigate={handleNavigate}
+                  onNavigateUp={navigateUp}
+                  isAdmin={auth.canUseAdminUi}
+                  onPlayTrack={audioPlayer.play}
+                  currentPreviewTrackId={audioPlayer.currentTrack?.id}
+                  isPreviewPlaying={audioPlayer.isPlaying}
+                  onRequest={handleRequestItem}
+                  onRequestDiscography={handleRequestDiscography}
+                  requestedIds={requestedIds}
+                  issuesHook={issuesHook}
+                />
+              )}
 
-            {activeRoute.tab === 'requests' && (
-              <RequestsView
-                sub={activeRoute.sub}
-                onSubChange={(sub, o) => handleNavigate({ tab: 'requests', sub }, o)}
-                requestsHook={requestsHook}
-                isAdmin={auth.canUseAdminUi}
-                canManageRequests={auth.canManageRequests}
-                issuesHook={issuesHook}
-                issuesOpenCount={issueCounts.open}
-                issuesUnreadCount={issueCounts.unread}
-                issueId={activeRoute.issueId}
-                onOpenIssue={(id) => handleNavigate({ tab: 'requests', sub: 'issues', issueId: id })}
-                onCloseIssue={() => navigateUp({ tab: 'requests', sub: 'issues' })}
-                currentUserId={auth.user?.id}
-                account={accountHook.account}
-              />
-            )}
+              {activeRoute.tab === 'requests' && (
+                <RequestsView
+                  sub={activeRoute.sub}
+                  onSubChange={(sub, o) => handleNavigate({ tab: 'requests', sub }, o)}
+                  requestsHook={requestsHook}
+                  isAdmin={auth.canUseAdminUi}
+                  canManageRequests={auth.canManageRequests}
+                  issuesHook={issuesHook}
+                  issuesOpenCount={issueCounts.open}
+                  issuesUnreadCount={issueCounts.unread}
+                  issueId={activeRoute.issueId}
+                  onOpenIssue={(id) => handleNavigate({ tab: 'requests', sub: 'issues', issueId: id })}
+                  onCloseIssue={() => navigateUp({ tab: 'requests', sub: 'issues' })}
+                  currentUserId={auth.user?.id}
+                  account={accountHook.account}
+                />
+              )}
 
-            {activeRoute.tab === 'library' && auth.canUseAdminUi && (
-              <LibraryView
-                route={activeRoute}
-                onNavigate={handleNavigate}
-                onNavigateUp={navigateUp}
-                onRequestItem={handleRequestItem}
-                onRequestDiscography={handleRequestDiscography}
-                libraryHook={libraryHook}
-                issuesHook={issuesHook}
-                isAdmin={auth.canUseAdminUi}
-                onPlayTrack={audioPlayer.play}
-                currentPreviewTrackId={audioPlayer.currentTrack?.id}
-                isPreviewPlaying={audioPlayer.isPlaying}
-                requestedIds={requestedIds}
-                users={users}
-                currentUserId={auth.user?.id}
-                canTargetUsers={mediaServer.capabilities.users}
-                serverLabel={mediaServer.label}
-              />
-            )}
+              {activeRoute.tab === 'library' && auth.canUseAdminUi && (
+                <LibraryView
+                  route={activeRoute}
+                  onNavigate={handleNavigate}
+                  onNavigateUp={navigateUp}
+                  onRequestItem={handleRequestItem}
+                  onRequestDiscography={handleRequestDiscography}
+                  libraryHook={libraryHook}
+                  issuesHook={issuesHook}
+                  isAdmin={auth.canUseAdminUi}
+                  onPlayTrack={audioPlayer.play}
+                  currentPreviewTrackId={audioPlayer.currentTrack?.id}
+                  isPreviewPlaying={audioPlayer.isPlaying}
+                  requestedIds={requestedIds}
+                  users={users}
+                  currentUserId={auth.user?.id}
+                  canTargetUsers={mediaServer.capabilities.users}
+                  serverLabel={mediaServer.label}
+                />
+              )}
 
-            {activeTab === 'playlists' && (
-              <PlaylistsView
-                playlists={playlists}
-                users={users}
-                currentUserId={auth.user?.id}
-                onSync={handleSyncPlaylists}
-                onToggleTarget={handleToggleTarget}
-                onImport={handleImportPlaylist}
-                onToggleActive={handleTogglePlaylistActive}
-                onSetMonitorMode={handleSetPlaylistMonitorMode}
-                canAutoRequest={canAutoRequestPlaylists}
-                onSetAutoRequest={handleSetPlaylistAutoRequest}
-                onPlaylistsChanged={loadPlaylistsAndUsers}
-                onDelete={handleDeletePlaylist}
-                isLoading={isPlaylistsLoading}
-                isAdmin={auth.canUseAdminUi}
-                hasMediaServer={mediaServer.hasMediaServer}
-                serverType={mediaServer.type}
-                serverLabel={mediaServer.label}
-                canTargetUsers={mediaServer.capabilities.users}
-                mixesEnabled={mediaServer.capabilities.mixes}
-                onRequestItem={handleRequestItem}
-              />
-            )}
+              {activeTab === 'playlists' && (
+                <PlaylistsView
+                  playlists={playlists}
+                  users={users}
+                  currentUserId={auth.user?.id}
+                  onSync={handleSyncPlaylists}
+                  onToggleTarget={handleToggleTarget}
+                  onImport={handleImportPlaylist}
+                  onToggleActive={handleTogglePlaylistActive}
+                  onSetMonitorMode={handleSetPlaylistMonitorMode}
+                  canAutoRequest={canAutoRequestPlaylists}
+                  onSetAutoRequest={handleSetPlaylistAutoRequest}
+                  onPlaylistsChanged={loadPlaylistsAndUsers}
+                  onDelete={handleDeletePlaylist}
+                  isLoading={isPlaylistsLoading}
+                  isAdmin={auth.canUseAdminUi}
+                  hasMediaServer={mediaServer.hasMediaServer}
+                  serverType={mediaServer.type}
+                  serverLabel={mediaServer.label}
+                  canTargetUsers={mediaServer.capabilities.users}
+                  mixesEnabled={mediaServer.capabilities.mixes}
+                  onRequestItem={handleRequestItem}
+                />
+              )}
 
-            {activeRoute.tab === 'activity' && auth.canUseAdminUi && (
-              <ActivityView
-                sub={activeRoute.sub}
-                onSubChange={(sub, o) => handleNavigate({ tab: 'activity', sub }, o)}
-                reviewCount={reviewHealth.count}
-                onReviewChanged={() => void reviewHealth.refresh()}
-              />
-            )}
+              {activeRoute.tab === 'activity' && auth.canUseAdminUi && (
+                <ActivityView
+                  sub={activeRoute.sub}
+                  onSubChange={(sub, o) => handleNavigate({ tab: 'activity', sub }, o)}
+                  reviewCount={reviewHealth.count}
+                  onReviewChanged={() => void reviewHealth.refresh()}
+                />
+              )}
 
-            {activeRoute.tab === 'wanted' && auth.canUseAdminUi && (
-              <WantedView
-                sub={activeRoute.sub}
-                onSubChange={(sub, o) => handleNavigate({ tab: 'wanted', sub }, o)}
-                onNavigate={handleNavigate}
-              />
-            )}
+              {activeRoute.tab === 'wanted' && auth.canUseAdminUi && (
+                <WantedView
+                  sub={activeRoute.sub}
+                  onSubChange={(sub, o) => handleNavigate({ tab: 'wanted', sub }, o)}
+                  onNavigate={handleNavigate}
+                />
+              )}
 
-            {activeRoute.tab === 'settings' && (
-              <SettingsView
-                route={activeRoute}
-                onNavigate={handleNavigate}
-                isAdmin={auth.canUseAdminUi}
-                showGatewayNote={auth.isAdmin && auth.tier === 'gateway'}
-                isCore={identity.isCore}
-                accountHook={accountHook}
-                currentUserId={auth.user?.id}
-                mfaEnrollmentRequired={mfaEnrollmentRequired}
-                hasMediaServer={mediaServer.isPlex}
-                updateCheck={updateCheck}
-              />
-            )}
+              {activeRoute.tab === 'settings' && (
+                <SettingsView
+                  route={activeRoute}
+                  onNavigate={handleNavigate}
+                  isAdmin={auth.canUseAdminUi}
+                  showGatewayNote={auth.isAdmin && auth.tier === 'gateway'}
+                  isCore={identity.isCore}
+                  accountHook={accountHook}
+                  currentUserId={auth.user?.id}
+                  mfaEnrollmentRequired={mfaEnrollmentRequired}
+                  hasMediaServer={mediaServer.isPlex}
+                  updateCheck={updateCheck}
+                />
+              )}
+            </Suspense>
             {identity.isGateway && (
               <p className="shrink-0 pt-2 text-center text-[10px] font-mono text-[var(--text-muted)]">
                 Settings are managed in TrackSeerr Core
