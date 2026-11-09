@@ -12,6 +12,7 @@ from fastapi.exceptions import ResponseValidationError
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.staticfiles import StaticFiles
 
 from trackseerr import __version__
@@ -113,6 +114,15 @@ def _enforce_internal_secret(config: Optional[Config]) -> None:
 _CLI_OWNED_CODES = frozenset({CODE_APP_URL_MISSING, CODE_CORE_URL, CODE_DB_PRESENT, CODE_SECRET_WEAK})
 
 
+class _ImmutableAssets(StaticFiles):
+    """Vite content-hashes every file under /assets, so a changed file always has a new name."""
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 def _enforce_role_environment(config: Optional[Config]) -> None:
     """Refuses to build a gateway/core app whose environment breaks the DMZ guardrails."""
     role = ((config.role if config is not None else None) or os.getenv("ROLE", "all-in-one")).lower().strip()
@@ -184,6 +194,7 @@ def _attach_state(app: FastAPI, db: Optional[Database], config: Optional[Config]
 
 
 def _install_middleware(app: FastAPI) -> None:
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
     app.add_middleware(ClientTzOffsetMiddleware)
     # 0. Two-tier security: hash signed bodies (all roles); deny-by-default guard (gateway role only, checked per request)
     # Added last = outermost: forged X-TS-* headers are refused on a gateway before the guard forwards anything.
@@ -341,7 +352,7 @@ def _mount_frontend(app: FastAPI) -> None:
 
     assets_dir = dist_dir / "assets"
     if assets_dir.is_dir():
-        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+        app.mount("/assets", _ImmutableAssets(directory=str(assets_dir)), name="assets")
 
     # Serve root public PWA assets
     base_manifest = _load_manifest(dist_dir, static_dir)
