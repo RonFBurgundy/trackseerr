@@ -7,6 +7,7 @@ library: availability is resolved on core per item (``annotate_item_statuses``) 
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import re
 import sqlite3
@@ -257,16 +258,21 @@ def match_discography(
 # ---------------------------------------------------------------------------------------------------- profile
 
 
-def _top_tracks(discovery: Any, discovery_id: Optional[str], annotate: Any) -> list[dict[str, Any]]:
-    """Deezer top tracks (up to 10) with status; [] for non-Deezer ids or when Deezer fails."""
+def _fetch_top_tracks(discovery: Any, discovery_id: Optional[str]) -> list[dict[str, Any]]:
+    """Deezer top tracks (up to 10) raw items; [] for non-Deezer ids or when Deezer fails."""
     if not discovery_id or not discovery_id.startswith("deezer:artist:"):
         return []
     try:
         raw = discovery.get_artist_top_tracks_detailed(discovery_id, limit=TOP_TRACKS_LIMIT)
+        return raw or []
     except (requests.RequestException, ValueError) as exc:
         logger.warning("Top tracks unavailable for %s: %s", discovery_id, exc)
         return []
-    items = [{**t, "item_type": "track"} for t in raw[:TOP_TRACKS_LIMIT]]
+
+
+def _shape_top_tracks(raw: list[dict[str, Any]], annotate: Any) -> list[dict[str, Any]]:
+    """Shapes and annotates raw top tracks with status."""
+    items = [{**t, "item_type": "track"} for t in (raw or [])[:TOP_TRACKS_LIMIT]]
     annotated = annotate(items)
     result = []
     for t in annotated:
@@ -282,6 +288,31 @@ def _top_tracks(discovery: Any, discovery_id: Optional[str], annotate: Any) -> l
             entry["request_id"] = t["request_id"]
         result.append(entry)
     return result
+
+
+def _top_tracks(discovery: Any, discovery_id: Optional[str], annotate: Any) -> list[dict[str, Any]]:
+    return _shape_top_tracks(_fetch_top_tracks(discovery, discovery_id), annotate)
+
+
+def _fetch_details(discovery: Any, discovery_id: str) -> Optional[dict[str, Any]]:
+    try:
+        return discovery.get_artist_details(discovery_id)
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("Discovery artist %s unavailable: %s", discovery_id, exc)
+        return None
+
+
+def _fetch_details_and_top(
+    discovery: Any, discovery_id: Optional[str]
+) -> tuple[Optional[dict[str, Any]], list[dict[str, Any]]]:
+    if not discovery_id:
+        return None, []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        fut_details = executor.submit(_fetch_details, discovery, discovery_id)
+        fut_top = executor.submit(_fetch_top_tracks, discovery, discovery_id)
+        details = fut_details.result()
+        top_raw = fut_top.result()
+    return details, top_raw
 
 
 def build_profile(  # noqa: C901
@@ -300,12 +331,12 @@ def build_profile(  # noqa: C901
     index = source.index() if source is not None else None
     link = ArtistLink(name="")
     details: Optional[dict[str, Any]] = None
+    prefetched_raw: list[dict[str, Any]] = []
+    prefetch_id: Optional[str] = None
 
     if discovery_id:
-        try:
-            details = discovery.get_artist_details(discovery_id)
-        except (requests.RequestException, ValueError) as exc:
-            logger.warning("Discovery artist %s unavailable: %s", discovery_id, exc)
+        prefetch_id = discovery_id
+        details, prefetched_raw = _fetch_details_and_top(discovery, discovery_id)
         if index is not None:
             link = artist_links.resolve_from_discovery(db, discovery, discovery_id, library=index, details=details)
         else:
@@ -319,16 +350,19 @@ def build_profile(  # noqa: C901
         if not link.name:
             return None
         if link.discovery_id:
-            try:
-                details = discovery.get_artist_details(link.discovery_id)
-            except (requests.RequestException, ValueError) as exc:
-                logger.warning("Discovery artist %s unavailable: %s", link.discovery_id, exc)
+            prefetch_id = link.discovery_id
+            details, prefetched_raw = _fetch_details_and_top(discovery, link.discovery_id)
 
     library_data = None
     if source is not None and link.library_artist_id:
         library_data = source.artist_and_albums(link.library_artist_id)
 
     effective_discovery_id = link.discovery_id or discovery_id
+    if effective_discovery_id != prefetch_id:
+        if effective_discovery_id:
+            details, prefetched_raw = _fetch_details_and_top(discovery, effective_discovery_id)
+        else:
+            details, prefetched_raw = None, []
 
     raw_groups = {g: list((details or {}).get(g) or []) for g in DISCOGRAPHY_GROUPS}
     for items in raw_groups.values():
@@ -377,9 +411,25 @@ def build_profile(  # noqa: C901
             if summary
             else None
         ),
-        "top_tracks": _top_tracks(discovery, effective_discovery_id, annotate),
+        "top_tracks": _shape_top_tracks(prefetched_raw, annotate),
         "discography": {**matched, "library_only": library_only},
     }
+
+
+def warm_profile_cache(db: Database, discovery: Any, library_artist_id: str) -> bool:
+    """Run by the nightly artist refresh so the first visit to an artist page is served from cache."""
+    try:
+        source = make_library_source(db, None)
+        index = source.index()
+        link = artist_links.resolve_from_library(db, discovery, str(library_artist_id), library=index)
+        if not link.discovery_id:
+            return False
+        discovery.get_artist_details(link.discovery_id)
+        _fetch_top_tracks(discovery, link.discovery_id)
+        return True
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("warm_profile_cache failed for %s: %s", library_artist_id, exc)
+        return False
 
 
 # Fields a non-admin may see on a discography item: discovery metadata plus ownership status and counts. Anything that
