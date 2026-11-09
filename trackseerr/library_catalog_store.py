@@ -1492,8 +1492,8 @@ class LibraryCatalogStoreMixin:
 
     def get_library_stats(self) -> dict[str, Any]:
         """Calculates aggregate statistics for the native library catalog."""
-        with self._lock:
-            cur = self.conn.cursor()
+        with self.reader() as conn:
+            cur = conn.cursor()
             cur.execute("SELECT COUNT(*) FROM library_artists")
             artist_count = int(cur.fetchone()[0] or 0)
 

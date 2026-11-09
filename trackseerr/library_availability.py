@@ -19,8 +19,8 @@ def _artist_row(
 ) -> Optional[dict[str, Any]]:
     artist_row = db.get_library_artist_by_name(artist_clean)
     if not artist_row and fid:
-        with db._lock:
-            cur = db.conn.execute(
+        with db.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_artists WHERE foreign_artist_id = ? LIMIT 1",
                 (fid,),
             )
@@ -55,8 +55,8 @@ def _track_availability(
         track_row = matches[0] if matches else None
 
     if not track_row and artist_row and fid:
-        with db._lock:
-            cur = db.conn.execute(
+        with db.reader() as conn:
+            cur = conn.execute(
                 "SELECT * FROM library_tracks WHERE foreign_track_id = ? AND artist_id = ? LIMIT 1",
                 (fid, str(artist_row["id"])),
             )
@@ -107,8 +107,8 @@ def _album_availability(
                     break
 
         if not album_row and fid:
-            with db._lock:
-                cur = db.conn.execute(
+            with db.reader() as conn:
+                cur = conn.execute(
                     "SELECT * FROM library_albums WHERE foreign_album_id = ? AND artist_id = ? LIMIT 1",
                     (fid, str(artist_row["id"])),
                 )
@@ -171,9 +171,9 @@ def _foreign_id_availability(
     db: Database,
     fid: str,
 ) -> Optional[dict[str, Any]]:
-    with db._lock:
+    with db.reader() as conn:
         # Foreign track lookup
-        cur = db.conn.execute(
+        cur = conn.execute(
             "SELECT * FROM library_tracks WHERE foreign_track_id = ? LIMIT 1",
             (fid,),
         )
@@ -201,7 +201,7 @@ def _foreign_id_availability(
             }
 
         # Foreign album lookup
-        cur = db.conn.execute(
+        cur = conn.execute(
             "SELECT * FROM library_albums WHERE foreign_album_id = ? LIMIT 1",
             (fid,),
         )
@@ -234,7 +234,7 @@ def _foreign_id_availability(
             }
 
         # Foreign artist lookup
-        cur = db.conn.execute(
+        cur = conn.execute(
             "SELECT * FROM library_artists WHERE foreign_artist_id = ? LIMIT 1",
             (fid,),
         )

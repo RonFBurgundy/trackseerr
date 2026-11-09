@@ -55,8 +55,8 @@ class MbMetadataStore:
         """Looks up a cached entry. Returns (True, payload) on unexpired hit, else (False, None)."""
         key = str(cache_key)
         try:
-            with self.db._lock:
-                row = self.db.conn.execute(
+            with self.db.reader() as conn:
+                row = conn.execute(
                     "SELECT payload_json, expires_at FROM mb_metadata_cache WHERE cache_key = ?",
                     (key,),
                 ).fetchone()
