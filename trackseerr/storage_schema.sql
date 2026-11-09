@@ -878,6 +878,7 @@ CREATE INDEX idx_lib_albums_sort_title ON library_albums(sort_title, id);
 CREATE INDEX idx_lib_tracks_sort_title ON library_tracks(sort_title, id);
 CREATE INDEX idx_lib_artists_created ON library_artists(created_at);
 CREATE INDEX idx_lib_albums_created ON library_albums(created_at);
+CREATE INDEX idx_lib_albums_monitored ON library_albums(monitored);
 CREATE INDEX idx_lib_tracks_created ON library_tracks(created_at);
 CREATE INDEX idx_import_list_items_list_status ON import_list_items(list_id, status);
 CREATE INDEX idx_lib_files_track_cutoff ON library_files(track_id, cutoff_met, id);
