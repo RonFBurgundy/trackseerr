@@ -5877,12 +5877,12 @@ export interface paths {
         };
         /**
          * Get backup retention and schedule settings
-         * @description Retrieves current scheduled backup retention count and effective interval.
+         * @description Retrieves current scheduled backup retention in days and effective interval.
          */
         get: operations["get_settings_api_system_backups_settings_get"];
         /**
          * Update backup retention and schedule settings
-         * @description Updates scheduled backup retention count and/or interval schedule.
+         * @description Updates backup retention in days and/or interval schedule.
          */
         put: operations["update_settings_api_system_backups_settings_put"];
         post?: never;
@@ -7082,15 +7082,15 @@ export interface components {
         BackupSettingsResponse: {
             /** Interval Seconds */
             interval_seconds?: number | null;
-            /** Retention */
-            retention: number;
+            /** Retention Days */
+            retention_days: number;
         };
         /** BackupSettingsUpdate */
         BackupSettingsUpdate: {
             /** Interval Seconds */
             interval_seconds?: number | null;
-            /** Retention */
-            retention?: number | null;
+            /** Retention Days */
+            retention_days?: number | null;
         };
         /**
          * BatchCreateMusicRequestBody
