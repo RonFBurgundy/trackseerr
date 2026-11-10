@@ -80,6 +80,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Backups no longer pile up. Every backup older than 28 days is deleted automatically, including manual and pre-restore backups, and the newest scheduled backup is always kept so you always have one to restore. Change the number of days in Settings → System → Backups → Settings ("Keep Backups For"). Cleanup runs after each backup and as soon as you save a new value. This replaces the old "keep the last 7 scheduled backups" setting.
 - The web app loads much faster, especially on phones. Pages load only the code they need (the first download is about a quarter of its old size), responses are compressed, and the app's files are cached by the browser between visits.
 - Artist pages open instantly. The nightly artist refresh now prepares each library artist's page (Deezer link, discography and top songs), and an artist page that isn't ready yet fetches its details and top songs at the same time instead of one after the other.
 - Pages no longer wait for background work. Browsing the library, artist pages, settings, requests and activity read the database alongside downloads, imports and scheduled tasks instead of queueing behind them.
