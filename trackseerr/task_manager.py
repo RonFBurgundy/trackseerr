@@ -262,7 +262,7 @@ TASKS: dict[str, TaskSpec] = {
         TaskSpec(
             "backup",
             "Database Backup & Retention",
-            "Snapshots the SQLite database with WAL safety, creates compressed backup archives, and prunes old scheduled backups per retention policy.",
+            "Snapshots the SQLite database with WAL safety, creates compressed backup archives, and deletes backups older than the retention period.",
             KIND_INTERVAL,
             7 * _DAY,
             _presets(_DAY),
