@@ -174,7 +174,7 @@ const SETTINGS: readonly SettingDef[] = [
   { label: 'Database Backups & Restore', section: 'system', leaf: 'backups', keywords: 'backup restore database snapshot download upload retention' },
   { label: 'Back up now', section: 'system', leaf: 'backups', anchor: 'Back up now', keywords: 'create database backup snapshot manual backup now' },
   { label: 'Restore backup from file', section: 'system', leaf: 'backups', anchor: 'Restore from file', keywords: 'restore database backup upload file archive snapshot' },
-  { label: 'Backup Settings', section: 'system', leaf: 'backups', anchor: 'Settings', keywords: 'backup settings retention scheduled interval frequency automated' },
+  { label: 'Backup Settings', section: 'system', leaf: 'backups', anchor: 'Settings', keywords: 'backup settings retention scheduled interval frequency automated days cleanup delete old' },
   { label: 'Application Logs', section: 'system', leaf: 'logs', keywords: 'log stream debug console output' },
   { label: 'Log Settings', section: 'system', leaf: 'logs', anchor: 'Log Settings', keywords: 'log settings level rotation retention days max size mb debug trace info' },
   { label: 'Download Log', section: 'system', leaf: 'logs', anchor: 'Download Log', keywords: 'download log files export save text' },

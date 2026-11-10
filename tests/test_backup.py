@@ -33,11 +33,11 @@ from trackseerr.backup import (
     create_backup,
     delete_backup,
     get_backup_dir,
-    get_backup_retention,
+    get_backup_retention_days,
     list_backups,
-    prune_scheduled,
+    prune_backups,
     resolve_backup_path,
-    set_backup_retention,
+    set_backup_retention_days,
     set_restart_killer,
     stage_restore,
     sweep_stale_temp_files,
@@ -151,46 +151,121 @@ def test_backup_wal_data_present_in_snapshot(tmp_path: Path):
         db.close()
 
 
-def test_retention_prunes_only_scheduled(test_db: Database, tmp_path: Path):
-    """Pruning deletes oldest scheduled backups beyond retention count, preserving manual and pre_restore."""
+def _make_backup_with_manifest(backup_dir: Path, name: str, created_at: Optional[str], kind: str) -> Path:
+    p = backup_dir / name
+    manifest: dict[str, Any] = {
+        "app_version": __version__,
+        "schema_version": SCHEMA_VERSION,
+        "kind": kind,
+    }
+    if created_at is not None:
+        manifest["created_at"] = created_at
+    with zipfile.ZipFile(p, "w") as zf:
+        zf.writestr(MANIFEST_MEMBER_NAME, json.dumps(manifest))
+        zf.writestr(DB_MEMBER_NAME, b"dummy")
+    return p
+
+
+def test_prune_backups_deletes_all_kinds_older_than_retention(test_db: Database, tmp_path: Path):
+    """Pruning deletes every backup kind older than retention_days, keeping backups within retention."""
     backup_dir = tmp_path / "backups"
     backup_dir.mkdir(parents=True, exist_ok=True)
 
-    # Helper to generate a minimal valid backup zip with a given timestamp and kind
-    def _make_backup(ts_str: str, kind: str) -> Path:
-        name = f"trackseerr_backup_{ts_str}_{kind}.zip"
-        p = backup_dir / name
-        manifest = {
-            "app_version": __version__,
-            "schema_version": SCHEMA_VERSION,
-            "created_at": f"2026-01-01T{ts_str[:2]}:{ts_str[2:4]}:{ts_str[4:]}Z",
-            "kind": kind,
-        }
-        with zipfile.ZipFile(p, "w") as zf:
-            zf.writestr(MANIFEST_MEMBER_NAME, json.dumps(manifest))
-            zf.writestr(DB_MEMBER_NAME, b"dummy")
-        return p
+    now = datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+    # 40 days old: 2026-01-20T00:00:00Z
+    # 5 days old: 2026-02-24T00:00:00Z
+    old_manual = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260120_000000_manual.zip", "2026-01-20T00:00:00Z", "manual"
+    )
+    old_pre_restore = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260120_000001_pre_restore.zip", "2026-01-20T00:00:01Z", "pre_restore"
+    )
+    old_scheduled = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260120_000002_scheduled.zip", "2026-01-20T00:00:02Z", "scheduled"
+    )
 
-    manual = _make_backup("000000_manual", "manual")
-    pre_restore = _make_backup("000001_pre_restore", "pre_restore")
+    recent_manual = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260224_000000_manual.zip", "2026-02-24T00:00:00Z", "manual"
+    )
+    recent_pre_restore = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260224_000001_pre_restore.zip", "2026-02-24T00:00:01Z", "pre_restore"
+    )
+    recent_scheduled = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260224_000002_scheduled.zip", "2026-02-24T00:00:02Z", "scheduled"
+    )
 
-    s1 = _make_backup("010000_scheduled", "scheduled")
-    s2 = _make_backup("020000_scheduled", "scheduled")
-    s3 = _make_backup("030000_scheduled", "scheduled")
-    s4 = _make_backup("040000_scheduled", "scheduled")
-    s5 = _make_backup("050000_scheduled", "scheduled")
+    deleted = prune_backups(retention_days=28, backup_dir=backup_dir, now=now)
+    assert set(deleted) == {old_manual.name, old_pre_restore.name, old_scheduled.name}
 
-    # Retention of 3 scheduled backups
-    deleted = prune_scheduled(retention=3, backup_dir=backup_dir)
-    assert set(deleted) == {s1.name, s2.name}
+    assert not old_manual.exists()
+    assert not old_pre_restore.exists()
+    assert not old_scheduled.exists()
+    assert recent_manual.exists()
+    assert recent_pre_restore.exists()
+    assert recent_scheduled.exists()
+
+
+def test_prune_backups_keeps_newest_scheduled_even_if_expired(test_db: Database, tmp_path: Path):
+    """Safety: never deletes newest valid scheduled backup even if past cutoff, while deleting old manual."""
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+    # 70 days old
+    s1 = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20251221_000000_scheduled.zip", "2025-12-21T00:00:00Z", "scheduled"
+    )
+    # 60 days old (newest scheduled)
+    s2 = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20251231_000000_scheduled.zip", "2025-12-31T00:00:00Z", "scheduled"
+    )
+    old_manual = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20251225_000000_manual.zip", "2025-12-25T00:00:00Z", "manual"
+    )
+
+    deleted = prune_backups(retention_days=28, backup_dir=backup_dir, now=now)
+    assert set(deleted) == {s1.name, old_manual.name}
 
     assert not s1.exists()
-    assert not s2.exists()
-    assert s3.exists()
-    assert s4.exists()
-    assert s5.exists()
-    assert manual.exists()
-    assert pre_restore.exists()
+    assert not old_manual.exists()
+    assert s2.exists()
+
+
+def test_prune_backups_falls_back_to_mtime(test_db: Database, tmp_path: Path):
+    """Manifest without created_at falls back to file st_mtime for age pruning."""
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+    old_mtime_backup = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260120_000000_manual.zip", None, "manual"
+    )
+    # Set mtime to 40 days before now
+    t_40d = (now - timedelta(days=40)).timestamp()
+    os.utime(old_mtime_backup, (t_40d, t_40d))
+
+    deleted = prune_backups(retention_days=28, backup_dir=backup_dir, now=now)
+    assert deleted == [old_mtime_backup.name]
+    assert not old_mtime_backup.exists()
+
+
+def test_prune_backups_default_on_nonpositive_retention(test_db: Database, tmp_path: Path):
+    """retention_days <= 0 falls back to DEFAULT_BACKUP_RETENTION_DAYS (28)."""
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime(2026, 3, 1, 0, 0, 0, tzinfo=timezone.utc)
+    old_manual = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260110_000000_manual.zip", "2026-01-10T00:00:00Z", "manual"
+    )
+    recent_manual = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260225_000000_manual.zip", "2026-02-25T00:00:00Z", "manual"
+    )
+
+    deleted = prune_backups(retention_days=0, backup_dir=backup_dir, now=now)
+    assert deleted == [old_manual.name]
+    assert not old_manual.exists()
+    assert recent_manual.exists()
 
 
 def test_create_backup_does_not_hold_db_lock(test_db: Database, tmp_path: Path):
@@ -681,12 +756,18 @@ def test_routes_admin_happy_paths(test_db: Database, test_config: Config, secret
     # 5. Get and update settings
     r_get_settings = client.get("/api/system/backups/settings")
     assert r_get_settings.status_code == 200
-    assert r_get_settings.json()["retention"] == 7
+    assert r_get_settings.json()["retention_days"] == 28
 
-    r_put_settings = client.put("/api/system/backups/settings", json={"retention": 14})
+    r_put_settings = client.put("/api/system/backups/settings", json={"retention_days": 14})
     assert r_put_settings.status_code == 200
-    assert r_put_settings.json()["retention"] == 14
-    assert get_backup_retention(test_db) == 14
+    assert r_put_settings.json()["retention_days"] == 14
+    assert get_backup_retention_days(test_db) == 14
+
+    r_put_bad = client.put("/api/system/backups/settings", json={"retention_days": 0})
+    assert r_put_bad.status_code == 400
+
+    r_put_bad_high = client.put("/api/system/backups/settings", json={"retention_days": 400})
+    assert r_put_bad_high.status_code == 400
 
     # 6. Restore from existing backup (with injected restart hook)
     restart_called = []
@@ -755,3 +836,27 @@ def test_backup_task_registered_and_run_now(test_db: Database, test_config: Conf
     # Verify backup was created
     backups = list_backups(backup_dir=test_db.db_path.parent / "backups")
     assert len(backups) >= 1
+
+
+def test_put_settings_prunes_immediately(test_db: Database, test_config: Config, secret_key: bytes):
+    """PUT /settings with a shorter retention prunes old backups immediately."""
+    app = make_test_app(test_db, test_config)
+    client = TestClient(app)
+    admin = test_db.get_user_by_username("admin_user")
+    cookies = create_auth_cookies(test_db, admin, secret_key)
+    client.cookies.update(cookies)
+
+    backup_dir = test_db.db_path.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    old_dt = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+    old_manual = _make_backup_with_manifest(
+        backup_dir, "trackseerr_backup_20260101_000000_manual.zip", old_dt, "manual"
+    )
+    assert old_manual.is_file()
+
+    r = client.put("/api/system/backups/settings", json={"retention_days": 28})
+    assert r.status_code == 200
+    assert r.json()["retention_days"] == 28
+
+    assert not old_manual.exists()

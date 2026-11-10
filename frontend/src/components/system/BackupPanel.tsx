@@ -71,14 +71,14 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ onToast }) => {
   const [selectedUploadFile, setSelectedUploadFile] = useState<File | null>(null);
 
   // Settings draft state
-  const [retentionDraft, setRetentionDraft] = useState<number>(settings?.retention ?? 7);
+  const [retentionDaysDraft, setRetentionDaysDraft] = useState<number>(settings?.retention_days ?? 28);
   const [intervalDraft, setIntervalDraft] = useState<number>(settings?.interval_seconds ?? 604800);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleOpenSettings = (): void => {
     if (settings) {
-      setRetentionDraft(settings.retention);
+      setRetentionDaysDraft(settings.retention_days);
       setIntervalDraft(settings.interval_seconds ?? 604800);
     }
     setShowSettingsModal(true);
@@ -86,7 +86,7 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ onToast }) => {
 
   const handleSaveSettings = async (): Promise<void> => {
     const success = await saveSettings({
-      retention: retentionDraft,
+      retention_days: retentionDaysDraft,
       interval_seconds: intervalDraft,
     });
     if (success) {
@@ -161,7 +161,7 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ onToast }) => {
               Database Backups &amp; Restore
             </h4>
             <p className="text-xs text-neutral-400 font-mono mt-1">
-              On-demand snapshots, scheduled retention pruning, and atomic database restores.
+              On-demand snapshots, automatic cleanup of old backups, and safe database restores.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -336,16 +336,23 @@ export const BackupPanel: React.FC<BackupPanelProps> = ({ onToast }) => {
       >
         <div className="space-y-4 font-mono text-xs">
           <FormField
-            label="Scheduled Backup Retention"
-            name="retention"
-            hint="Number of recent scheduled backups to retain. Manual and pre-restore backups are never deleted automatically."
+            label="Keep Backups For (days)"
+            name="retention_days"
+            hint="Backups older than this are deleted automatically, including manual and pre-restore backups. The newest scheduled backup is always kept."
           >
             <input
               type="number"
               min={1}
               max={365}
-              value={retentionDraft}
-              onChange={(e) => setRetentionDraft(Math.max(1, parseInt(e.target.value, 10) || 1))}
+              value={retentionDaysDraft}
+              onChange={(e) => {
+                const val = parseInt(e.target.value, 10);
+                if (Number.isNaN(val)) {
+                  setRetentionDaysDraft(1);
+                } else {
+                  setRetentionDaysDraft(Math.min(365, Math.max(1, val)));
+                }
+              }}
               className={inputClass}
             />
           </FormField>

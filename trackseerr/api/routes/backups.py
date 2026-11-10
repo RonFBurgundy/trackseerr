@@ -30,10 +30,11 @@ from trackseerr.backup import (
     create_backup,
     delete_backup,
     get_backup_dir,
-    get_backup_retention,
+    get_backup_retention_days,
     list_backups,
+    prune_backups,
     resolve_backup_path,
-    set_backup_retention,
+    set_backup_retention_days,
     stage_restore,
     trigger_restart,
 )
@@ -62,12 +63,12 @@ class BackupItem(ApiModel):
 
 
 class BackupSettingsResponse(ApiModel):
-    retention: int
+    retention_days: int
     interval_seconds: Optional[int] = None
 
 
 class BackupSettingsUpdate(ApiModel):
-    retention: Optional[int] = None
+    retention_days: Optional[int] = None
     interval_seconds: Optional[int] = None
 
 
@@ -97,6 +98,7 @@ def create_manual_backup(db: Database = Depends(get_db)) -> dict[str, Any]:
     """Snapshots the live database on-demand and creates a manual backup zip archive."""
     b_dir = _get_target_backup_dir(db)
     backup_path = create_backup(db, kind="manual", backup_dir=b_dir)
+    prune_backups(retention_days=get_backup_retention_days(db), backup_dir=b_dir)
     backups = list_backups(backup_dir=b_dir)
     for b in backups:
         if b["name"] == backup_path.name:
@@ -117,9 +119,9 @@ def get_settings(
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
 ) -> dict[str, Any]:
-    """Retrieves current scheduled backup retention count and effective interval."""
+    """Retrieves current scheduled backup retention in days and effective interval."""
     return {
-        "retention": get_backup_retention(db),
+        "retention_days": get_backup_retention_days(db),
         "interval_seconds": effective_interval_seconds(db, config, "backup"),
     }
 
@@ -130,11 +132,12 @@ def update_settings(
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
 ) -> dict[str, Any]:
-    """Updates scheduled backup retention count and/or interval schedule."""
-    if body.retention is not None:
-        if body.retention <= 0 or body.retention > 365:
-            raise HTTPException(status_code=400, detail="Retention must be between 1 and 365")
-        set_backup_retention(db, body.retention)
+    """Updates backup retention in days and/or interval schedule."""
+    if body.retention_days is not None:
+        if body.retention_days <= 0 or body.retention_days > 365:
+            raise HTTPException(status_code=400, detail="Retention must be between 1 and 365 days")
+        set_backup_retention_days(db, body.retention_days)
+        prune_backups(retention_days=body.retention_days, backup_dir=_get_target_backup_dir(db))
     if body.interval_seconds is not None:
         spec = TASKS.get("backup")
         if spec and spec.presets and body.interval_seconds not in spec.presets:
@@ -144,7 +147,7 @@ def update_settings(
             )
         set_interval_override(db, "backup", body.interval_seconds)
     return {
-        "retention": get_backup_retention(db),
+        "retention_days": get_backup_retention_days(db),
         "interval_seconds": effective_interval_seconds(db, config, "backup"),
     }
 

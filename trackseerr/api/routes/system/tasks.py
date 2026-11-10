@@ -851,12 +851,12 @@ def run_scheduled_task(  # noqa: C901, PLR0915
         _run_manual(db, task_id, "ManualMixGenerationTask", _mix)
 
     elif task_id == "backup":
-        from trackseerr.backup import create_backup, get_backup_retention, prune_scheduled
+        from trackseerr.backup import create_backup, get_backup_retention_days, prune_backups
 
         def _backup(run: RunHandle) -> None:
-            retention = get_backup_retention(db)
+            retention = get_backup_retention_days(db)
             path = create_backup(db, kind="manual")
-            pruned = prune_scheduled(retention=retention, backup_dir=path.parent)
+            pruned = prune_backups(retention_days=retention, backup_dir=path.parent)
             run.message = f"created={path.name}, pruned={len(pruned)}"
 
         _run_manual(db, task_id, "ManualBackupTask", _backup)

@@ -15,7 +15,7 @@ import tempfile
 import threading
 import time
 import zipfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence, Union
 
@@ -40,8 +40,9 @@ MANIFEST_MEMBER_NAME = "manifest.json"
 PENDING_RESTORE_DB_NAME = ".pending_restore.sqlite"
 PENDING_RESTORE_MARKER_NAME = ".pending_restore.marker"
 
-KV_BACKUP_RETENTION = "backup_retention"
-DEFAULT_BACKUP_RETENTION = 7
+KV_BACKUP_RETENTION_DAYS = "backup_retention_days"
+DEFAULT_BACKUP_RETENTION_DAYS = 28
+MAX_BACKUP_RETENTION_DAYS = 365
 
 MAX_BACKUP_UNCOMPRESSED_BYTES = 2 * 1024 * 1024 * 1024  # 2 GiB
 MAX_BACKUP_RATIO = 200
@@ -122,24 +123,24 @@ def get_backup_dir(base_dir: Optional[Union[str, Path]] = None) -> Path:
     return ensure_backup_dir(backup_dir)
 
 
-def get_backup_retention(db: Database) -> int:
-    """Retrieves the configured retention count for scheduled backups (default: 7)."""
+def get_backup_retention_days(db: Database) -> int:
+    """Retrieves the configured retention in days for all backups (default: 28)."""
     try:
-        raw = db.get_kv(KV_BACKUP_RETENTION)
+        raw = db.get_kv(KV_BACKUP_RETENTION_DAYS)
         if raw is not None:
             val = int(raw)
             if val > 0:
                 return val
     except (sqlite3.Error, ValueError, TypeError) as exc:
         logger.warning("Could not read backup retention setting: %s", safe_exc(exc))
-    return DEFAULT_BACKUP_RETENTION
+    return DEFAULT_BACKUP_RETENTION_DAYS
 
 
-def set_backup_retention(db: Database, retention: int) -> None:
-    """Persists the retention count for scheduled backups in settings storage."""
-    if retention <= 0:
-        raise ValueError("Backup retention count must be positive")
-    db.set_kv(KV_BACKUP_RETENTION, str(retention))
+def set_backup_retention_days(db: Database, days: int) -> None:
+    """Persists the retention in days for all backups in settings storage."""
+    if days < 1 or days > MAX_BACKUP_RETENTION_DAYS:
+        raise ValueError(f"Backup retention days must be between 1 and {MAX_BACKUP_RETENTION_DAYS}")
+    db.set_kv(KV_BACKUP_RETENTION_DAYS, str(days))
 
 
 def resolve_backup_path(name: str, backup_dir: Optional[Path] = None) -> Path:
@@ -395,36 +396,70 @@ def list_backups(backup_dir: Optional[Path] = None) -> list[dict[str, Any]]:
     return items
 
 
-def prune_scheduled(
-    retention: int = DEFAULT_BACKUP_RETENTION,
+def _backup_created_at(item: dict[str, Any], path: Path) -> Optional[datetime]:
+    """Parses created timestamp for backup item, falling back to mtime or None."""
+    created_raw = item.get("created_at")
+    if isinstance(created_raw, str):
+        raw_clean = created_raw[:-1] + "+00:00" if created_raw.endswith("Z") else created_raw
+        try:
+            dt = datetime.fromisoformat(raw_clean)
+            return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError) as exc:
+            logger.debug("Failed parsing created_at '%s' for %s: %s", created_raw, item.get("name"), safe_exc(exc))
+
+    try:
+        mtime = path.stat().st_mtime
+        return datetime.fromtimestamp(mtime, tz=timezone.utc)
+    except OSError as exc:
+        logger.warning("Could not determine timestamp for backup %s: %s", item.get("name"), safe_exc(exc))
+        return None
+
+
+def prune_backups(
+    retention_days: int = DEFAULT_BACKUP_RETENTION_DAYS,
     backup_dir: Optional[Path] = None,
+    now: Optional[datetime] = None,
 ) -> list[str]:
-    """Prunes oldest scheduled backups beyond retention limit. Never prunes manual or pre_restore backups."""
-    if retention <= 0:
-        retention = DEFAULT_BACKUP_RETENTION
+    """Prunes backups older than retention_days, preserving the newest valid scheduled backup."""
+    if retention_days <= 0:
+        retention_days = DEFAULT_BACKUP_RETENTION_DAYS
+
+    current_time = now if now is not None else datetime.now(timezone.utc)
+    if current_time.tzinfo is None:
+        current_time = current_time.replace(tzinfo=timezone.utc)
+    cutoff = current_time - timedelta(days=retention_days)
 
     b_dir = backup_dir or get_backup_dir()
     all_backups = list_backups(backup_dir=b_dir)
 
-    # Filter only valid scheduled backups
-    scheduled = [
-        b for b in all_backups
-        if b.get("kind") == "scheduled" and b.get("error") is None
-    ]
+    parsed_items: list[tuple[dict[str, Any], Path, datetime]] = []
+    for item in all_backups:
+        path = b_dir / item["name"]
+        created = _backup_created_at(item, path)
+        if created is not None:
+            parsed_items.append((item, path, created))
 
-    # Sort oldest first
-    scheduled.sort(key=lambda x: str(x.get("created_at") or x["name"]))
+    # Find the newest valid scheduled backup to keep as a safety net
+    newest_scheduled_name: Optional[str] = None
+    valid_scheduled = [
+        (item, path, dt)
+        for item, path, dt in parsed_items
+        if item.get("kind") == "scheduled" and item.get("error") is None
+    ]
+    if valid_scheduled:
+        valid_scheduled.sort(key=lambda x: x[2], reverse=True)
+        newest_scheduled_name = valid_scheduled[0][0]["name"]
 
     deleted_names: list[str] = []
-    if len(scheduled) > retention:
-        to_prune = scheduled[: len(scheduled) - retention]
-        for item in to_prune:
-            path = b_dir / item["name"]
+    for item, path, dt in parsed_items:
+        if item["name"] == newest_scheduled_name:
+            continue
+        if dt < cutoff:
             try:
                 if path.is_file():
                     path.unlink()
                     deleted_names.append(item["name"])
-                    logger.info("Pruned old scheduled backup: %s", item["name"])
+                    logger.info("Pruned backup older than %d days: %s", retention_days, item["name"])
             except OSError as exc:
                 logger.warning("Failed to prune backup %s: %s", item["name"], safe_exc(exc))
 
@@ -855,9 +890,9 @@ class BackupWorker:
     def run_once(self, db: Any) -> bool:
         try:
             with record_task_run(db, "backup", TRIGGER_SCHEDULED) as run:
-                retention = get_backup_retention(db)
+                retention = get_backup_retention_days(db)
                 backup_path = create_backup(db, kind="scheduled")
-                pruned = prune_scheduled(retention=retention, backup_dir=backup_path.parent)
+                pruned = prune_backups(retention_days=retention, backup_dir=backup_path.parent)
                 run.message = f"created={backup_path.name}, pruned={len(pruned)}"
             return True
         except Exception as exc:
