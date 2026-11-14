@@ -164,7 +164,7 @@ def ingest_artist(
             metadata_profile_id=body.metadata_profile_id,
             metadata_profile_id_set="metadata_profile_id" in body.model_fields_set,
         )
-    except MetadataProfileNotFound as exc:
+    except (MetadataProfileNotFound, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),

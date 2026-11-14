@@ -11,7 +11,6 @@ from typing import Any
 import uuid
 
 from trackseerr import art_pipeline
-from trackseerr.api.routes.library._shared import validate_media_path
 from trackseerr.artist_refresh import _store_total_tracks
 from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
@@ -21,6 +20,7 @@ from trackseerr.library_monitoring import (
     hydrated_track_monitored,
     section_to_album_type,
 )
+from trackseerr.naming import sanitize_component
 from trackseerr.models import (
     LibraryAlbum,
     LibraryArtist,
@@ -278,9 +278,14 @@ def ingest_artist_native(
     mm = db.get_media_management_settings()
     root_folder_str = root_folder or mm.get("root_folder_path") or "/music"
     if root_folder:
+        from trackseerr.api.routes.library._shared import validate_media_path
         validate_media_path(root_folder, db=db)
     root_path = Path(root_folder_str).resolve()
-    artist_folder = str(root_path / artist_name)
+    artist_component = sanitize_component(artist_name)
+    artist_folder_path = (root_path / artist_component).resolve()
+    if not artist_folder_path.is_relative_to(root_path):
+        raise ValueError("Artist folder escapes the root folder")
+    artist_folder = str(artist_folder_path)
 
     resolved_monitor_option = monitor_option or str(mm.get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
     resolved_metadata_profile_id: int | None = (

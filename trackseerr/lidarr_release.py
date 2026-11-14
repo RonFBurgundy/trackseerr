@@ -13,6 +13,8 @@ import re
 import unicodedata
 from typing import Any, Iterable, Optional
 
+from trackseerr.text_limits import cap
+
 _FAR_FUTURE = "9999-99-99"
 _BRACKETED = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
 _DASH_SPLIT = re.compile(r"\s+[-–—]\s+")
@@ -81,7 +83,7 @@ _ALBUM_VERSION_SUFFIX = re.compile(
 
 def _strip_album_version(text: Any) -> Any:
     if isinstance(text, str):
-        return _ALBUM_VERSION_SUFFIX.sub("", text).strip()
+        return _ALBUM_VERSION_SUFFIX.sub("", cap(text)).strip()
     return text
 
 

@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from trackseerr.exclusions import exclusion_norm
+from trackseerr.text_limits import cap
 
 AUDIO_EXTS = {
     ".flac",
@@ -94,6 +95,7 @@ def strip_trailing_bpm(title: str) -> str | None:
     """Return title with trailing 60-200 number removed, or None if no such trailing number."""
     if not title:
         return None
+    title = cap(title)
     bm = _TRAILING_BPM_RE.search(title)
     if bm:
         bpm_val = int(bm.group(1))
@@ -103,6 +105,7 @@ def strip_trailing_bpm(title: str) -> str | None:
 
 
 def _extract_trailing_bpm_key(current: str, extras: dict[str, Any]) -> str:
+    current = cap(current)
     changed = True
     while changed:
         changed = False
@@ -178,6 +181,7 @@ def _extract_edit_kind(current: str, extras: dict[str, Any]) -> str:
 
 
 def _extract_featured(current: str, extras: dict[str, Any]) -> str:
+    current = cap(current)
     fm = _FEAT_RE.search(current)
     if fm:
         extras["featured"] = fm.group(1).strip()
@@ -201,6 +205,7 @@ def clean_pool_title(title: str) -> tuple[str, dict[str, Any]]:
     if not title:
         return ("", {})
 
+    title = cap(title)
     extras: dict[str, Any] = {}
     has_pool_bracket = bool(_POOL_BRACKET_RE.search(title))
     current = title.strip()
@@ -270,7 +275,7 @@ def infer_audio_quality(ext: str, path: str, pack_title: str) -> str:
 
 
 def _strip_trailing_bracket_tags(text: str) -> str:
-    current = text
+    current = cap(text)
     while True:
         cleaned = _TRAILING_BRACKET_RE.sub("", current)
         if cleaned == current:

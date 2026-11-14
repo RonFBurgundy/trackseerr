@@ -11,6 +11,7 @@ from typing import Optional
 
 from trackseerr.decision_engine import phrase_score
 from trackseerr.lidarr_release import _fold, _is_noise, norm_title
+from trackseerr.text_limits import cap
 
 _VERSION_KEYWORDS = (
     "remix", "mix", "edit", "version", "rework", "bootleg", "vip", "dub", "live", "acoustic", "remaster",
@@ -37,20 +38,20 @@ def _collapse(text: str) -> str:
 
 def primary_artist(artist: str) -> str:
     """First artist of a credit list (``A, B & C`` -> ``A``); a single artist is returned stripped."""
-    text = (artist or "").strip()
+    text = cap(artist).strip()
     first = _ARTIST_SPLIT_RE.split(text, maxsplit=1)[0].strip()
     return first or text
 
 
 def strip_featuring(title: str) -> str:
     """Remove ``(feat. ...)``/``[ft. ...]`` groups and a trailing un-bracketed ``feat. ...`` clause."""
-    text = _FEAT_GROUP_RE.sub("", title or "")
+    text = _FEAT_GROUP_RE.sub("", cap(title))
     text = _FEAT_TRAIL_RE.sub("", text)
     return _collapse(text)
 
 
 def _version_groups(title: str) -> list[str]:
-    return [g.strip() for g in _GROUP_RE.findall(title or "") if _VERSION_RE.search(g)]
+    return [g.strip() for g in _GROUP_RE.findall(cap(title)) if _VERSION_RE.search(g)]
 
 
 def version_descriptor(title: str) -> Optional[str]:
