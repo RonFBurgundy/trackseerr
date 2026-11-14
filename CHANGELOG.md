@@ -130,6 +130,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Adding an artist whose name contains characters that aren't allowed in folder names (for example AC/DC) no longer creates a folder inside a folder; the name is cleaned the same way the naming settings clean it.
 - The `MUSICBRAINZ_URL` and `MUSICBRAINZ_MIRROR_URL` environment variables now work: when set, they choose the MusicBrainz server and lock the setting on the Metadata Sources page.
 - Adding a Spotify playlist works again. Spotify stopped sending cover art for some playlists, which made adding them fail.
 - Database backups no longer freeze the app while they run.
