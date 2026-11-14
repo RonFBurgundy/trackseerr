@@ -12,6 +12,7 @@ import type {
   RecycleBinEmptyResult,
   LidarrSettings,
   LidarrTestResult,
+  MusicBrainzTestResult,
   LibraryManagerMode,
   LibraryManagerState,
   LidarrDefaults,
@@ -132,6 +133,13 @@ export async function testLidarrConnection(payload: {
   return apiRequest<LidarrTestResult>('/api/settings/lidarr/test', {
     method: 'POST',
     body: payload,
+  });
+}
+
+export async function testMusicBrainzMirror(url: string): Promise<MusicBrainzTestResult> {
+  return apiRequest<MusicBrainzTestResult>('/api/settings/musicbrainz/test', {
+    method: 'POST',
+    body: { url },
   });
 }
 
