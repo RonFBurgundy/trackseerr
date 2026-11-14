@@ -1,0 +1,4 @@
+name: "TrackSeerr CodeQL config"
+paths-ignore:
+  - tests/**
+  - frontend/node_modules/**
