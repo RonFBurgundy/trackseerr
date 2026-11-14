@@ -28,6 +28,7 @@ from trackseerr.storage_common import (
     SEED_COMPLETE_ACTIONS,
     _LEGACY_LIDARR_OVERRIDE_COLUMNS,
 )
+from trackseerr.clients.mbid_enricher import strip_ws2_suffix
 from trackseerr.track_credits import (
     FEATURED_ARTIST_MODES,
     REMIX_CREDIT_MODES,
@@ -37,8 +38,10 @@ logger = logging.getLogger(__name__)
 
 
 def _normalize_mb_mirror_url(raw_url: str) -> str:
-    """Normalize BrainzMash mirror URL, redirecting legacy api.brainzmash.org to .cc."""
-    val = str(raw_url).strip()
+    """Normalize BrainzMash/MusicBrainz mirror URL, redirecting legacy api.brainzmash.org to .cc and stripping trailing /ws/2."""
+    val = strip_ws2_suffix(raw_url)
+    if not val:
+        return ""
     try:
         parsed = urllib.parse.urlparse(val)
         if parsed.hostname == "api.brainzmash.org":

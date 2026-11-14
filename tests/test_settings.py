@@ -288,6 +288,19 @@ class TestMediaManagementAPI:
         assert resp.json()["mb_mirror_url"] == "https://api.brainzmash.cc"
         assert test_db.get_media_management_settings()["mb_mirror_url"] == "https://api.brainzmash.cc"
 
+    def test_save_mb_mirror_url_with_ws2_is_stored_without_it(self, app_and_client, test_db, test_config, seeded_users):
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+        resp = client.put(
+            "/api/settings/media-management",
+            json={"mb_mirror_url": "http://192.168.1.5:5000/ws/2"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["mb_mirror_url"] == "http://192.168.1.5:5000"
+        assert test_db.get_media_management_settings()["mb_mirror_url"] == "http://192.168.1.5:5000"
+
     def test_put_invalid_remix_credit_returns_4xx(self, app_and_client, test_db, test_config, seeded_users):
         _, client = app_and_client
         admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
@@ -660,4 +673,56 @@ def test_normalize_mb_mirror_url_unparseable_is_kept_and_logged(caplog):
 
     assert result == invalid_url
     assert any("Ignoring unparseable mb_mirror_url 'http://[::1'" in record.message for record in caplog.records)
+
+
+def test_normalize_mb_mirror_url_strips_ws2_suffix():
+    from trackseerr.settings_store import _normalize_mb_mirror_url
+
+    assert _normalize_mb_mirror_url("http://192.168.1.5:5000/ws/2") == "http://192.168.1.5:5000"
+    assert _normalize_mb_mirror_url("http://192.168.1.5:5000/ws/2/") == "http://192.168.1.5:5000"
+    assert _normalize_mb_mirror_url("http://192.168.1.5:5000/WS/2") == "http://192.168.1.5:5000"
+    assert _normalize_mb_mirror_url("https://api.brainzmash.cc/") == "https://api.brainzmash.cc"
+
+
+def test_musicbrainz_test_endpoint_online(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    with patch("trackseerr.api.routes.settings.probe_mirror", return_value=(True, None)) as mock_probe:
+        resp = client.post(
+            "/api/settings/musicbrainz/test",
+            json={"url": "http://192.168.1.5:5000/ws/2/"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["online"] is True
+        assert body["error"] is None
+        mock_probe.assert_called_once_with("http://192.168.1.5:5000")
+
+
+def test_musicbrainz_test_endpoint_rejects_metadata_host(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    with patch("trackseerr.api.routes.settings.probe_mirror") as mock_probe:
+        resp = client.post(
+            "/api/settings/musicbrainz/test",
+            json={"url": "http://169.254.169.254"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["online"] is False
+        assert "prohibited or invalid" in body["error"].lower()
+        mock_probe.assert_not_called()
+
+
+def test_musicbrainz_test_endpoint_requires_admin(app_and_client, test_db, test_config, seeded_users):
+    _, client = app_and_client
+    alice_headers = _auth_headers(seeded_users["alice"], test_db, test_config)
+    resp = client.post(
+        "/api/settings/musicbrainz/test",
+        json={"url": "http://192.168.1.5:5000"},
+        headers=alice_headers,
+    )
+    assert resp.status_code == 403
 

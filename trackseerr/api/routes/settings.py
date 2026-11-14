@@ -19,6 +19,7 @@ from trackseerr.media_servers import settings as media_server_settings
 from trackseerr.library_monitoring import accept_deprecated_profile_keys, validate_monitor_option
 from trackseerr.redaction import redact_text, safe_exc
 from trackseerr.clients.lidarr import LidarrApiError, LidarrClient, invalidate_add_defaults
+from trackseerr.clients.mbid_enricher import probe_mirror, strip_ws2_suffix
 from trackseerr.naming import (
     PRESET_DESCRIPTIONS,
     PRESETS,
@@ -402,6 +403,15 @@ class LidarrTestConnectionResponse(ApiModel):
     error: str | None = None
 
 
+class MusicBrainzTestPayload(BaseModel):
+    url: str
+
+
+class MusicBrainzTestResponse(ApiModel):
+    online: bool
+    error: str | None = None
+
+
 class MediaManagementGetResponse(ApiModel):
     settings: MediaManagementSettingsModel
     presets: dict[str, dict[str, Any]]
@@ -738,6 +748,30 @@ def test_lidarr_connection(
             version=None,
             error=redact_text(str(e)),
         )
+
+
+@router.post(
+    "/musicbrainz/test",
+    response_model=MusicBrainzTestResponse,
+    summary="Test MusicBrainz mirror (Admin Only)",
+)
+def test_musicbrainz_mirror(
+    payload: MusicBrainzTestPayload,
+    admin_user: dict[str, Any] = Depends(require_admin),
+) -> MusicBrainzTestResponse:
+    """Admin-only: tests connectivity to a MusicBrainz mirror or API."""
+    url = strip_ws2_suffix(payload.url)
+    if not is_safe_service_url(url):
+        return MusicBrainzTestResponse(
+            online=False,
+            error="Prohibited or invalid host URL",
+        )
+
+    online, err = probe_mirror(url)
+    return MusicBrainzTestResponse(
+        online=online,
+        error=redact_text(err) if err else None,
+    )
 
 
 # -----------------------------------------------------------------------------

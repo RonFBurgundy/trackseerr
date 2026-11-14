@@ -169,6 +169,8 @@ export type LidarrHealth = Schema<'LidarrHealthResponse'>;
 
 export type LidarrTestResult = Schema<'LidarrTestConnectionResponse'>;
 
+export type MusicBrainzTestResult = Schema<'MusicBrainzTestResponse'>;
+
 export type SystemLogItem = Schema<'LogEntry'>;
 
 export type LogFileItem = Schema<'LogFileEntry'>;

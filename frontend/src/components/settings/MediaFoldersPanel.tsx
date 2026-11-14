@@ -4,7 +4,7 @@ import { ConfirmDialog, TapeDeckButton, MachinedCard, TactileSwitch, ActionBar, 
 import type { MediaManagementSettings, SeedCompleteAction } from '@/types/models';
 import type { Schema } from '@/types/apiSchema';
 import { useDownloadClientRoots } from '@/hooks/useDownloadClientRoots';
-import { updateMediaManagementSettings } from '@/services/settingsService';
+import { updateMediaManagementSettings, testMusicBrainzMirror } from '@/services/settingsService';
 import { getAcoustidContributions } from '@/services/libraryService';
 import { routeToHash, settingsRouteFor } from '@/hooks/useAppRoute';
 import { NamingFormatsEditor } from '@/components/naming/NamingFormatsEditor';
@@ -31,10 +31,12 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
   const seedActionId = useId();
   const scanMonitorId = useId();
   const addMonitorId = useId();
+  const mbMirrorId = useId();
   const acoustidKeyId = useId();
   const acoustidUserKeyId = useId();
   const roots = useDownloadClientRoots();
   const [saveWarnings, setSaveWarnings] = useState<string[]>([]);
+  const [isTestingMb, setIsTestingMb] = useState<boolean>(false);
   const [showKey, setShowKey] = useState<boolean>(false);
   const [confirmRemoveKey, setConfirmRemoveKey] = useState<boolean>(false);
   const [removingKey, setRemovingKey] = useState<boolean>(false);
@@ -405,6 +407,61 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
             </div>
             <p className="text-[11px] text-neutral-400 font-mono">
               Off: a song you already own on one release is not downloaded again for another.
+            </p>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-[#1f1f1f] space-y-3">
+          <div>
+            <h5 className="text-xs font-bold uppercase font-mono text-white">MusicBrainz server</h5>
+            <p className="text-[11px] text-neutral-400 font-mono mt-0.5">
+              Where TrackSeerr looks up artists, albums and tracks. Leave the default, or point it at your own mirror.
+            </p>
+          </div>
+          <div>
+            <label htmlFor={mbMirrorId} className={labelClass}>Server address</label>
+            <div className="flex items-stretch gap-2">
+              <input
+                id={mbMirrorId}
+                name="mb_mirror_url"
+                type="text"
+                autoComplete="off"
+                spellCheck={false}
+                value={settings?.mb_mirror_url ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  onChange((prev) => (prev ? { ...prev, mb_mirror_url: v } : prev));
+                }}
+                placeholder="https://api.brainzmash.cc"
+                className={`${inputClass} font-mono`}
+              />
+              <TapeDeckButton
+                type="button"
+                size="sm"
+                disabled={isTestingMb || !(settings?.mb_mirror_url ?? '').trim()}
+                onClick={async () => {
+                  const value = (settings?.mb_mirror_url ?? '').trim();
+                  setIsTestingMb(true);
+                  try {
+                    const res = await testMusicBrainzMirror(value);
+                    if (res.online) {
+                      onToast('MusicBrainz server is reachable');
+                    } else {
+                      onToast(`Could not use that server: ${res.error ?? 'no answer'}`, 'error');
+                    }
+                  } catch (err) {
+                    onToast(err instanceof ApiError ? err.message : 'Test failed', 'error');
+                  } finally {
+                    setIsTestingMb(false);
+                  }
+                }}
+                icon={isTestingMb ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : undefined}
+              >
+                Test
+              </TapeDeckButton>
+            </div>
+            <p className="text-[11px] text-neutral-500 font-mono mt-1">
+              Example: http://192.168.1.10:5000 — adding /ws/2 is fine.
             </p>
           </div>
         </div>
