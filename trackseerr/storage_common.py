@@ -9,6 +9,8 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
+from trackseerr.text_limits import cap
+
 def clean_library_name(text: str) -> str:
     """Normalizes string for indexing and resilient comparison: lowercased, alphanumerics and single spaces.
 
@@ -46,7 +48,7 @@ def _has_extra_bracket_suffix(a: str, b: str) -> bool:
 
     'X' and 'X (Foo Remix)' are different recordings even though their clean titles overlap.
     """
-    return sorted(_BRACKET_SUFFIX_RE.findall(a or "")) != sorted(_BRACKET_SUFFIX_RE.findall(b or ""))
+    return sorted(_BRACKET_SUFFIX_RE.findall(cap(a))) != sorted(_BRACKET_SUFFIX_RE.findall(cap(b)))
 
 
 def _titles_near_equal(a: str, b: str) -> bool:

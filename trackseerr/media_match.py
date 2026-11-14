@@ -5,6 +5,7 @@ import unicodedata
 from difflib import SequenceMatcher
 
 from trackseerr.search_terms import title_core, version_descriptor
+from trackseerr.text_limits import cap
 
 _DOLLAR_RE = re.compile(r"\$")
 _NON_ALPHANUM_RE = re.compile(r"[^a-z0-9]+")
@@ -35,7 +36,7 @@ def split_artist_credits(text: str) -> list[str]:
     """Split artist credit string on common delimiters into stripped non-empty parts."""
     if not text:
         return []
-    parts = _SPLIT_CREDITS_RE.split(text)
+    parts = _SPLIT_CREDITS_RE.split(cap(text))
     return [p.strip() for p in parts if p.strip()]
 
 

@@ -14,6 +14,7 @@ from trackseerr.models import (
     ParsedRelease,
     QualityProfile,
 )
+from trackseerr.text_limits import cap
 
 logger = logging.getLogger(__name__)
 
@@ -143,7 +144,7 @@ def parse_release_title(title: str) -> ParsedRelease:  # noqa: C901, PLR0915
     Handles scene and P2P conventions, including bitrates, audio channels,
     and release naming structures.
     """
-    raw_title = title.strip()
+    raw_title = cap(title).strip()
 
     # 1. Format Detection
     detected_quality = AudioQuality.UNKNOWN.value

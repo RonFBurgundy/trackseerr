@@ -193,17 +193,27 @@ class MediaCoverService:
             time.sleep(0.01)
         return False
 
+    @staticmethod
+    def _safe_id(item_id: str) -> str:
+        s = str(item_id) if item_id is not None else ""
+        if not s or "/" in s or "\\" in s or "\x00" in s or ".." in s:
+            raise ValueError(f"Unsafe artwork id: {item_id!r}")
+        return s
+
     def get_artist_poster_path(self, artist_id: str) -> Path:
         """Returns the canonical filesystem path for an artist's poster image."""
-        return self.artists_dir / f"{artist_id}_poster.jpg"
+        safe_id = self._safe_id(artist_id)
+        return self.artists_dir / f"{safe_id}_poster.jpg"
 
     def get_artist_banner_path(self, artist_id: str) -> Path:
         """Returns the canonical filesystem path for an artist's banner image."""
-        return self.artists_dir / f"{artist_id}_banner.jpg"
+        safe_id = self._safe_id(artist_id)
+        return self.artists_dir / f"{safe_id}_banner.jpg"
 
     def get_album_cover_path(self, album_id: str) -> Path:
         """Returns the canonical filesystem path for an album's cover image."""
-        return self.albums_dir / f"{album_id}_cover.jpg"
+        safe_id = self._safe_id(album_id)
+        return self.albums_dir / f"{safe_id}_cover.jpg"
 
     def cache_image(
         self, target_path: Path, remote_url: str, timeout: Union[float, tuple[float, float]] = _FETCH_TIMEOUT
@@ -322,13 +332,17 @@ class MediaCoverService:
         On a miss the download is queued on the background pool and ``None`` is returned immediately, so request
         handlers never wait on a remote host. ``block=True`` downloads inline (tests / explicit one-shot callers).
         """
-        if category == "artist_poster":
-            target = self.get_artist_poster_path(item_id)
-        elif category == "artist_banner":
-            target = self.get_artist_banner_path(item_id)
-        elif category == "album_cover":
-            target = self.get_album_cover_path(item_id)
-        else:
+        try:
+            if category == "artist_poster":
+                target = self.get_artist_poster_path(item_id)
+            elif category == "artist_banner":
+                target = self.get_artist_banner_path(item_id)
+            elif category == "album_cover":
+                target = self.get_album_cover_path(item_id)
+            else:
+                return None
+        except ValueError as exc:
+            logger.warning("MediaCoverService: Invalid artwork id %r for category %s: %s", item_id, category, exc)
             return None
 
         try:

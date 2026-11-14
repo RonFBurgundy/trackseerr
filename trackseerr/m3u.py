@@ -3,6 +3,7 @@ import re
 from typing import Any, Optional
 
 from .security import sanitize_text
+from trackseerr.text_limits import cap
 
 # Regex for #EXTINF:<seconds> [attributes],<title / artist - title>
 _EXTINF_PATTERN = re.compile(
@@ -82,7 +83,7 @@ def parse_m3u(content: str) -> list[dict[str, Any]]:  # noqa: C901, PLR0915
     if not isinstance(content, str):
         return []
 
-    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    lines = [cap(line.strip(), 4096) for line in content.splitlines() if line.strip()]
     tracks: list[dict[str, Any]] = []
 
     pending_title: Optional[str] = None
