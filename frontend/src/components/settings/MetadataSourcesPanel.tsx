@@ -23,6 +23,7 @@ export const MetadataSourcesPanel: React.FC<MetadataSourcesPanelProps> = ({ sett
   const mbMirrorId = useId();
   const acoustidKeyId = useId();
   const acoustidUserKeyId = useId();
+  const mbFromEnv = settings?.mb_mirror_url_from_env ?? false;
   const [isTestingMb, setIsTestingMb] = useState<boolean>(false);
   const [showKey, setShowKey] = useState<boolean>(false);
   const [confirmRemoveKey, setConfirmRemoveKey] = useState<boolean>(false);
@@ -116,9 +117,11 @@ export const MetadataSourcesPanel: React.FC<MetadataSourcesPanelProps> = ({ sett
     setIsSaving(true);
     try {
       const payload: Partial<MediaManagementSettings> = {
-        mb_mirror_url: settings.mb_mirror_url,
         fingerprint_on_weak_match: settings.fingerprint_on_weak_match,
       };
+      if (!mbFromEnv) {
+        payload.mb_mirror_url = settings.mb_mirror_url;
+      }
       if (keyDraft !== null) {
         payload.acoustid_api_key = keyDraft;
       }
@@ -163,6 +166,7 @@ export const MetadataSourcesPanel: React.FC<MetadataSourcesPanelProps> = ({ sett
                 type="text"
                 autoComplete="off"
                 spellCheck={false}
+                disabled={mbFromEnv}
                 value={settings?.mb_mirror_url ?? ''}
                 onChange={(e) => {
                   const v = e.target.value;
@@ -196,9 +200,15 @@ export const MetadataSourcesPanel: React.FC<MetadataSourcesPanelProps> = ({ sett
                 Test
               </TapeDeckButton>
             </div>
-            <p className="text-[11px] text-neutral-500 font-mono mt-1">
-              Example: http://192.168.1.10:5000 — adding /ws/2 is fine.
-            </p>
+            {mbFromEnv ? (
+              <p className="text-[11px] text-neutral-500 font-mono mt-1">
+                Set by the MUSICBRAINZ_URL environment variable. Remove it from your container settings to change the server here.
+              </p>
+            ) : (
+              <p className="text-[11px] text-neutral-500 font-mono mt-1">
+                Example: http://192.168.1.10:5000 — adding /ws/2 is fine.
+              </p>
+            )}
           </div>
         </div>
 

@@ -214,6 +214,9 @@ class MediaManagementSettingsModel(ApiModel):
         False, description="Fingerprint files via AcoustID during download import when the tag match is weak or missing"
     )
     mb_mirror_url: str = Field("https://api.brainzmash.cc", description="MusicBrainz / BrainzMash API mirror base URL")
+    mb_mirror_url_from_env: bool = Field(
+        False, description="True when MUSICBRAINZ_URL or MUSICBRAINZ_MIRROR_URL sets the server; the saved value is then ignored"
+    )
     prefer_local_artwork: bool = Field(True, description="Whether to prefer local filesystem artwork over remote metadata art")
     scan_monitor_option: str = Field("existing", description="Monitor option given to artists created by a library scan")
     add_monitor_option: str = Field("existing", description="Default monitor option for artists added manually")
