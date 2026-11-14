@@ -167,9 +167,10 @@ The import settings are in **Settings > Media Management > Root Folders & Naming
 | Import mode (torrents) | **Move** (default), **Hardlink**, or **Copy**. Use Hardlink to keep seeding without using extra space. Usenet and Soulseek downloads are always moved. |
 | Tagging hardlinked torrent files | **Write tags** makes a temporary copy while the torrent seeds. **Keep hardlink** leaves the tags as they came. Writing tags to a hardlink would change the file the torrent is seeding. |
 | Write Tags, Embed Artwork, Normalize Audio Tags | Turn tag writing on or off. |
-| AcoustID API key | Turns on fingerprint matching. Get a free key at [acoustid.org](https://acoustid.org/new-application). |
 
 **Move** breaks seeding. If a torrent indexer has seeding rules, TrackSeerr warns you when Move is selected.
+
+Fingerprint matching is set up in **Settings > Media Management > Metadata Sources**: add an AcoustID API key (free at [acoustid.org](https://acoustid.org/new-application)) to turn it on.
 
 ## Seeding
 

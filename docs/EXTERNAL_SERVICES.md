@@ -10,7 +10,7 @@ TrackSeerr gets artist, album and track data from MusicBrainz. Each install has 
 
 ### Which servers
 
-- **BrainzMash mirror.** By default TrackSeerr asks `https://api.brainzmash.cc`, a MusicBrainz mirror run by the community. You can change it in Media Management, or with the `MUSICBRAINZ_URL` environment variable.
+- **BrainzMash mirror.** By default TrackSeerr asks `https://api.brainzmash.cc`, a MusicBrainz mirror run by the community. You can change it in **Settings > Media Management > Metadata Sources** (use **Test** to check your own mirror answers), or with the `MUSICBRAINZ_URL` environment variable, which overrides the setting.
 - **musicbrainz.org.** Used only as a backup: when the mirror returns an error, asks us to slow down, or is paused (see below).
 
 ### What a request looks like

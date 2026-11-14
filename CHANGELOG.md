@@ -13,7 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
-- Media Management has a **MusicBrainz server** setting with a **Test** button, so you can use your own MusicBrainz mirror (for example `http://192.168.1.10:5000`; adding `/ws/2` is fine).
+- New **Media Management → Metadata Sources** page with a **MusicBrainz server** setting and a **Test** button, so you can use your own MusicBrainz mirror (for example `http://192.168.1.10:5000`; adding `/ws/2` is fine). AcoustID fingerprinting settings moved here from Root Folders & Naming. Both can be found from the navigation search.
 - `{Album Type}` can be a folder of its own in the track formats (for example `Artist/EP/…`), and `{medium:00}` can be used in the Standard Track Format too. The naming token list offers both.
 - Songs inside torrent packs and pools can now be found and downloaded on their own. Turn on **Index packs** for a torrent indexer and TrackSeerr reads the song lists inside its pack, pool, chart and "VA" torrents (only the small .torrent file is downloaded). Searches then find songs buried in those packs, Manual search marks them **In pack**, and qBittorrent downloads just that song instead of the whole pack. Needs qBittorrent. See "Songs inside packs and pools" in the Acquisition guide.
 - Exclusions: exclude an artist, album or song and TrackSeerr will never request, add, monitor or automatically search for it again, including from playlists, import lists, user requests and new-release checks. Use **Exclude** in the artist, album, song, Wanted and playlist missing-song menus, with an optional reason. Excluding also unmonitors it. **Activity → Exclusions** lists everything excluded and lets you remove entries. Manual search still works, with a warning. See the Library guide.
@@ -130,6 +130,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The `MUSICBRAINZ_URL` and `MUSICBRAINZ_MIRROR_URL` environment variables now work: when set, they choose the MusicBrainz server and lock the setting on the Metadata Sources page.
 - Adding a Spotify playlist works again. Spotify stopped sending cover art for some playlists, which made adding them fail.
 - Database backups no longer freeze the app while they run.
 - A scheduled backup no longer runs every time TrackSeerr restarts; it waits until the backup interval has passed since the last one. Temporary files left by an interrupted backup are cleaned up and no longer listed as backups.

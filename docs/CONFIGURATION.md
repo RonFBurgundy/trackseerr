@@ -148,7 +148,7 @@ These only matter when Lidarr is the library manager. All of them can also be se
 |---|---|---|
 | `FEED_TOKEN` | unset | Protects the missing-track feeds and the sync webhook. Callers pass it as `?token=`, `X-Api-Key`, or `Authorization: Bearer`. |
 | `ITUNES_IMPORT_MAX_MB` | `100` | Largest iTunes library XML file accepted for import. |
-| `MUSICBRAINZ_URL` | `https://api.brainzmash.cc` | MusicBrainz API used to look up IDs. Point it at your own mirror if you run one. See [External services](EXTERNAL_SERVICES.md) for what TrackSeerr sends. |
+| `MUSICBRAINZ_URL` | (not set) | MusicBrainz server used to look up artists, albums and tracks, for example your own mirror (`http://192.168.1.10:5000`). When set, it overrides the **Metadata Sources** setting and the field there is locked. `MUSICBRAINZ_MIRROR_URL` works the same. Leave it unset to choose the server in the app (default `https://api.brainzmash.cc`). See [External services](EXTERNAL_SERVICES.md) for what TrackSeerr sends. |
 | `MUSICBRAINZ_MIRROR_RPS` | `3` | Most requests per second sent to the MusicBrainz mirror (0.5 to 20). musicbrainz.org itself always gets 1 per second. |
 | `MUSICBRAINZ_MIRROR_CONCURRENCY` | `2` | Most requests to the mirror at the same time (1 to 8). |
 | `ENABLE_API_DOCS` | `0` | `1` serves the interactive API docs at `/api/docs`. |
