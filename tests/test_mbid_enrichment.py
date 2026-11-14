@@ -18,7 +18,7 @@ from trackseerr.import_files import _is_safe_cover_url
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
 from trackseerr.auth import create_session_token, get_or_create_secret_key
-from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient, probe_mirror
 from trackseerr.config import Config
 from trackseerr.library import (
     fingerprint_audio_file,
@@ -958,3 +958,57 @@ class TestAcoustIDEndpoint:
         assert body["success"] is True
         assert body["fingerprint"]["recording_id"] == "rec-match-123"
         assert body["fingerprint"]["title"] == "Around the World"
+
+
+def test_client_strips_ws2_from_base_url():
+    client = MbidEnricherClient(base_url="http://10.0.0.2:5000/ws/2/")
+    assert client.base_url == "http://10.0.0.2:5000"
+
+
+def test_probe_mirror_ok():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"artists": []}
+
+    with patch("trackseerr.clients.mbid_enricher.requests.get", return_value=mock_resp) as mock_get:
+        ok, err = probe_mirror("http://10.0.0.2:5000/ws/2/")
+        assert ok is True
+        assert err is None
+        mock_get.assert_called_once()
+        args, kwargs = mock_get.call_args
+        assert args[0] == "http://10.0.0.2:5000/ws/2/artist"
+        assert kwargs["params"] == {"query": "artist:Radiohead", "limit": 1, "fmt": "json"}
+
+
+def test_probe_mirror_http_error():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 503
+
+    with patch("trackseerr.clients.mbid_enricher.requests.get", return_value=mock_resp) as mock_get:
+        ok, err = probe_mirror("http://10.0.0.2:5000/ws/2/")
+        assert ok is False
+        assert "503" in (err or "")
+        mock_get.assert_called_once()
+        assert mock_get.call_args[0][0] == "http://10.0.0.2:5000/ws/2/artist"
+
+
+def test_probe_mirror_not_musicbrainz():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"foo": 1}
+
+    with patch("trackseerr.clients.mbid_enricher.requests.get", return_value=mock_resp) as mock_get:
+        ok, err = probe_mirror("http://10.0.0.2:5000")
+        assert ok is False
+        assert err == "That address did not answer like a MusicBrainz server"
+        mock_get.assert_called_once()
+        assert mock_get.call_args[0][0] == "http://10.0.0.2:5000/ws/2/artist"
+
+
+def test_probe_mirror_connection_error():
+    with patch("trackseerr.clients.mbid_enricher.requests.get", side_effect=requests.ConnectionError("x")) as mock_get:
+        ok, err = probe_mirror("http://10.0.0.2:5000")
+        assert ok is False
+        assert "Could not reach the mirror" in (err or "")
+        mock_get.assert_called_once()
+        assert mock_get.call_args[0][0] == "http://10.0.0.2:5000/ws/2/artist"

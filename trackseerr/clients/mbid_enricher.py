@@ -20,6 +20,45 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_HEADERS: dict[str, str] = {
+    "User-Agent": "Lidarr/2.0.0 (TrackSeerr; https://github.com/trackseerr)",
+    "Accept": "application/json",
+}
+
+
+def strip_ws2_suffix(url: str) -> str:
+    """Strip whitespace, trailing slashes, and trailing /ws/2 from MusicBrainz URL."""
+    val = str(url or "").strip().rstrip("/")
+    if val.lower().endswith("/ws/2"):
+        val = val[:-5].rstrip("/")
+    return val
+
+
+def probe_mirror(base_url: str, timeout: float = 5.0) -> tuple[bool, str | None]:
+    """Test connectivity to a MusicBrainz mirror or API.
+
+    Returns (True, None) on 200 with JSON containing an 'artists' key;
+    (False, "<plain message>") otherwise. Never raises.
+    """
+    clean_base = strip_ws2_suffix(base_url)
+    target_url = f"{clean_base}/ws/2/artist"
+    try:
+        resp = requests.get(
+            target_url,
+            params={"query": "artist:Radiohead", "limit": 1, "fmt": "json"},
+            headers=DEFAULT_HEADERS,
+            timeout=timeout,
+        )
+        if resp.status_code != 200:
+            return (False, f"Mirror answered HTTP {resp.status_code}")
+        data = resp.json()
+        if not isinstance(data, dict) or "artists" not in data:
+            return (False, "That address did not answer like a MusicBrainz server")
+        return (True, None)
+    except (requests.RequestException, ValueError) as exc:
+        logger.warning("MusicBrainz probe failed for %s: %s", target_url, exc)
+        return (False, f"Could not reach the mirror: {exc}")
+
 
 def _sanitize_lucene_query(text: str) -> str:
     """Removes or escapes characters that disrupt Lucene query parsing."""
@@ -316,7 +355,7 @@ class MbidEnricherClient:
             or os.getenv("MUSICBRAINZ_MIRROR_URL")
             or "https://api.brainzmash.cc"
         )
-        self.base_url = (base_url or default_base).rstrip("/")
+        self.base_url = strip_ws2_suffix(base_url or default_base)
         self.timeout = float(timeout)
         self.cache_ttl = float(cache_ttl)
         self._min_interval = float(min_interval)
@@ -331,12 +370,7 @@ class MbidEnricherClient:
         if mirror_host != "musicbrainz.org":
             self._breakers["musicbrainz.org"] = _CircuitBreaker("musicbrainz.org")
         self._session = requests.Session()
-        self._session.headers.update(
-            {
-                "User-Agent": "Lidarr/2.0.0 (TrackSeerr; https://github.com/trackseerr)",
-                "Accept": "application/json",
-            }
-        )
+        self._session.headers.update(DEFAULT_HEADERS)
 
     def _get_breaker(self, host: str) -> _CircuitBreaker:
         with self._lock:

@@ -534,3 +534,56 @@ def test_clean_minimal_and_audiophile_compilation_formats() -> None:
     assert "{Track ArtistName}" in PRESETS["Audiophile / Detailed"]["compilation_track_format"]
     assert "{Artist Name}" not in PRESETS["Audiophile / Detailed"]["compilation_track_format"]
 
+
+def test_album_type_casing_normalised():
+    assert render_template("{Album Type}", {"album_type": "ep"}) == "EP"
+    assert render_template("{Album Type}", {"album_type": "album"}) == "Album"
+    assert render_template("{Album Type}", {"album_type": "Weird"}) == "Weird"
+
+
+def test_album_type_folder_falls_back_to_album():
+    settings = {
+        "root_folder_path": "/music",
+        "artist_folder_format": "{Artist Name}",
+        "standard_track_format": "{Album Type}/{Album Title}/{medium:00}-{track:00} - {Track Title}",
+    }
+    meta = {
+        "artist": "Radiohead",
+        "album": "Kid A",
+        "title": "Everything in Its Right Place",
+        "track_number": 8,
+        "disc_number": 1,
+        "total_discs": 1,
+        "extension": ".flac",
+    }
+    path = build_track_path(meta, settings)
+    assert "/Album/Kid A/01-08 - Everything in Its Right Place.flac" in path
+    assert "Unknown Album" not in path
+
+
+def test_album_type_optional_block_still_empty_without_type():
+    meta = {
+        "album": "Kid A",
+    }
+    res = render_template("{Album Title}{ - [{Album Type}]}", meta)
+    assert res == "Kid A"
+
+
+def test_medium_track_tokens_in_standard_format():
+    meta = {
+        "artist": "Radiohead",
+        "album": "Kid A",
+        "title": "Idioteque",
+        "track_number": 8,
+        "disc_number": 1,
+        "total_discs": 1,
+        "extension": ".flac",
+    }
+    settings = {
+        "root_folder_path": "/music",
+        "artist_folder_format": "{Artist Name}",
+        "standard_track_format": "{Album Title}/{medium:00}-{track:00} - {Track Title}",
+    }
+    path = build_track_path(meta, settings)
+    assert path.endswith("01-08 - Idioteque.flac")
+

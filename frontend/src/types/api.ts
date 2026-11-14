@@ -5307,6 +5307,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/musicbrainz/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test MusicBrainz mirror (Admin Only)
+         * @description Admin-only: tests connectivity to a MusicBrainz mirror or API.
+         */
+        post: operations["test_musicbrainz_mirror_api_settings_musicbrainz_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/notifications": {
         parameters: {
             query?: never;
@@ -11551,6 +11571,18 @@ export interface components {
         MoveItemRequest: {
             /** After Playlist Item Id */
             after_playlist_item_id?: number | null;
+        };
+        /** MusicBrainzTestPayload */
+        MusicBrainzTestPayload: {
+            /** Url */
+            url: string;
+        };
+        /** MusicBrainzTestResponse */
+        MusicBrainzTestResponse: {
+            /** Error */
+            error?: string | null;
+            /** Online */
+            online: boolean;
         };
         /** NotificationActionResponse */
         NotificationActionResponse: {
@@ -24442,6 +24474,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MediaServerTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_musicbrainz_mirror_api_settings_musicbrainz_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MusicBrainzTestPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MusicBrainzTestResponse"];
                 };
             };
             /** @description Validation Error */

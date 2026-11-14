@@ -12,6 +12,18 @@ from typing import Any
 from trackseerr.album_years import plausible_year
 from trackseerr.track_credits import apply_credit_style
 
+ALBUM_TYPE_CANONICAL: dict[str, str] = {
+    "album": "Album",
+    "ep": "EP",
+    "single": "Single",
+    "broadcast": "Broadcast",
+    "other": "Other",
+    "compilation": "Compilation",
+    "live": "Live",
+    "soundtrack": "Soundtrack",
+    "remix": "Remix",
+}
+
 # Supported token names
 SUPPORTED_TOKENS: list[str] = [
     # Artist
@@ -514,7 +526,12 @@ def resolve_token(token: str, metadata: dict[str, Any]) -> str | None:  # noqa: 
         return str(val).strip() if val else None
     if t == "Album Type":
         val = metadata.get("album_type")
-        return str(val).strip() if val else None
+        if not val:
+            return None
+        stripped = str(val).strip()
+        if not stripped:
+            return None
+        return ALBUM_TYPE_CANONICAL.get(stripped.lower(), stripped)
 
     # Disc / Medium
     if t in ("medium:00", "disc:00"):
@@ -920,6 +937,24 @@ def _apply_track_credits(meta: dict[str, Any], settings: dict[str, Any]) -> None
         meta["title"] = title
 
 
+def _finalize_file_component(file_component: str, meta: dict[str, Any]) -> str:
+    ext = _guess_extension(meta)
+    if not ext:
+        return file_component
+    if not ext.startswith("."):
+        ext = f".{ext}"
+    ext_bytes = len(ext.encode("utf-8"))
+    max_stem_bytes = max(0, MAX_NAME_BYTES - ext_bytes)
+    if not file_component.lower().endswith(ext.lower()):
+        stem = truncate_utf8_bytes(file_component, max_stem_bytes).rstrip(" .")
+        return f"{stem or 'Track'}{ext}"
+    if len(file_component.encode("utf-8")) > MAX_NAME_BYTES:
+        raw_stem = file_component[:-len(ext)]
+        stem = truncate_utf8_bytes(raw_stem, max_stem_bytes).rstrip(" .")
+        return f"{stem or 'Track'}{ext}"
+    return file_component
+
+
 def build_path_parts(
     metadata: dict[str, Any],
     settings: dict[str, Any],
@@ -975,24 +1010,13 @@ def build_path_parts(
         comp = render(folder_tpl, meta)
         if comp:
             folders.append(comp)
+        elif folder_tpl.strip() == "{Album Type}":
+            folders.append("Album")
         elif idx == 0:
             folders.append("Unknown Album")
 
     file_component = render(file_template, meta) or "Track"
-
-    ext = _guess_extension(meta)
-    if ext:
-        if not ext.startswith("."):
-            ext = f".{ext}"
-        ext_bytes = len(ext.encode("utf-8"))
-        max_stem_bytes = max(0, MAX_NAME_BYTES - ext_bytes)
-        if not file_component.lower().endswith(ext.lower()):
-            stem = truncate_utf8_bytes(file_component, max_stem_bytes).rstrip(" .")
-            file_component = f"{stem or 'Track'}{ext}"
-        elif len(file_component.encode("utf-8")) > MAX_NAME_BYTES:
-            raw_stem = file_component[:-len(ext)]
-            stem = truncate_utf8_bytes(raw_stem, max_stem_bytes).rstrip(" .")
-            file_component = f"{stem or 'Track'}{ext}"
+    file_component = _finalize_file_component(file_component, meta)
 
     return {"artist": artist_component, "folders": folders, "file": file_component}
 
@@ -1040,7 +1064,7 @@ TOKEN_HELP: list[dict[str, Any]] = [
             ("{Album TitleFirstCharacter}", "First letter of the album (article ignored), upper-case", "W"),
             ("{Album Genre}", "Genre of the album (empty when unknown)", "Rock"),
             ("{Album MbId}", "MusicBrainz release group ID", "1b022e01-4da6-387b-8658-8678046e4cef"),
-            ("{Album Type}", "Release type (Album, EP, Single, ...)", "EP"),
+            ("{Album Type}", "Release type (Album, EP, Single, ...); a folder of just this token falls back to Album", "EP"),
             ("{Album Disambiguation}", "MusicBrainz release disambiguation (empty when none)", "Remastered"),
             ("{Release Year}", "Year of this release", "1968"),
             ("{Original Release Year}", "Year the album was first released", "1968"),
