@@ -5,6 +5,7 @@ export * from './LibraryManagerSwitch';
 export * from './ModeSwitchConfirm';
 export * from './GeneralPanel';
 export * from './MediaFoldersPanel';
+export * from './MetadataSourcesPanel';
 export * from './RecycleBinSection';
 export * from './ClientsPanel';
 export * from './IndexersPanel';

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   Sliders,
   Folder,
+  Fingerprint,
   Download,
   Search,
   Radio,
@@ -28,6 +29,7 @@ import type { SettingsLeafId, SettingsRoute, SettingsSection } from '@/hooks/use
 export type SettingsTab =
   | 'general'
   | 'media'
+  | 'metadata'
   | 'quality'
   | 'profiles'
   | 'custom-formats'
@@ -94,6 +96,7 @@ export function buildSettingsTree(isAdmin: boolean, mfaEnrollmentRequired: boole
       icon: <Boxes className={ico} />,
       leaves: [
         leaf('media', 'Root Folders & Naming', <Folder className={ico} />),
+        leaf('metadata', 'Metadata Sources', <Fingerprint className={ico} />),
         leaf('quality', 'Quality', <Gauge className={ico} />),
         leaf('profiles', 'Profiles', <Layers className={ico} />),
         leaf('custom-formats', 'Custom Formats', <Tags className={ico} />),

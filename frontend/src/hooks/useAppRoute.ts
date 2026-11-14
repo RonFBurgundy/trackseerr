@@ -11,7 +11,7 @@ export type ActivitySub = 'queue' | 'history' | 'blocklist' | 'exclusions' | 'se
 export type WantedSub = WantedListName | 'calendar';
 
 export type SettingsSection = 'general' | 'media-management' | 'lidarr' | 'requests' | 'system' | 'account';
-export type MediaManagementLeaf = 'media' | 'quality' | 'profiles' | 'custom-formats' | 'clients' | 'indexers' | 'import-lists' | 'media-server';
+export type MediaManagementLeaf = 'media' | 'metadata' | 'quality' | 'profiles' | 'custom-formats' | 'clients' | 'indexers' | 'import-lists' | 'media-server';
 export type RequestsLeaf = 'users' | 'scrobbling' | 'notifications';
 export type SystemLeaf = 'status' | 'tasks' | 'backups' | 'logs';
 export type SettingsLeafId = MediaManagementLeaf | RequestsLeaf | SystemLeaf;
@@ -97,6 +97,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
 ];
 export const MEDIA_MANAGEMENT_LEAVES: readonly MediaManagementLeaf[] = [
   'media',
+  'metadata',
   'quality',
   'profiles',
   'custom-formats',
