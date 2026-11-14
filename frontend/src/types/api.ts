@@ -10851,6 +10851,12 @@ export interface components {
              */
             mb_mirror_url: string;
             /**
+             * Mb Mirror Url From Env
+             * @description True when MUSICBRAINZ_URL or MUSICBRAINZ_MIRROR_URL sets the server; the saved value is then ignored
+             * @default false
+             */
+            mb_mirror_url_from_env: boolean;
+            /**
              * Multi Disc Folder Format
              * @description Legacy multi-disc subdirectory format (superseded)
              */

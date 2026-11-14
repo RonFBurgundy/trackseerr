@@ -15,6 +15,7 @@ import {
   ModeSwitchConfirm,
   GeneralPanel,
   MediaFoldersPanel,
+  MetadataSourcesPanel,
   ClientsPanel,
   IndexersPanel,
   LidarrPanel,
@@ -268,6 +269,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <InactiveGate active={mediaActive} activeManager={mode} onRequestSwitch={requestSwitch}>
           <MediaFoldersPanel settings={data.media} onChange={data.setMedia} onToast={showToast} />
         </InactiveGate>
+      )}
+
+      {!data.isLoading && activeTab === 'metadata' && isAdmin && (
+        <MetadataSourcesPanel settings={data.media} onChange={data.setMedia} onToast={showToast} />
       )}
 
       {!data.isLoading && activeTab === 'quality' && isAdmin && (

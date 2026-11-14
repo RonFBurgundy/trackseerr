@@ -51,6 +51,12 @@ def _normalize_mb_mirror_url(raw_url: str) -> str:
     return val
 
 
+def env_mb_mirror_url() -> str:
+    """Return the MusicBrainz mirror URL from environment variables, or empty string if not set."""
+    val = os.getenv("MUSICBRAINZ_URL") or os.getenv("MUSICBRAINZ_MIRROR_URL") or ""
+    return strip_ws2_suffix(val)
+
+
 class SettingsStoreMixin:
     # -------------------------------------------------------------------------
     # Media Management Settings CRUD
@@ -131,6 +137,10 @@ class SettingsStoreMixin:
             )
             res["fingerprint_on_weak_match"] = bool(res.get("fingerprint_on_weak_match", 0))
             res["mb_mirror_url"] = str(res.get("mb_mirror_url") or "https://api.brainzmash.cc")
+            env_url = env_mb_mirror_url()
+            if env_url:
+                res["mb_mirror_url"] = env_url
+            res["mb_mirror_url_from_env"] = bool(env_url)
             res["prefer_local_artwork"] = bool(res.get("prefer_local_artwork", 1))
             res["scan_monitor_option"] = str(res.get("scan_monitor_option") or "existing")
             res["add_monitor_option"] = str(res.get("add_monitor_option") or DEFAULT_MONITOR_OPTION)
@@ -265,7 +275,9 @@ class SettingsStoreMixin:
                     if v is not None:
                         updates[k] = normalize_check_mode(v)
                 elif k == "mb_mirror_url":
-                    if v is not None:
+                    if env_mb_mirror_url():
+                        logger.info("Ignoring mb_mirror_url change: set by MUSICBRAINZ_URL/MUSICBRAINZ_MIRROR_URL")
+                    elif v is not None:
                         updates[k] = _normalize_mb_mirror_url(v)
                 elif v is not None:
                     updates[k] = str(v)

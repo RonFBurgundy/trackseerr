@@ -726,3 +726,62 @@ def test_musicbrainz_test_endpoint_requires_admin(app_and_client, test_db, test_
     )
     assert resp.status_code == 403
 
+
+def test_mb_mirror_env_overrides_saved_value(monkeypatch, test_db):
+    monkeypatch.setenv("MUSICBRAINZ_URL", "http://10.0.0.5:5000/ws/2")
+    settings = test_db.get_media_management_settings()
+    assert settings["mb_mirror_url"] == "http://10.0.0.5:5000"
+    assert settings["mb_mirror_url_from_env"] is True
+
+
+def test_mb_mirror_env_alias(monkeypatch, test_db):
+    monkeypatch.delenv("MUSICBRAINZ_URL", raising=False)
+    monkeypatch.setenv("MUSICBRAINZ_MIRROR_URL", "http://10.0.0.6:5000/ws/2/")
+    settings = test_db.get_media_management_settings()
+    assert settings["mb_mirror_url"] == "http://10.0.0.6:5000"
+    assert settings["mb_mirror_url_from_env"] is True
+
+
+def test_mb_mirror_no_env_uses_saved_value(monkeypatch, test_db):
+    monkeypatch.delenv("MUSICBRAINZ_URL", raising=False)
+    monkeypatch.delenv("MUSICBRAINZ_MIRROR_URL", raising=False)
+    settings = test_db.get_media_management_settings()
+    assert settings["mb_mirror_url"] == "https://api.brainzmash.cc"
+    assert settings["mb_mirror_url_from_env"] is False
+
+
+def test_mb_mirror_save_ignored_when_env_set(monkeypatch, app_and_client, test_db, test_config, seeded_users):
+    monkeypatch.setenv("MUSICBRAINZ_URL", "http://10.0.0.5:5000")
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    with test_db._lock:
+        raw_before = test_db.conn.execute("SELECT mb_mirror_url FROM media_management_settings WHERE id=1").fetchone()[0]
+
+    resp = client.post(
+        "/api/settings/media-management",
+        json={"mb_mirror_url": "http://other:5000"},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["mb_mirror_url"] == "http://10.0.0.5:5000"
+    assert body["mb_mirror_url_from_env"] is True
+
+    with test_db._lock:
+        raw_after = test_db.conn.execute("SELECT mb_mirror_url FROM media_management_settings WHERE id=1").fetchone()[0]
+    assert raw_after == raw_before
+
+
+def test_shared_enricher_uses_env_mirror(monkeypatch, test_db):
+    monkeypatch.setenv("MUSICBRAINZ_URL", "http://10.0.0.5:5000/ws/2")
+    from trackseerr.mb_metadata_store import get_shared_enricher, reset_shared_enricher
+
+    reset_shared_enricher()
+    try:
+        enricher = get_shared_enricher(test_db)
+        assert enricher.base_url == "http://10.0.0.5:5000"
+    finally:
+        reset_shared_enricher()
+
+
