@@ -4,6 +4,7 @@ import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
 import { MEDIA_ISSUE_TYPES, REQUEST_ISSUE_TYPES } from '@/types/models';
 import {
+  ConfirmDangerButton,
   TabStrip,
   TapeDeckButton,
   MachinedCard,
@@ -68,6 +69,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     setSource,
     setFilter,
     approve,
+    approveAll,
     reject,
     remove,
     retry,
@@ -75,6 +77,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
   const { toast, showToast } = useToast();
 
   const [processingId, setProcessingId] = useState<string | null>(null);
+  const [approvingAll, setApprovingAll] = useState<boolean>(false);
   const section: 'requests' | 'issues' = sub === 'issues' ? 'issues' : 'requests';
 
   // The request list loads through the hook's filter; keep it in step with the route.
@@ -90,21 +93,43 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     { id: 'rejected', label: 'Rejected' },
   ];
 
-  const handleApprove = async (id: string) => {
-    setProcessingId(id);
+  const requestLabel = (req: RequestItem): string => req.title || req.artist || 'request';
+
+  const handleApprove = async (req: RequestItem) => {
+    setProcessingId(req.id);
     try {
-      await approve(id);
+      await approve(req.id);
+      showToast(`Approved "${requestLabel(req)}"`);
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Approve failed', 'error');
     } finally {
       setProcessingId(null);
     }
   };
 
-  const handleReject = async (id: string) => {
-    setProcessingId(id);
+  const handleReject = async (req: RequestItem) => {
+    setProcessingId(req.id);
     try {
-      await reject(id);
+      await reject(req.id);
+      showToast(`Rejected "${requestLabel(req)}"`);
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Reject failed', 'error');
     } finally {
       setProcessingId(null);
+    }
+  };
+
+  const handleApproveAll = async () => {
+    setApprovingAll(true);
+    try {
+      const result = await approveAll();
+      const noun = result.approved === 1 ? 'request' : 'requests';
+      const skipped = result.skipped > 0 ? `, ${result.skipped} already handled` : '';
+      showToast(`Approved ${result.approved} ${noun}${skipped}`);
+    } catch (err: unknown) {
+      showToast(err instanceof Error ? err.message : 'Failed to approve requests', 'error');
+    } finally {
+      setApprovingAll(false);
     }
   };
 
@@ -299,7 +324,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                 disabled={isBusy}
                 onClick={(e) => {
                   e.stopPropagation();
-                  void handleApprove(req.id);
+                  void handleApprove(req);
                 }}
                 collapseLabel
                 aria-label="Approve request"
@@ -313,7 +338,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
                 disabled={isBusy}
                 onClick={(e) => {
                   e.stopPropagation();
-                  void handleReject(req.id);
+                  void handleReject(req);
                 }}
                 collapseLabel
                 aria-label="Reject request"
@@ -354,14 +379,14 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           label: 'Approve',
           icon: <Check className="h-3.5 w-3.5" />,
           disabled: isBusy,
-          onSelect: () => void handleApprove(req.id),
+          onSelect: () => void handleApprove(req),
         });
         items.push({
           key: 'reject',
           label: 'Reject',
           icon: <X className="h-3.5 w-3.5" />,
           disabled: isBusy,
-          onSelect: () => void handleReject(req.id),
+          onSelect: () => void handleReject(req),
         });
       }
       if (isAdmin && req.status_reason && req.status !== 'pending' && req.status !== 'rejected') {
@@ -470,26 +495,39 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
       }
       actions={
         section === 'requests' ? (
-          <TabStrip aria-label="Request source filters">
-            <TapeDeckButton
-              size="sm"
-              active={source === 'all' || !source}
-              onClick={() => setSource('all')}
-            >
-              All sources
-            </TapeDeckButton>
-            {sources.map((s) => (
+          <div className="flex items-center gap-2 flex-wrap">
+            {sub === 'pending' && canManage && list.total > 0 && (
+              <ConfirmDangerButton
+                icon={<Check className="h-3.5 w-3.5" />}
+                idleLabel={`Approve all (${list.total})`}
+                ariaLabel="Approve all pending requests"
+                confirmLabel="Approve"
+                collapseLabel={false}
+                disabled={approvingAll}
+                onConfirm={() => void handleApproveAll()}
+              />
+            )}
+            <TabStrip aria-label="Request source filters">
               <TapeDeckButton
-                key={s.source}
                 size="sm"
-                active={source === s.source}
-                onClick={() => setSource(s.source)}
+                active={source === 'all' || !source}
+                onClick={() => setSource('all')}
               >
-                {formatSourceLabel(s.source)}{' '}
-                <span className="text-[10px] font-mono opacity-70">({s.count})</span>
+                All sources
               </TapeDeckButton>
-            ))}
-          </TabStrip>
+              {sources.map((s) => (
+                <TapeDeckButton
+                  key={s.source}
+                  size="sm"
+                  active={source === s.source}
+                  onClick={() => setSource(s.source)}
+                >
+                  {formatSourceLabel(s.source)}{' '}
+                  <span className="text-[10px] font-mono opacity-70">({s.count})</span>
+                </TapeDeckButton>
+              ))}
+            </TabStrip>
+          </div>
         ) : undefined
       }
     >

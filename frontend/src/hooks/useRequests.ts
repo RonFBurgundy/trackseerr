@@ -8,6 +8,7 @@ import {
   getUserQuota,
   createRequest as apiCreateRequest,
   approveRequest as apiApproveRequest,
+  bulkApproveRequests as apiBulkApproveRequests,
   rejectRequest as apiRejectRequest,
   deleteRequest as apiDeleteRequest,
   retryRequest as apiRetryRequest,
@@ -44,6 +45,7 @@ export interface UseRequestsReturn {
   setSource: (source: string) => void;
   submitRequest: (item: RequestableItem) => Promise<void>;
   approve: (id: string) => Promise<void>;
+  approveAll: () => Promise<Schema<'BulkApproveResult'>>;
   reject: (id: string, reason?: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
   retry: (id: string) => Promise<Schema<'RetryResult'>>;
@@ -180,6 +182,22 @@ export function useRequests(enabled: boolean = true): UseRequestsReturn {
     [filter, list, loadSources, loadQuota]
   );
 
+  const approveAll = useCallback(async () => {
+    setActionError(null);
+    try {
+      const result = await apiBulkApproveRequests({
+        source: source && source !== 'all' ? source : undefined,
+      });
+      list.reload();
+      await Promise.all([loadSources(), loadQuota()]);
+      return result;
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to approve requests';
+      setActionError(msg);
+      throw err;
+    }
+  }, [source, list, loadSources, loadQuota]);
+
   const reject = useCallback(
     async (id: string, reason?: string) => {
       setActionError(null);
@@ -243,6 +261,7 @@ export function useRequests(enabled: boolean = true): UseRequestsReturn {
     setSource,
     submitRequest,
     approve,
+    approveAll,
     reject,
     remove,
     retry,
