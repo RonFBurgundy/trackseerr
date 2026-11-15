@@ -60,11 +60,29 @@ TrackSeerr asks each client where it saves files. If TrackSeerr cannot see that 
 - **Transmission:** Enable RPC in Transmission preferences. The default RPC path is `/transmission/rpc`. Basic authentication is optional. TrackSeerr passes its category as torrent labels.
 - **Deluge:** Enable the Deluge Web UI. TrackSeerr connects with the Web UI password and attaches to the Deluge daemon. Enable the Label plugin in Deluge preferences if you want category labels.
 - **rTorrent / ruTorrent:** TrackSeerr talks to rTorrent's XML-RPC address. On most seedboxes this is `https://your-server/RPC2`, behind the same username and password as ruTorrent. Enter the server address, keep the RPC path as `/RPC2` unless your provider gives another one, and add the username and password if it asks for them. The label appears in ruTorrent's Label column. TrackSeerr downloads the .torrent file itself and sends it to rTorrent, so rTorrent does not need to reach your indexers. rTorrent can't delete files through this connection, so removing a torrent from TrackSeerr leaves its files on the server, and seed limits are not sent to it (TrackSeerr's own seeding rules still apply).
-- **Remote seedbox:** if your torrent client runs on another machine, copying finished files to a folder TrackSeerr can see is up to you (for example with rclone, Syncthing or a network mount). After the files are copied home, open the client in Settings → Media Management → Clients and add a **Remote path mapping** from the client's folder (for example `/home/user/downloads`) to the folder where TrackSeerr sees the copies (for example `/mnt/seedbox`). Root Folders & Naming → Download folders shows both paths and warns when TrackSeerr can't see a folder. When a download is finished on the seedbox but its files have not arrived yet, TrackSeerr shows "Waiting for files to appear" and tries again on its next check, instead of failing the download.
+- **Remote seedbox:** see [Torrent client on another machine](#torrent-client-on-another-machine).
 - **NZBGet:** Enter the NZBGet web address and your ControlUsername and ControlPassword. Category defaults to `music`. NZBGet leaves files on disk (TrackSeerr's import step moves them).
 - **qBittorrent:** Enable the Web UI. Enter the address, username, and password. Category defaults to `trackseerr`.
 - **SABnzbd:** Enter the address and API key from SABnzbd General settings.
 - **slskd:** slskd is good for single tracks, rare releases, and B-sides. It does not use indexers.
+
+### Torrent client on another machine
+
+Use this when your torrent client runs somewhere TrackSeerr can't see its files directly, for example a rented seedbox or a VPS. It works with any torrent client; rTorrent / ruTorrent is the usual one on seedboxes.
+
+TrackSeerr does not copy files from the seedbox. Something else has to bring finished downloads home, for example Syncthing, rclone or a network mount. TrackSeerr then imports the copies.
+
+1. **Bring finished files home.** Set up your sync tool so finished downloads land in a folder on the machine that runs TrackSeerr. Keep the folder layout the same as on the seedbox, including the label or category folder (for example `trackseerr/<release>`).
+2. **Let TrackSeerr see that folder.** If TrackSeerr runs in Docker, mount the folder into the container, for example `/mnt/seedbox` on the host as `/downloads/completed` in the container.
+3. **Add the client.** Settings → Media Management → Clients. Use an address TrackSeerr can reach: the seedbox's own address, or a local address if you reach the client through a VPN or SSH tunnel. If the tunnel already protects the connection, the username and password can stay blank.
+4. **Add a remote path mapping** on that client. Client path is the folder on the seedbox where finished downloads end up. TrackSeerr path is where the copies appear for TrackSeerr. Example: client path `/downloads/seed`, TrackSeerr path `/downloads/completed`.
+
+What to expect:
+
+- **Clients that move finished downloads.** Some clients move a torrent when it finishes, for example ruTorrent's AutoMove from `/downloads/incomplete` to `/downloads/seed/<label>`. TrackSeerr asks the client where each torrent is now, so it follows the move. Map the folder downloads are moved to, not the one they start in.
+- **Waiting for the copy.** When a download is finished on the seedbox but the copy hasn't arrived yet, the download shows "Waiting for files to appear" and TrackSeerr tries again on its next check. It doesn't fail the download.
+- **Download folders warning.** Root Folders & Naming → Download folders shows each client folder next to the folder TrackSeerr uses, and warns when TrackSeerr can't see one. A warning for the client's unfinished-downloads folder (for example `/downloads/incomplete`) is expected, because that folder is never copied home.
+- **Seeding is untouched.** The seeding copy stays on the seedbox. TrackSeerr imports from the copy at home and never deletes anything on the seedbox.
 
 ## Indexers
 
