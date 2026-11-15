@@ -13,13 +13,13 @@ import {
 import {
   PERMISSION_ALL_KNOWN_BITS,
   PERMISSION_ADMIN,
-  PERMISSION_FLAGS,
   QUOTA_KINDS,
   QUOTA_LABELS,
 } from '@/types/account';
 import type { AdminUser, QuotaKind, QuotaOverrides, UpdateUserPayload } from '@/types/account';
 import type { UseAdminUsersReturn } from '@/hooks/useAdminUsers';
 import { errorMessage } from '@/services/apiClient';
+import { PermissionSwitches } from './PermissionSwitches';
 
 export interface UserEditModalProps {
   user: AdminUser | null;
@@ -171,10 +171,6 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
     }
   };
 
-  const togglePermission = (bit: number, checked: boolean) => {
-    setPermissions((prev) => (checked ? prev | bit : prev & ~bit));
-  };
-
   const setOverride = (key: OverrideKey, v: number | null) => {
     setOverrides((prev) => ({ ...prev, [key]: v }));
   };
@@ -257,36 +253,20 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
             <legend className="text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)] mb-2">
               Permissions
             </legend>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
-              {PERMISSION_FLAGS.map((flag) => {
-                const isAdminFlag = flag.bit === PERMISSION_ADMIN;
-                const lockedAdmin = isAdminFlag && isSelf;
-                const lockedByAdmin = !isAdminFlag && userIsAdmin;
-                const isLocked = lockedAdmin || lockedByAdmin;
-                const isChecked = lockedByAdmin || (permissions & flag.bit) !== 0;
-                const tooltip = lockedAdmin
+            <PermissionSwitches
+              idPrefix="edit-user-permission"
+              value={permissions}
+              onChange={setPermissions}
+              lockedBits={isSelf ? PERMISSION_ADMIN : 0}
+              allOnBits={userIsAdmin ? PERMISSION_ALL_KNOWN_BITS & ~PERMISSION_ADMIN : 0}
+              tooltipFor={(bit) =>
+                bit === PERMISSION_ADMIN && isSelf
                   ? 'You cannot change your own admin permission'
-                  : lockedByAdmin
+                  : userIsAdmin && bit !== PERMISSION_ADMIN
                     ? 'Administrators hold every permission'
-                    : undefined;
-                return (
-                  <div
-                    key={flag.bit}
-                    className="flex items-center min-h-[36px] sm:min-h-[32px] text-xs font-mono"
-                  >
-                    <TactileSwitch
-                      id={`edit-user-permission-${flag.bit}`}
-                      name={`permission-${flag.bit}`}
-                      checked={isChecked}
-                      disabled={isLocked}
-                      onChange={(checked) => togglePermission(flag.bit, checked)}
-                      label={`${flag.label} (${flag.bit})`}
-                      title={tooltip}
-                    />
-                  </div>
-                );
-              })}
-            </div>
+                    : undefined
+              }
+            />
             {userIsAdmin && (
               <p className="text-[11px] font-mono text-[var(--text-muted)] mt-1">
                 Administrators hold every permission.
