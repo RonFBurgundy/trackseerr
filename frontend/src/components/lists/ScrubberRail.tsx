@@ -47,6 +47,12 @@ export function groupIndexForOffset(groups: readonly GroupIndexGroup[], index: n
 }
 
 const DESKTOP_WIDTH_PX = 28;
+/** Desktop rail never grows past this, however long the longest label is; longer labels are shortened instead. */
+const DESKTOP_MAX_WIDTH_PX = 72;
+/** Advance width (px) of one character of the 10px bold mono label. */
+const DESKTOP_CHAR_PX = 6.2;
+/** Room beside the label: its `pr-1.5` padding plus breathing space on the left edge. */
+const DESKTOP_LABEL_PAD_PX = 14;
 /**
  * Overlay rail (narrow screens): drawn over the list's right edge. 24px holds a 3-char 9px bold mono label
  * (about 16px) plus OVERLAY_LABEL_PAD_PX at rest. Published to the scroll element as `--overlay-rail-w` so the
@@ -108,6 +114,22 @@ function prefersReducedMotion(): boolean {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+/** Desktop rail width (px) that fits the longest of `labels`, clamped to the desktop min and max. */
+export function desktopRailWidth(labels: readonly string[]): number {
+  let maxLen = 0;
+  for (const label of labels) maxLen = Math.max(maxLen, label.length);
+  return clamp(Math.ceil(maxLen * DESKTOP_CHAR_PX) + DESKTOP_LABEL_PAD_PX, DESKTOP_WIDTH_PX, DESKTOP_MAX_WIDTH_PX);
+}
+
+/** Longest label (in characters) that fits on the desktop rail at DESKTOP_MAX_WIDTH_PX. */
+const DESKTOP_MAX_LABEL_CHARS = Math.floor((DESKTOP_MAX_WIDTH_PX - DESKTOP_LABEL_PAD_PX) / DESKTOP_CHAR_PX);
+
+/** Label text for the rail: the slim form on the overlay rail, and on desktop only when the full label would not fit. */
+function railLabel(label: string, overlayRail: boolean): string {
+  if (overlayRail) return overlayLabel(label);
+  return label.length > DESKTOP_MAX_LABEL_CHARS ? overlayLabel(label) : label;
 }
 
 function haptic(): void {
@@ -387,7 +409,8 @@ const GroupRail: React.FC<RailProps> = ({ groups, viewport, touch, ariaLabel }) 
     kbdTimerRef.current = window.setTimeout(() => setKeyboardIndex(null), KEYBOARD_BALLOON_MS);
   };
 
-  const width = overlayRail ? OVERLAY_WIDTH_PX : DESKTOP_WIDTH_PX;
+  const desktopWidth = useMemo(() => desktopRailWidth(groups.map((g) => g.label)), [groups]);
+  const width = overlayRail ? OVERLAY_WIDTH_PX : desktopWidth;
   const markerHeight = clamp(slot, 6, 22);
   const markerY = (markerIndex + 0.5) * slot - markerHeight / 2;
   const labelText = overlayRail ? 'text-[9px]' : 'text-[10px]';
@@ -463,7 +486,7 @@ const GroupRail: React.FC<RailProps> = ({ groups, viewport, touch, ariaLabel }) 
                     active ? 'text-[#e5a00d]' : 'text-neutral-400'
                   }`}
                 >
-                  {overlayRail ? overlayLabel(groups[item.index].label) : groups[item.index].label}
+                  {railLabel(groups[item.index].label, overlayRail)}
                 </span>
               </div>
             );
