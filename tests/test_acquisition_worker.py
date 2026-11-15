@@ -477,6 +477,101 @@ def test_worker_rejects_candidate_src_outside_staging(test_db, workspace_dirs, t
     assert evil_file.exists()
 
 
+def _seed_completed_download_waiting_on_source(test_db, client_id, download_id, source_dir):
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id=client_id,
+            name="Seedbox",
+            driver_type=DownloadDriverType.SABNZBD,
+            host_url="http://sabnzbd:8080",
+            api_key="secret",
+        )
+    )
+    test_db.create_active_download(
+        ActiveDownload(
+            id=download_id,
+            title="Not Synced Album",
+            artist="Remote Artist",
+            client_id=client_id,
+            download_hash=f"hash-{download_id}",
+            status=DownloadStatus.COMPLETED.value,
+            source_path=str(source_dir),
+        )
+    )
+    mock_driver = MagicMock()
+    mock_driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "source_path": str(source_dir),
+        "error_message": None,
+    }
+    return mock_driver
+
+
+def test_worker_waits_when_source_not_on_disk_yet(test_db, workspace_dirs):
+    downloads_dir, _music_dir = workspace_dirs
+    missing_dir = downloads_dir / "Not Synced Yet"
+    mock_driver = _seed_completed_download_waiting_on_source(
+        test_db, "client-wait-1", "dl-wait-missing", missing_dir
+    )
+    worker = AcquisitionWorker()
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        stats = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
+
+    assert stats["failed"] == 0
+    assert stats["imported"] == 0
+    updated = test_db.get_active_download("dl-wait-missing")
+    assert updated["status"] == DownloadStatus.COMPLETED.value
+    assert updated["error_message"].startswith("Waiting for files to appear")
+    assert test_db.list_blocklist() == []
+
+
+def test_worker_imports_after_source_arrives(test_db, workspace_dirs):
+    downloads_dir, music_dir = workspace_dirs
+    arriving_dir = downloads_dir / "Arriving Later"
+    mock_driver = _seed_completed_download_waiting_on_source(
+        test_db, "client-wait-2", "dl-wait-arrives", arriving_dir
+    )
+    worker = AcquisitionWorker()
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        first = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
+    assert first["failed"] == 0
+    assert test_db.get_active_download("dl-wait-arrives")["error_message"].startswith(
+        "Waiting for files to appear"
+    )
+
+    arriving_dir.mkdir()
+    track = arriving_dir / "01 - Arrived.mp3"
+    write_mp3(track)
+    mock_meta = {
+        "artist": "Remote Artist",
+        "title": "Arrived",
+        "album": "Not Synced Album",
+        "file_path": str(track),
+        "extension": ".mp3",
+        "track_number": 1,
+        "year": 2020,
+        "disc_number": 1,
+        "total_discs": 1,
+    }
+    settings = test_db.get_media_management_settings()
+    settings["root_folder_path"] = str(music_dir)
+    test_db.update_media_management_settings(settings)
+
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
+        with patch("trackseerr.acquisition_import.inspect_audio_file", return_value=mock_meta), \
+             patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=mock_meta):
+            second = worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
+
+    assert second["failed"] == 0
+    assert second["imported"] == 1
+    updated = test_db.get_active_download("dl-wait-arrives")
+    assert updated["status"] == DownloadStatus.IMPORTED.value
+    assert not (updated["error_message"] or "").startswith("Waiting for files to appear")
+
+
 def test_worker_rejects_target_escaping_root_folder(test_db, workspace_dirs):
     downloads_dir, music_dir = workspace_dirs
 
