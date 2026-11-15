@@ -94,7 +94,7 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
             />
           </div>
           <p className="text-[11px] text-neutral-500 font-mono">
-            Finished downloads are imported from the folders each download client reports, so there is nothing to type here.
+            Finished downloads are imported from the folders each download client reports. If a client sees a different path than TrackSeerr, add a remote path mapping to that client.
           </p>
           {roots.error && (
             <p role="alert" className="text-[11px] font-mono text-[#ef4444]">{roots.error}</p>
@@ -106,9 +106,27 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
             {roots.clients.map((c) => (
               <li key={c.client_id} className="px-2 py-1.5 rounded-[3px] border border-[#222222] bg-[#0d0d0d]">
                 <div className="text-[11px] font-mono font-bold text-neutral-300">{c.name}</div>
-                {c.roots.map((r) => (
-                  <div key={r} className="text-[11px] font-mono text-white break-all">{r}</div>
-                ))}
+                {c.folders && c.folders.length > 0
+                  ? c.folders.map((f) => (
+                      <div key={`${f.client_path}|${f.local_path}`}>
+                        {f.client_path !== f.local_path ? (
+                          <>
+                            <div className="text-[11px] font-mono text-white break-all">{f.client_path}</div>
+                            <div className="text-[11px] font-mono text-neutral-400 break-all">{`→ ${f.local_path}`}</div>
+                          </>
+                        ) : (
+                          <div className="text-[11px] font-mono text-white break-all">{f.local_path}</div>
+                        )}
+                        {!f.found && (
+                          <div className="text-[11px] font-mono text-[#e5a00d] break-words">
+                            TrackSeerr can&apos;t see this folder. If the client runs elsewhere, add a remote path mapping in Clients.
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  : c.roots.map((r) => (
+                      <div key={r} className="text-[11px] font-mono text-white break-all">{r}</div>
+                    ))}
                 {c.error && (
                   <div className="text-[11px] font-mono text-[#e5a00d] break-words">
                     Could not read download folder: {c.error}

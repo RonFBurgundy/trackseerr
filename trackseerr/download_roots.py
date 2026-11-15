@@ -74,7 +74,18 @@ def fetch_client_roots(
     force: bool = False,
     driver_factory: Optional[Callable[[dict[str, Any]], Any]] = None,
 ) -> tuple[list[str], Optional[str]]:
-    """The client's completed-download roots translated to local paths, and an error string (None on success).
+    """The client's completed-download roots translated to local paths, and an error string (None on success)."""
+    pairs, error = fetch_client_root_pairs(cfg, force=force, driver_factory=driver_factory)
+    return [local for _c, local in pairs], error
+
+
+def fetch_client_root_pairs(
+    cfg: dict[str, Any],
+    *,
+    force: bool = False,
+    driver_factory: Optional[Callable[[dict[str, Any]], Any]] = None,
+) -> tuple[list[tuple[str, str]], Optional[str]]:
+    """``(client_path, local_path)`` pairs for the client's completed-download roots, and an error (None on success).
 
     Results are cached per client id (``ROOTS_TTL_SECONDS``; failures ``ROOTS_ERROR_TTL_SECONDS``), keyed to the
     client's connection settings so an edited client is re-read immediately.
@@ -105,12 +116,22 @@ def fetch_client_roots(
                 _cache[client_id] = (now + ttl, fp, raw_roots, error)
 
     mappings = client_mappings(cfg)
-    mapped: list[str] = []
+    pairs: list[tuple[str, str]] = []
+    seen_local: set[str] = set()
     for root in raw_roots:
         local = translate_remote_path(root, mappings)
-        if local and local not in mapped:
-            mapped.append(local)
-    return mapped, error
+        if local and local not in seen_local:
+            seen_local.add(local)
+            pairs.append((root, local))
+    return pairs, error
+
+
+def _is_dir(path: str) -> bool:
+    try:
+        return Path(path).is_dir()
+    except OSError as exc:
+        logger.debug("Could not stat download folder %s: %s", path, safe_exc(exc))
+        return False
 
 
 def _config_dirs() -> list[Path]:
@@ -223,12 +244,13 @@ def describe_client_roots(db: Any, *, force: bool = False) -> list[dict[str, Any
     for cfg in db.list_download_clients(enabled_only=True):
         if str(cfg.get("driver_type") or "").lower() == "lidarr":
             continue
-        roots, error = fetch_client_roots(cfg, force=force)
+        pairs, error = fetch_client_root_pairs(cfg, force=force)
         out.append(
             {
                 "client_id": str(cfg.get("id") or ""),
                 "name": str(cfg.get("name") or cfg.get("id") or ""),
-                "roots": roots,
+                "roots": [local for _c, local in pairs],
+                "folders": [{"client_path": c, "local_path": local, "found": _is_dir(local)} for c, local in pairs],
                 "error": error,
             }
         )

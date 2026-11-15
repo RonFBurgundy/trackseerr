@@ -153,6 +153,44 @@ def test_unreadable_roots_report_error(db):
     assert roots == [] and err == "connection refused"
 
 
+def test_root_pairs_keep_client_and_local_paths(db, tmp_path):
+    cfg = _client(db, extra={"remote_path_mappings": [{"remote_path": "/remote/dl", "local_path": str(tmp_path / "dl")}]})
+    factory = lambda c: _driver(["/remote/dl"])  # noqa: E731
+    pairs, err = dr.fetch_client_root_pairs(cfg, driver_factory=factory)
+    assert pairs == [("/remote/dl", str(tmp_path / "dl"))] and err is None
+    assert dr.fetch_client_roots(cfg, driver_factory=factory) == ([str(tmp_path / "dl")], None)
+
+
+def test_describe_roots_marks_found_and_missing_folders(db, tmp_path):
+    (tmp_path / "here").mkdir()
+    _client(
+        db,
+        cid="c-q",
+        extra={
+            "remote_path_mappings": [
+                {"remote_path": "/a", "local_path": str(tmp_path / "here")},
+                {"remote_path": "/b", "local_path": str(tmp_path / "gone")},
+            ]
+        },
+    )
+    with patch("trackseerr.download_roots.get_acquisition_driver", return_value=_driver(["/a", "/b"])):
+        item = dr.describe_client_roots(db)[0]
+    assert item["folders"] == [
+        {"client_path": "/a", "local_path": str(tmp_path / "here"), "found": True},
+        {"client_path": "/b", "local_path": str(tmp_path / "gone"), "found": False},
+    ]
+
+
+def test_roots_endpoint_includes_folders(db, api, headers, tree):
+    _client(db, cid="c-q", name="qBit")
+    with patch("trackseerr.download_roots.get_acquisition_driver", return_value=_driver([str(tree["qbit"])])):
+        resp = api.get("/api/settings/download-clients/roots", headers=headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()[0]["folders"] == [
+        {"client_path": str(tree["qbit"]), "local_path": str(tree["qbit"]), "found": True}
+    ]
+
+
 # -------------------------------------------------------- _find_audio_files
 def test_find_audio_files_uses_client_roots_and_fallback_scans_roots(tree):
     good = tree["qbit"] / "Artist - Album"
@@ -309,7 +347,13 @@ def test_roots_endpoint_lists_roots_and_errors(db, api, headers, tree):
     assert resp.status_code == 200, resp.text
     by_id = {r["client_id"]: r for r in resp.json()}
     assert set(by_id) == {"c-q", "c-s"}  # Lidarr has no roots concept
-    assert by_id["c-q"] == {"client_id": "c-q", "name": "qBit", "roots": [str(tree["qbit"])], "error": None}
+    q = by_id["c-q"]
+    assert {k: q[k] for k in ("client_id", "name", "roots", "error")} == {
+        "client_id": "c-q",
+        "name": "qBit",
+        "roots": [str(tree["qbit"])],
+        "error": None,
+    }
     assert by_id["c-s"]["roots"] == [] and "HTTP 500" in by_id["c-s"]["error"]
 
 

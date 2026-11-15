@@ -176,10 +176,17 @@ def list_download_clients(
     return [_mask_client_dict(c) for c in clients]
 
 
+class DownloadRootFolder(ApiModel):
+    client_path: str
+    local_path: str
+    found: bool
+
+
 class DownloadRootsItem(ApiModel):
     client_id: str
     name: str
     roots: list[str]
+    folders: list[DownloadRootFolder] = []
     error: Optional[str] = None
 
 

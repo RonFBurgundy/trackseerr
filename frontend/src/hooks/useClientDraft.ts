@@ -115,6 +115,23 @@ function readSlskdTuning(extra: Record<string, unknown>): SlskdTuning {
   return out;
 }
 
+export interface PathMapping {
+  remote_path: string;
+  local_path: string;
+}
+
+function readPathMappings(extra: Record<string, unknown>): PathMapping[] {
+  const raw = extra.remote_path_mappings;
+  if (!Array.isArray(raw)) return [];
+  const out: PathMapping[] = [];
+  for (const entry of raw) {
+    if (isRecord(entry) && typeof entry.remote_path === 'string' && typeof entry.local_path === 'string') {
+      out.push({ remote_path: entry.remote_path, local_path: entry.local_path });
+    }
+  }
+  return out;
+}
+
 export const DEFAULT_CLIENT_PRIORITY = 1;
 
 export interface ClientDraft {
@@ -130,6 +147,7 @@ export interface ClientDraft {
   priority: number;
   enabled: boolean;
   slskd: SlskdTuning;
+  pathMappings: PathMapping[];
   setName: (v: string) => void;
   setType: (v: DownloadDriverType) => void;
   setHostUrl: (v: string) => void;
@@ -141,6 +159,9 @@ export interface ClientDraft {
   setPriority: (v: number) => void;
   setEnabled: (v: boolean) => void;
   setSlskdField: (key: SlskdTuningKey, value: string) => void;
+  addPathMapping: () => void;
+  updatePathMapping: (index: number, key: keyof PathMapping, value: string) => void;
+  removePathMapping: (index: number) => void;
   startEdit: (client: DownloadClientItem) => void;
   reset: () => void;
   toPayload: () => Schema<'DownloadClientPayload'>;
@@ -160,11 +181,24 @@ export function useClientDraft(): ClientDraft {
   const [priority, setPriority] = useState<number>(DEFAULT_CLIENT_PRIORITY);
   const [enabled, setEnabled] = useState<boolean>(true);
   const [slskd, setSlskd] = useState<SlskdTuning>(EMPTY_SLSKD_TUNING);
+  const [pathMappings, setPathMappings] = useState<PathMapping[]>([]);
   // Original parsed extra settings; edits merge over it so keys the form does not know survive a save.
   const [baseExtra, setBaseExtra] = useState<Record<string, unknown>>({});
 
   const setSlskdField = useCallback((key: SlskdTuningKey, value: string) => {
     setSlskd((prev) => ({ ...prev, [key]: value }));
+  }, []);
+
+  const addPathMapping = useCallback(() => {
+    setPathMappings((prev) => [...prev, { remote_path: '', local_path: '' }]);
+  }, []);
+
+  const updatePathMapping = useCallback((index: number, key: keyof PathMapping, value: string) => {
+    setPathMappings((prev) => prev.map((row, i) => (i === index ? { ...row, [key]: value } : row)));
+  }, []);
+
+  const removePathMapping = useCallback((index: number) => {
+    setPathMappings((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
   const setType = useCallback((next: DownloadDriverType) => {
@@ -189,6 +223,7 @@ export function useClientDraft(): ClientDraft {
     const extra = parseExtra(client.extra_settings_json);
     setBaseExtra(extra);
     setSlskd(readSlskdTuning(extra));
+    setPathMappings(readPathMappings(extra));
   }, []);
 
   const reset = useCallback(() => {
@@ -205,6 +240,7 @@ export function useClientDraft(): ClientDraft {
     setEnabled(true);
     setBaseExtra({});
     setSlskd(EMPTY_SLSKD_TUNING);
+    setPathMappings([]);
   }, []);
 
   const toPayload = useCallback((): Schema<'DownloadClientPayload'> => {
@@ -224,6 +260,11 @@ export function useClientDraft(): ClientDraft {
       if (ignored) extraSettings.ignored_users = ignored;
       else delete extraSettings.ignored_users;
     }
+    const mappingRows = pathMappings
+      .map((m) => ({ remote_path: m.remote_path.trim(), local_path: m.local_path.trim() }))
+      .filter((m) => m.remote_path !== '' && m.local_path !== '');
+    if (mappingRows.length > 0) extraSettings.remote_path_mappings = mappingRows;
+    else delete extraSettings.remote_path_mappings;
 
     const usesUsername = type === 'qbittorrent' || type === 'transmission' || type === 'rtorrent' || type === 'nzbget';
     const usesPassword = usesUsername || type === 'deluge';
@@ -242,11 +283,12 @@ export function useClientDraft(): ClientDraft {
       category: category.trim() || undefined,
       extra_settings_json: Object.keys(extraSettings).length > 0 ? JSON.stringify(extraSettings) : undefined,
     };
-  }, [editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled, slskd, baseExtra]);
+  }, [editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled, slskd, pathMappings, baseExtra]);
 
   return {
-    editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled, slskd,
+    editingId, name, type, hostUrl, rpcPath, username, password, apiKey, category, priority, enabled, slskd, pathMappings,
     setName, setType, setHostUrl, setRpcPath, setUsername, setPassword, setApiKey, setCategory, setPriority, setEnabled, setSlskdField,
+    addPathMapping, updatePathMapping, removePathMapping,
     startEdit, reset, toPayload,
   };
 }
