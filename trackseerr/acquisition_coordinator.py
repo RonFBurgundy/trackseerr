@@ -1211,7 +1211,7 @@ class AcquisitionCoordinator:
         Ordered by priority ascending (1 = preferred); clients sharing a priority take turns (the head rotates on each
         call); clients in backoff after a failed dispatch go last rather than being dropped.
 
-        - "torrent" / "torznab": driver_type in ("qbittorrent", "transmission", "deluge")
+        - "torrent" / "torznab": driver_type in ("qbittorrent", "transmission", "deluge", "rtorrent")
         - "usenet" / "newznab": driver_type in ("sabnzbd", "nzbget")
         - "slskd" / "soulseek" / "p2p": driver_type == "slskd"
         """

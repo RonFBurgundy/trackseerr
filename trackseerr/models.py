@@ -207,6 +207,7 @@ class DownloadDriverType(str, Enum):
     LIDARR = "lidarr"
     TRANSMISSION = "transmission"
     DELUGE = "deluge"
+    RTORRENT = "rtorrent"
     NZBGET = "nzbget"
 
 
