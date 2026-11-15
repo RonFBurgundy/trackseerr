@@ -127,6 +127,47 @@ def test_usable_roots_drop_library_roots(tree):
     assert allowed.usable_roots() == [tree["qbit"].resolve()]
 
 
+def _mapped_cfg(local, reachable_roots=None):
+    return {
+        "id": "c-seed",
+        "name": "seedbox",
+        "driver_type": "rtorrent",
+        "host_url": "http://seedbox:8080",
+        "extra_settings": {"remote_path_mappings": [{"remote_path": "/remote/seed", "local_path": str(local)}]},
+    }
+
+
+def test_mapping_local_path_is_an_allowed_root(tree, tmp_path):
+    dr.clear_roots_cache()
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    cfg = _mapped_cfg(seed)
+    mm = {"root_folder_path": str(tree["library"]), "staging_folder_path": ""}
+    allowed = dr.build_allowed_roots(mm, [cfg], driver=_driver(["/remote/incomplete"]))
+    ok, why = allowed.check(seed / "trackseerr" / "Album")
+    assert ok, why
+
+
+def test_mapping_root_still_blocks_library(tree):
+    dr.clear_roots_cache()
+    mm = {"root_folder_path": str(tree["library"]), "staging_folder_path": ""}
+    for local in (tree["library"], tree["library"] / "sub"):
+        cfg = _mapped_cfg(local)
+        allowed = dr.build_allowed_roots(mm, [cfg], driver=_driver(["/remote/incomplete"]))
+        ok, why = allowed.check(tree["library"] / "Artist")
+        assert not ok and "library" in why, (local, why)
+
+
+def test_mapping_root_used_when_client_unreachable(tmp_path):
+    dr.clear_roots_cache()
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    cfg = _mapped_cfg(seed)
+    allowed = dr.build_allowed_roots({}, [cfg], driver=_driver([], "connection refused"))
+    assert seed.resolve() in allowed.roots
+    assert any("connection refused" in e for e in allowed.errors), allowed.errors
+
+
 # ----------------------------------------------------- mappings, cache, errors
 def test_roots_translated_through_remote_path_mappings(db, tree):
     cfg = _client(db, extra={"remote_path_mappings": [{"remote_path": "/downloads", "local_path": str(tree["qbit"].parent)}]})
