@@ -496,7 +496,13 @@ class AccountStoreMixin:
             "default_quota_albums": int(gs.get("default_quota_albums", 10)),
             "default_quota_discographies": int(gs.get("default_quota_discographies", 1)),
             "default_quota_window_days": int(gs.get("default_quota_window_days", 7)),
+            "default_user_permissions": int(gs.get("default_user_permissions", int(UserPermission.DEFAULT))),
         }
+
+    def default_user_permissions(self) -> int:
+        """The permission bits a newly created non-admin user starts with (the admin bit is never included)."""
+        value = int(self.get_account_settings()["default_user_permissions"])
+        return value & ~int(UserPermission.ADMIN)
 
     def get_user_quota_overrides(self, user_id: str) -> dict[str, Optional[int]]:
         with self.reader() as conn:

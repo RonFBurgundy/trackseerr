@@ -40,7 +40,7 @@ class UserStoreMixin:
         uid = str(user_id)
         uname = str(username)
         admin_val = 1 if is_admin else 0
-        default_perms = 35 if is_admin else 34
+        default_perms = 35 if is_admin else self.default_user_permissions()
         with self._lock:
             self.conn.execute(
                 """
@@ -83,6 +83,7 @@ class UserStoreMixin:
         name = str(username or "").strip()
         if not uid or not name:
             return None
+        new_perms = 35 if grant_admin else self.default_user_permissions()
         with self._lock:
             clash = self.conn.execute(
                 "SELECT 1 FROM users WHERE lower(username) = lower(?) AND id != ?", (name, uid)
@@ -109,7 +110,7 @@ class UserStoreMixin:
                     INSERT INTO users (id, username, email, is_admin, permissions, auth_type, updated_at)
                     VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                     """,
-                    (uid, name, email, 1 if grant_admin else 0, 35 if grant_admin else 34, auth_type),
+                    (uid, name, email, 1 if grant_admin else 0, new_perms, auth_type),
                 )
             self.conn.commit()
         return self.get_user(uid)
@@ -140,6 +141,7 @@ class UserStoreMixin:
                 raise PermissionError("Imported media-server accounts cannot sign in")
             return existing
         name = str(username or "").strip() or uid
+        new_perms = self.default_user_permissions()
         with self._lock:
             clash = self.conn.execute(
                 "SELECT id FROM users WHERE lower(username) = lower(?) AND id != ?", (name, uid)
@@ -149,10 +151,10 @@ class UserStoreMixin:
             self.conn.execute(
                 """
                 INSERT INTO users (id, username, email, is_admin, permissions, updated_at)
-                VALUES (?, ?, NULL, 0, 34, CURRENT_TIMESTAMP)
+                VALUES (?, ?, NULL, 0, ?, CURRENT_TIMESTAMP)
                 ON CONFLICT(id) DO NOTHING
                 """,
-                (uid, name),
+                (uid, name, new_perms),
             )
             self.conn.commit()
         user = self.get_user(uid)
@@ -445,6 +447,7 @@ class UserStoreMixin:
             "default_quota_albums",
             "default_quota_discographies",
             "default_quota_window_days",
+            "default_user_permissions",
         }
         cols: list[str] = []
         params: list[Any] = []
