@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- **Approve all** on Requests → Pending approves every pending request in one go (only the selected source, if you picked one). Their searches run one after another in the background.
 - **Remote path mappings** can be set on each download client (Settings → Media Management → Clients). Use them when the client sees a different folder than TrackSeerr, for example a seedbox whose downloads you copy home. Root Folders & Naming → Download folders now shows each client's folder next to the folder TrackSeerr uses, and warns when TrackSeerr can't see it.
 - **rTorrent / ruTorrent** can be added as a torrent download client (Settings → Media Management → Clients). It connects through rTorrent's XML-RPC address (usually `/RPC2`), with an optional username and password, and sets a ruTorrent label. TrackSeerr sends the .torrent file itself, so a remote seedbox doesn't need to reach your indexers. See "Client setup notes" in the Acquisition guide.
 - New **Media Management → Metadata Sources** page with a **MusicBrainz server** setting and a **Test** button, so you can use your own MusicBrainz mirror (for example `http://192.168.1.10:5000`; adding `/ws/2` is fine). AcoustID fingerprinting settings moved here from Root Folders & Naming. Both can be found from the navigation search.
@@ -132,6 +133,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Approving a request is instant again: the row leaves the Pending list straight away with an "Approved" message, and the search for it runs in the background instead of holding up the page. Approving many requests no longer starts many searches at once.
 - On desktop, the scroll bar's date labels (for example "Yesterday" or "Fri 13" in Activity) no longer spill out of the bar; the bar widens to fit them. Mobile is unchanged.
 - A finished download whose files haven't reached TrackSeerr yet (for example while a seedbox sync is still copying them) now waits with "Waiting for files to appear" and is tried again, instead of being marked failed and blocklisted.
 - If `ADMIN_PASSWORD` is turned down (for example because it is too common), the sign-in page now says why no admin account was created, instead of only "Invalid username or password".
