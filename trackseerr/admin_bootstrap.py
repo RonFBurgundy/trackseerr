@@ -7,6 +7,7 @@ sign-in, and creating users needs an admin, so a local admin is seeded from the 
 import logging
 import os
 import sqlite3
+from typing import Optional
 
 from trackseerr import local_auth
 from trackseerr.models import UserPermission
@@ -17,12 +18,16 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_ADMIN_USERNAME = "admin"
 
+_last_problem: Optional[str] = None
+
 
 def ensure_bootstrap_admin(db: Database) -> bool:
     """Creates a local admin from ``ADMIN_USERNAME`` (default ``admin``) / ``ADMIN_PASSWORD`` when no enabled admin
     can actually sign in without a media server (a local admin with a password). Returns True only when an account
     was created. Never modifies an existing account, and never runs once a usable admin exists (so the env
     password cannot be used to reset one). ``ADMIN_PASSWORD`` is removed from the process environment afterwards."""
+    global _last_problem
+    _last_problem = None
     if db.count_local_login_admins() > 0:
         os.environ.pop("ADMIN_PASSWORD", None)
         return False
@@ -30,6 +35,7 @@ def ensure_bootstrap_admin(db: Database) -> bool:
     os.environ.pop("ADMIN_PASSWORD", None)
     username = local_auth.normalize_username(os.getenv("ADMIN_USERNAME") or DEFAULT_ADMIN_USERNAME)
     if not password:
+        _last_problem = "Set ADMIN_PASSWORD and restart to create one."
         logger.error(
             "No administrator can sign in: no media server is configured and no local admin with a password "
             "exists. To recover: set ADMIN_PASSWORD and restart to create a local admin (ADMIN_USERNAME optionally "
@@ -38,10 +44,12 @@ def ensure_bootstrap_admin(db: Database) -> bool:
         return False
     problem = local_auth.validate_password(password, username)
     if problem:
+        _last_problem = f"ADMIN_PASSWORD was rejected: {problem}. Set a different one and restart."
         logger.error("ADMIN_PASSWORD rejected: %s", problem)
         return False
     existing = next((u for u in db.list_users() if str(u.get("username", "")).lower() == username.lower()), None)
     if existing is not None:
+        _last_problem = f"A user named '{username}' already exists. Set ADMIN_USERNAME to a different name and restart."
         logger.error(
             "Cannot create the local admin '%s': a %s user with that name already exists and is left untouched. "
             "Set ADMIN_USERNAME to a different name and restart.",
@@ -56,7 +64,16 @@ def ensure_bootstrap_admin(db: Database) -> bool:
             int(UserPermission.DEFAULT) | int(UserPermission.ADMIN),
         )
     except (ValueError, sqlite3.Error) as exc:
+        _last_problem = "Creating it failed; check the server log."
         logger.error("Could not create the first local admin '%s': %s", username, safe_exc(exc))
         return False
     logger.info("Created first local admin '%s' from ADMIN_USERNAME/ADMIN_PASSWORD", username)
     return True
+
+
+def setup_hint(db: Database) -> Optional[str]:
+    """Returns an actionable hint explaining why no local admin exists, or None if at least one exists."""
+    if db.count_local_login_admins() > 0:
+        return None
+    return "No admin account exists yet. " + (_last_problem or "Set ADMIN_PASSWORD and restart to create one.")
+

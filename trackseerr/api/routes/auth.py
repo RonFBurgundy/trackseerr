@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
-from trackseerr import local_auth
+from trackseerr import admin_bootstrap, local_auth
 from trackseerr.api.dependencies import (
     DETAIL_ADMIN_USE_CORE,
     HEADER_SIGNATURE,
@@ -460,6 +460,10 @@ def local_login(
             client_ip=client_ip,
         )
     except LoginError as exc:
+        if exc.status_code == 401 and config.media_server_type != MEDIA_SERVER_PLEX:
+            hint = admin_bootstrap.setup_hint(db)
+            if hint:
+                raise HTTPException(status_code=401, detail=hint) from exc
         raise _login_http_error(exc) from exc
     user = db.get_user(result.user_id)
     if user is None:

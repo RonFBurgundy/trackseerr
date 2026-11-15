@@ -9,7 +9,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from trackseerr import local_auth, media_server
+import trackseerr
+from trackseerr import admin_bootstrap, local_auth, media_server
 from trackseerr.admin_bootstrap import ensure_bootstrap_admin
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_plex_client
@@ -252,6 +253,68 @@ def test_bootstrap_username_collision_with_non_local_user_is_an_error_and_untouc
         assert ensure_bootstrap_admin(db) is False
     assert db.get_user("plex-1") == before and len(db.list_users()) == 1
     assert any("already exists" in r.getMessage() and "ADMIN_USERNAME" in r.getMessage() for r in caplog.records)
+
+
+def test_login_explains_rejected_admin_password(tmp_path):
+    trackseerr.admin_bootstrap._last_problem = None
+    db = Database(":memory:")
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "password1234"}, clear=True):
+        assert ensure_bootstrap_admin(db) is False
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    app = create_app(db=db, config=cfg)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: cfg
+    res = TestClient(app).post("/api/auth/local/login", json={"username": "admin", "password": "password1234"})
+    assert res.status_code == 401
+    detail = res.json().get("detail", "")
+    assert "No admin account exists yet" in detail
+    assert "too common" in detail
+    assert "password1234" not in detail
+
+
+def test_login_explains_missing_admin_password(tmp_path):
+    trackseerr.admin_bootstrap._last_problem = None
+    db = Database(":memory:")
+    with patch.dict(os.environ, {}, clear=True):
+        assert ensure_bootstrap_admin(db) is False
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    app = create_app(db=db, config=cfg)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: cfg
+    res = TestClient(app).post("/api/auth/local/login", json={"username": "admin", "password": "any password"})
+    assert res.status_code == 401
+    detail = res.json().get("detail", "")
+    assert "Set ADMIN_PASSWORD" in detail
+
+
+def test_login_hint_cleared_once_admin_exists(tmp_path):
+    trackseerr.admin_bootstrap._last_problem = None
+    db = Database(":memory:")
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "password1234"}, clear=True):
+        assert ensure_bootstrap_admin(db) is False
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "correct horse battery"}, clear=True):
+        assert ensure_bootstrap_admin(db) is True
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    app = create_app(db=db, config=cfg)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: cfg
+    res = TestClient(app).post("/api/auth/local/login", json={"username": "admin", "password": "wrong password"})
+    assert res.status_code == 401
+    assert res.json().get("detail") == "Invalid username or password"
+
+
+def test_login_hint_not_shown_with_plex(tmp_path):
+    trackseerr.admin_bootstrap._last_problem = None
+    db = Database(":memory:")
+    with patch.dict(os.environ, {"ADMIN_PASSWORD": "password1234"}, clear=True):
+        assert ensure_bootstrap_admin(db) is False
+    cfg = Config(plex_url="http://plex:32400", plex_token="tok", data_dir=str(tmp_path))
+    app = create_app(db=db, config=cfg)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: cfg
+    res = TestClient(app).post("/api/auth/local/login", json={"username": "admin", "password": "wrong password"})
+    assert res.status_code == 401
+    assert res.json().get("detail") == "Invalid username or password"
 
 
 def test_bootstrap_is_atomic_failure_leaves_no_admin_row_and_no_invite():
