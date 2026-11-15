@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- **Default permissions for new users** in Settings → Users → Account defaults: choose which permissions people get the first time they sign in with Plex or are added from your media server (the default is still Request music and Report issues). Existing users don't change, and admin can't be a default.
+- Creating a user now shows every permission switch, not just a preset. The presets are still there as a starting point.
 - **Approve all** on Requests → Pending approves every pending request in one go (only the selected source, if you picked one). Their searches run one after another in the background.
 - **Remote path mappings** can be set on each download client (Settings → Media Management → Clients). Use them when the client sees a different folder than TrackSeerr, for example a seedbox whose downloads you copy home. Root Folders & Naming → Download folders now shows each client's folder next to the folder TrackSeerr uses, and warns when TrackSeerr can't see it.
 - **rTorrent / ruTorrent** can be added as a torrent download client (Settings → Media Management → Clients). It connects through rTorrent's XML-RPC address (usually `/RPC2`), with an optional username and password, and sets a ruTorrent label. TrackSeerr sends the .torrent file itself, so a remote seedbox doesn't need to reach your indexers. See "Client setup notes" in the Acquisition guide.
