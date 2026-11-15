@@ -8,6 +8,7 @@ from trackseerr.clients.acquisition.deluge import DelugeDriver
 from trackseerr.clients.acquisition.lidarr_adapter import LidarrAdapter
 from trackseerr.clients.acquisition.nzbget import NzbgetDriver
 from trackseerr.clients.acquisition.qbittorrent import QbittorrentDriver
+from trackseerr.clients.acquisition.rtorrent import RtorrentDriver
 from trackseerr.clients.acquisition.sabnzbd import SabnzbdDriver
 from trackseerr.clients.acquisition.slskd import SlskdDriver
 from trackseerr.clients.acquisition.torznab import TorznabDriver
@@ -22,6 +23,7 @@ DRIVER_CLASSES: dict[str, type[AcquisitionDriver]] = {
     DownloadDriverType.LIDARR.value: LidarrAdapter,
     DownloadDriverType.TRANSMISSION.value: TransmissionDriver,
     DownloadDriverType.DELUGE.value: DelugeDriver,
+    DownloadDriverType.RTORRENT.value: RtorrentDriver,
     DownloadDriverType.NZBGET.value: NzbgetDriver,
 }
 
@@ -117,6 +119,15 @@ def get_acquisition_driver(
             label=extra.get("label") or extra.get("category", "trackseerr"),
             download_location=extra.get("download_location") or extra.get("download_dir"),
         )
+    elif driver_type in (DownloadDriverType.RTORRENT.value, "rtorrent"):
+        return RtorrentDriver(
+            host_url=host_url,
+            rpc_path=str(extra.get("rpc_path") or "/RPC2"),
+            username=username,
+            password=password,
+            category=extra.get("category", "trackseerr"),
+            download_dir=extra.get("download_dir"),
+        )
     elif driver_type in (DownloadDriverType.NZBGET.value, "nzbget"):
         return NzbgetDriver(
             host_url=host_url,
@@ -163,6 +174,7 @@ __all__ = [
     "QbittorrentDriver",
     "TransmissionDriver",
     "DelugeDriver",
+    "RtorrentDriver",
     "NzbgetDriver",
     "TorznabDriver",
     "LidarrAdapter",
