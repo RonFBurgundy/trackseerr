@@ -8,6 +8,7 @@ export const DRIVER_TYPES: ReadonlyArray<DownloadDriverType> = [
   'qbittorrent',
   'transmission',
   'deluge',
+  'rtorrent',
   'nzbget',
 ];
 
@@ -17,6 +18,7 @@ export const DEFAULT_URLS: Record<DownloadDriverType, string> = {
   qbittorrent: 'http://localhost:8080',
   transmission: 'http://localhost:9091',
   deluge: 'http://localhost:8112',
+  rtorrent: 'http://localhost:8080',
   nzbget: 'http://localhost:6789',
   lidarr: 'http://localhost:8686',
 };
@@ -26,10 +28,19 @@ export const DEFAULT_CATEGORIES: Partial<Record<DownloadDriverType, string>> = {
   qbittorrent: 'trackseerr',
   transmission: 'trackseerr',
   deluge: 'trackseerr',
+  rtorrent: 'trackseerr',
   nzbget: 'music',
 };
 
-const DEFAULT_RPC_PATH = '/transmission/rpc';
+const DEFAULT_RPC_PATHS: Partial<Record<DownloadDriverType, string>> = {
+  transmission: '/transmission/rpc',
+  rtorrent: '/RPC2',
+};
+
+/** Default RPC path for a driver; '' for drivers that take no RPC path. */
+export function defaultRpcPath(t: DownloadDriverType): string {
+  return DEFAULT_RPC_PATHS[t] ?? '';
+}
 
 export function toDriverType(value: string): DownloadDriverType {
   return DRIVER_TYPES.find((t) => t === value) ?? 'slskd';
@@ -141,7 +152,7 @@ export function useClientDraft(): ClientDraft {
   const [name, setName] = useState<string>('');
   const [type, setTypeState] = useState<DownloadDriverType>('slskd');
   const [hostUrl, setHostUrl] = useState<string>(DEFAULT_URLS.slskd);
-  const [rpcPath, setRpcPath] = useState<string>(DEFAULT_RPC_PATH);
+  const [rpcPath, setRpcPath] = useState<string>(defaultRpcPath('slskd'));
   const [username, setUsername] = useState<string>('');
   const [password, setPassword] = useState<string>('');
   const [apiKey, setApiKey] = useState<string>('');
@@ -159,6 +170,7 @@ export function useClientDraft(): ClientDraft {
   const setType = useCallback((next: DownloadDriverType) => {
     setTypeState(next);
     setHostUrl(DEFAULT_URLS[next]);
+    setRpcPath(defaultRpcPath(next));
     setCategory(DEFAULT_CATEGORIES[next] ?? '');
   }, []);
 
@@ -167,7 +179,7 @@ export function useClientDraft(): ClientDraft {
     setName(client.name);
     setTypeState(client.driver_type);
     setHostUrl(client.host_url);
-    setRpcPath(parseRpcPath(client.extra_settings_json) || DEFAULT_RPC_PATH);
+    setRpcPath(parseRpcPath(client.extra_settings_json) || defaultRpcPath(client.driver_type));
     setUsername(client.username ?? '');
     setPassword(client.password ?? '');
     setApiKey(client.api_key ?? '');
@@ -184,7 +196,7 @@ export function useClientDraft(): ClientDraft {
     setName('');
     setTypeState('slskd');
     setHostUrl(DEFAULT_URLS.slskd);
-    setRpcPath(DEFAULT_RPC_PATH);
+    setRpcPath(defaultRpcPath('slskd'));
     setUsername('');
     setPassword('');
     setApiKey('');
@@ -197,7 +209,7 @@ export function useClientDraft(): ClientDraft {
 
   const toPayload = useCallback((): Schema<'DownloadClientPayload'> => {
     const extraSettings: Record<string, unknown> = { ...baseExtra };
-    if (type === 'transmission' && rpcPath.trim()) extraSettings.rpc_path = rpcPath.trim();
+    if ((type === 'transmission' || type === 'rtorrent') && rpcPath.trim()) extraSettings.rpc_path = rpcPath.trim();
     else delete extraSettings.rpc_path;
     if (category.trim()) extraSettings.category = category.trim();
     else delete extraSettings.category;
@@ -213,7 +225,7 @@ export function useClientDraft(): ClientDraft {
       else delete extraSettings.ignored_users;
     }
 
-    const usesUsername = type === 'qbittorrent' || type === 'transmission' || type === 'nzbget';
+    const usesUsername = type === 'qbittorrent' || type === 'transmission' || type === 'rtorrent' || type === 'nzbget';
     const usesPassword = usesUsername || type === 'deluge';
     const usesApiKey = type === 'slskd' || type === 'sabnzbd';
 

@@ -195,6 +195,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 <option value="qbittorrent">qBittorrent</option>
                 <option value="transmission">Transmission</option>
                 <option value="deluge">Deluge</option>
+                <option value="rtorrent">rTorrent / ruTorrent</option>
                 <option value="nzbget">NZBGet</option>
               </select>
             </div>
@@ -214,7 +215,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
             />
           </div>
 
-          {type === 'transmission' && (
+          {(type === 'transmission' || type === 'rtorrent') && (
             <div>
               <label htmlFor="client-rpc-path" className={compactLabelClass}>RPC Path</label>
               <input
@@ -223,7 +224,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
                 type="text"
                 value={draft.rpcPath}
                 onChange={(e) => draft.setRpcPath(e.target.value)}
-                placeholder="/transmission/rpc"
+                placeholder={type === 'rtorrent' ? '/RPC2' : '/transmission/rpc'}
                 className={compactInputClass}
               />
             </div>
@@ -292,7 +293,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
             </fieldset>
           )}
 
-          {(type === 'qbittorrent' || type === 'transmission' || type === 'nzbget') && (
+          {(type === 'qbittorrent' || type === 'transmission' || type === 'rtorrent' || type === 'nzbget') && (
             <div>
               <label htmlFor="client-username" className={compactLabelClass}>
                 Username {type === 'nzbget' && <span className="text-[#e5a00d]">*</span>}
@@ -313,6 +314,7 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
 
           {(type === 'qbittorrent' ||
             type === 'transmission' ||
+            type === 'rtorrent' ||
             type === 'deluge' ||
             type === 'nzbget') && (
             <div>
@@ -336,11 +338,12 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
           {(type === 'sabnzbd' ||
             type === 'qbittorrent' ||
             type === 'transmission' ||
+            type === 'rtorrent' ||
             type === 'deluge' ||
             type === 'nzbget') && (
             <div>
               <label htmlFor="client-category" className={compactLabelClass}>
-                {type === 'deluge' ? 'Label' : type === 'transmission' ? 'Category / Label' : 'Category'}
+                {type === 'deluge' || type === 'rtorrent' ? 'Label' : type === 'transmission' ? 'Category / Label' : 'Category'}
               </label>
               <input
                 id="client-category"

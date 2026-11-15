@@ -79,7 +79,7 @@ export type LibraryStats = Schema<'LibraryStats'>;
 export type QueueItem = Schema<'QueueItemResponse'>;
 
 /** Drivers `DownloadDriverType` accepts on the backend. */
-export type DownloadDriverType = 'slskd' | 'sabnzbd' | 'qbittorrent' | 'lidarr' | 'transmission' | 'deluge' | 'nzbget';
+export type DownloadDriverType = 'slskd' | 'sabnzbd' | 'qbittorrent' | 'lidarr' | 'transmission' | 'deluge' | 'rtorrent' | 'nzbget';
 
 /** A configured download client (credentials arrive masked). `host_url` is one URL including scheme and port. */
 export type DownloadClientItem = Narrow<Schema<'DownloadClientItem'>, { driver_type: DownloadDriverType }>;
