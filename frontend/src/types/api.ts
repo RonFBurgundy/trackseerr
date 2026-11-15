@@ -4382,6 +4382,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/requests/bulk-approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Approve Requests
+         * @description Approves many pending requests (all of them, or the given ids); their searches run one at a time afterwards.
+         */
+        post: operations["bulk_approve_requests_api_requests_bulk_approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/requests/index": {
         parameters: {
             query?: never;
@@ -4453,7 +4473,7 @@ export interface paths {
         put?: never;
         /**
          * Approve Request
-         * @description Endpoint to approve a request, updating status to processing and dispatching to Lidarr or native acquisition.
+         * @description Approves a request: marks it processing and notifies at once; the search/grab runs after the response.
          */
         post: operations["approve_request_api_requests__request_id__approve_post"];
         delete?: never;
@@ -7218,6 +7238,23 @@ export interface components {
             results: components["schemas"]["BulkItemResult"][];
             /** Succeeded */
             succeeded: number;
+        };
+        /**
+         * BulkApprovePayload
+         * @description ``ids`` None approves every pending request (optionally only those from ``source``).
+         */
+        BulkApprovePayload: {
+            /** Ids */
+            ids?: string[] | null;
+            /** Source */
+            source?: string | null;
+        };
+        /** BulkApproveResult */
+        BulkApproveResult: {
+            /** Approved */
+            approved: number;
+            /** Skipped */
+            skipped: number;
         };
         /** BulkArtistsResult */
         BulkArtistsResult: {
@@ -22733,6 +22770,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BatchCreatedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_approve_requests_api_requests_bulk_approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkApprovePayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkApproveResult"];
                 };
             };
             /** @description Validation Error */
