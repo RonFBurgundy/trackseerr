@@ -70,6 +70,15 @@ export async function approveRequest(requestId: string): Promise<Schema<'Request
   });
 }
 
+export async function bulkApproveRequests(
+  body: Schema<'BulkApprovePayload'>
+): Promise<Schema<'BulkApproveResult'>> {
+  return apiRequest<Schema<'BulkApproveResult'>>('/api/requests/bulk-approve', {
+    method: 'POST',
+    body,
+  });
+}
+
 export async function rejectRequest(requestId: string, reason?: string): Promise<Schema<'RequestRecord'>> {
   return apiRequest<Schema<'RequestRecord'>>(`/api/requests/${requestId}/reject`, {
     method: 'POST',
