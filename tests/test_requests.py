@@ -1009,6 +1009,116 @@ class TestMusicRequestsAPI:
             assert args[1]["title"] == "Test Track"
             assert mock_grab.called
 
+    @staticmethod
+    def _make_pending(test_db, user, n):
+        ids = []
+        for i in range(n):
+            rid = f"bulk-{i}"
+            test_db.create_request(MusicRequest(
+                id=rid, user_id=user["id"], item_type="album", title=f"Album {i}",
+                artist="Bulk Artist", album=f"Album {i}", status=RequestStatus.PENDING,
+            ))
+            ids.append(rid)
+        return ids
+
+    def test_approve_returns_before_search_runs(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        (rid,) = self._make_pending(test_db, seeded_users["alice"], 1)
+        with patch("trackseerr.api.routes.requests._dispatch_approved") as mock_dispatch:
+            res = client.post(f"/api/requests/{rid}/approve", headers=admin_headers)
+        assert res.status_code == 200
+        assert res.json()["status"] == "processing"
+        mock_dispatch.assert_called_once()
+        assert [r["id"] for r in mock_dispatch.call_args.args[2]] == [rid]
+
+    def test_bulk_approve_all_pending(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        ids = self._make_pending(test_db, seeded_users["alice"], 3)
+        with patch("trackseerr.api.routes.requests._dispatch_approved"):
+            assert client.post(f"/api/requests/{ids[0]}/approve", headers=admin_headers).status_code == 200
+        with patch("trackseerr.api.routes.requests._dispatch_approved") as mock_dispatch:
+            res = client.post("/api/requests/bulk-approve", json={}, headers=admin_headers)
+        assert res.status_code == 200
+        assert res.json() == {"approved": 2, "skipped": 0}
+        assert all(test_db.get_request(i)["status"] == "processing" for i in ids)
+        mock_dispatch.assert_called_once()
+        assert sorted(r["id"] for r in mock_dispatch.call_args.args[2]) == ids[1:]
+
+    def test_bulk_approve_ids_skips_non_pending(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+        ids = self._make_pending(test_db, seeded_users["alice"], 2)
+        test_db.update_request_status(ids[1], RequestStatus.PROCESSING)
+        with patch("trackseerr.api.routes.requests._dispatch_approved"):
+            res = client.post(
+                "/api/requests/bulk-approve",
+                json={"ids": [ids[0], ids[1], "no-such-id"]},
+                headers=admin_headers,
+            )
+        assert res.status_code == 200
+        assert res.json() == {"approved": 1, "skipped": 2}
+
+    def test_bulk_approve_requires_manage_permission(
+        self, app_and_client, test_db, test_config, seeded_users
+    ):
+        _, client = app_and_client
+        alice_headers = _auth_headers(seeded_users["alice"], test_db, test_config)
+        res = client.post("/api/requests/bulk-approve", json={}, headers=alice_headers)
+        assert res.status_code == 403
+
+    def test_dispatch_approved_runs_searches_in_order(self, test_db, test_config, seeded_users):
+        from trackseerr.api.routes.requests import _dispatch_approved
+
+        reqs = [
+            {"id": "r1", "artist": "A", "title": "One", "item_type": "track"},
+            {"id": "r2", "artist": "B", "title": "Two", "item_type": "track"},
+        ]
+        with (
+            patch("trackseerr.api.routes.requests.run_for_mode", side_effect=lambda db, native, lidarr: native()),
+            patch("trackseerr.api.routes.requests.native_is_configured", return_value=True),
+            patch("trackseerr.api.routes.requests.seed_request_catalog"),
+            patch("trackseerr.api.routes.requests.request_trigger"),
+            patch("trackseerr.api.routes.requests.acquisition_coordinator.search_and_grab") as mock_grab,
+        ):
+            mock_grab.return_value = {"success": True}
+            _dispatch_approved(test_db, test_config, reqs, None, None)
+        assert [c.kwargs["request_id"] for c in mock_grab.call_args_list] == ["r1", "r2"]
+
+    def test_dispatch_approved_drains_items_queued_while_running(self, test_db, test_config):
+        from trackseerr.api.routes import requests as routes
+        from trackseerr.api.routes.requests import _APPROVAL_DISPATCH_LOCK, _dispatch_approved
+
+        r1 = {"id": "r1", "artist": "A", "title": "One", "item_type": "track"}
+        r2 = {"id": "r2", "artist": "B", "title": "Two", "item_type": "track"}
+        order = []
+        nested_returned_before_first_finished = []
+
+        def fake_one(db, req, actor):
+            order.append(req["id"])
+            if req["id"] == "r1":
+                _dispatch_approved(test_db, test_config, [r2], None, None)
+                nested_returned_before_first_finished.append("r2" not in order)
+
+        with (
+            patch("trackseerr.api.routes.requests.run_for_mode", side_effect=lambda db, native, lidarr: native()),
+            patch("trackseerr.api.routes.requests.native_is_configured", return_value=True),
+            patch("trackseerr.api.routes.requests._native_dispatch_one", side_effect=fake_one),
+        ):
+            _dispatch_approved(test_db, test_config, [r1], None, None)
+        assert order == ["r1", "r2"]
+        assert nested_returned_before_first_finished == [True]
+        assert not routes._approval_queue
+        assert _APPROVAL_DISPATCH_LOCK.acquire(blocking=False)
+        _APPROVAL_DISPATCH_LOCK.release()
+
     def test_native_approve_seed_failure_still_grabs(
         self, app_and_client, test_db, test_config, seeded_users
     ):

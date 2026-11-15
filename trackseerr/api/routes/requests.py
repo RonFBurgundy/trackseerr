@@ -1,12 +1,14 @@
 """Requests REST API endpoints for user requests, approval workflows, and Lidarr dispatch."""
 
+import collections
 import logging
 import os
+import threading
 from typing import Any, Literal, Optional
 
 import httpx
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from trackseerr.acquisition_coordinator import acquisition_coordinator
@@ -24,6 +26,7 @@ from trackseerr.api.dependencies import (
 from trackseerr.api.routes.activity import SORT_DIR_PATTERN
 from trackseerr.api.schemas.requests import (
     BatchCreatedResponse,
+    BulkApproveResult,
     RequestDeleted,
     RequestIndexResponse,
     RequestListResponse,
@@ -345,77 +348,109 @@ def _actor_id(user: dict[str, Any]) -> Optional[str]:
     return str(uid) if uid and uid != "api_key_user" else None
 
 
-@router.post("/{request_id}/approve", response_model=RequestRecord, response_model_exclude_unset=True)
-def approve_request(
-    request_id: str,
-    db: Database = Depends(get_db),
-    config: Config = Depends(get_config),
-    current_user: dict[str, Any] = Depends(require_admin_or_permission(UserPermission.MANAGE_REQUESTS)),
-    lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
-) -> dict[str, Any]:
-    """Endpoint to approve a request, updating status to processing and dispatching to Lidarr or native acquisition."""
-    req = db.get_request(request_id)
-    if not req:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+# Approval searches run one at a time so approving many requests doesn't fire many indexer searches at once.
+_APPROVAL_DISPATCH_LOCK = threading.Lock()
+_approval_queue: collections.deque[
+    tuple[Database, Config, list[dict[str, Any]], Optional[str], Optional[LidarrClient]]
+] = collections.deque()
 
+
+class BulkApprovePayload(BaseModel):
+    """``ids`` None approves every pending request (optionally only those from ``source``)."""
+
+    ids: Optional[list[str]] = Field(None, max_length=1000)
+    source: Optional[str] = Field(None, max_length=32)
+
+
+def _lidarr_item(req: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": req["id"],
+        "artist": req["artist"],
+        "album": (req.get("album") or req["title"]) if req.get("item_type") == "album" else (req.get("album") or ""),
+        "title": req["title"],
+        "item_type": req.get("item_type") or "track",
+        "is_request": True,
+    }
+
+
+def _native_dispatch_one(db: Database, req: dict[str, Any], actor_user_id: Optional[str]) -> None:
+    request_id = req["id"]
+    try:
+        seed_request_catalog(
+            db,
+            req,
+            discovery_client=get_shared_discovery_client(db),
+            enricher=get_shared_enricher(db),
+        )
+    except Exception as e:
+        logger.error("Error seeding catalog for approved request %s (%s)", request_id, type(e).__name__)
+    try:
+        grab_res = acquisition_coordinator.search_and_grab(
+            artist=req["artist"],
+            title=req["title"],
+            album=req.get("album"),
+            item_type=req.get("item_type", "track"),
+            request_id=request_id,
+            db=db,
+            trigger=request_trigger(db, req, kind=TRIGGER_REQUEST_APPROVED, actor_user_id=actor_user_id),
+        )
+        if grab_res.get("success"):
+            logger.info("Native acquisition grabbed approved request %s (%s - %s)", request_id, req["artist"], req["title"])
+        else:
+            logger.info("Native acquisition found no match for approved request %s: %s", request_id, grab_res.get("message"))
+    except Exception as e:  # coordinator drivers raise heterogeneous errors; the request stays approved
+        logger.error("Error in native acquisition for approved request %s (%s)", request_id, type(e).__name__)
+
+
+def _run_dispatch(item: tuple[Database, Config, list[dict[str, Any]], Optional[str], Optional[LidarrClient]]) -> None:
+    db, config, reqs, actor_user_id, lidarr_client = item
+
+    def _lidarr() -> None:
+        dispatch_to_lidarr(db, lidarr_client, [_lidarr_item(r) for r in reqs], config)
+
+    def _native() -> None:
+        if not native_is_configured(db):
+            return
+        for r in reqs:
+            _native_dispatch_one(db, r, actor_user_id)
+
+    try:
+        run_for_mode(db, native=_native, lidarr=_lidarr)
+    except ModeChanged:
+        logger.warning("Library manager kept changing; %d approved request(s) stay in processing", len(reqs))
+
+
+def _dispatch_approved(
+    db: Database,
+    config: Config,
+    reqs: list[dict[str, Any]],
+    actor_user_id: Optional[str],
+    lidarr_client: Optional[LidarrClient],
+) -> None:
+    """Queues approved requests for search/grab and drains the queue if nobody else is.
+
+    Never waits: if another thread holds the lock it will run this item, so no server thread parks here.
+    """
+    _approval_queue.append((db, config, reqs, actor_user_id, lidarr_client))
+    while _approval_queue:
+        if not _APPROVAL_DISPATCH_LOCK.acquire(blocking=False):
+            return
+        try:
+            while _approval_queue:
+                _run_dispatch(_approval_queue.popleft())
+        finally:
+            _APPROVAL_DISPATCH_LOCK.release()
+
+
+def _mark_approved(db: Database, req: dict[str, Any], current_user: dict[str, Any]) -> dict[str, Any]:
+    """Sets PROCESSING, records the event and sends the approval notification. Returns the updated row."""
+    request_id = req["id"]
     db.update_request_status(request_id, RequestStatus.PROCESSING)
     updated = db.get_request(request_id)
     record_request_event(
         db, "request_approved", req, message="Approved",
         actor_user_id=_actor_id(current_user),
     )
-
-    def _lidarr_approve() -> None:
-        dispatch_to_lidarr(
-            db,
-            lidarr_client,
-            [
-                {
-                    "id": request_id,
-                    "artist": req["artist"],
-                    "album": (req.get("album") or req["title"]) if req.get("item_type") == "album" else (req.get("album") or ""),
-                    "title": req["title"],
-                    "item_type": req.get("item_type") or "track",
-                    "is_request": True,
-                }
-            ],
-            config,
-        )
-
-    def _native_approve() -> None:
-        if not native_is_configured(db):
-            return
-        try:
-            seed_request_catalog(
-                db,
-                req,
-                discovery_client=get_shared_discovery_client(db),
-                enricher=get_shared_enricher(db),
-            )
-        except Exception as e:
-            logger.error("Error seeding catalog for approved request %s (%s)", request_id, type(e).__name__)
-        try:
-            grab_res = acquisition_coordinator.search_and_grab(
-                artist=req["artist"],
-                title=req["title"],
-                album=req.get("album"),
-                item_type=req.get("item_type", "track"),
-                request_id=request_id,
-                db=db,
-                trigger=request_trigger(db, req, kind=TRIGGER_REQUEST_APPROVED, actor_user_id=_actor_id(current_user)),
-            )
-            if grab_res.get("success"):
-                logger.info("Native acquisition grabbed approved request %s (%s - %s)", request_id, req["artist"], req["title"])
-            else:
-                logger.info("Native acquisition found no match for approved request %s: %s", request_id, grab_res.get("message"))
-        except Exception as e:  # coordinator drivers raise heterogeneous errors; the request stays approved
-            logger.error("Error in native acquisition for approved request %s (%s)", request_id, type(e).__name__)
-
-    try:
-        run_for_mode(db, native=_native_approve, lidarr=_lidarr_approve)
-    except ModeChanged:
-        logger.warning("Library manager kept changing; approved request %s stays in processing", request_id)
-
     res_req = updated or req
     dispatch_data = dict(res_req)
     if not dispatch_data.get("requested_by") and dispatch_data.get("user_id"):
@@ -424,6 +459,52 @@ def approve_request(
         dispatch_data["actor_user_id"] = str(current_user["id"])
     notification_dispatcher.dispatch(NotificationEvent.REQUEST_APPROVED, data=dispatch_data, db=db)
     return res_req
+
+
+@router.post("/{request_id}/approve", response_model=RequestRecord, response_model_exclude_unset=True)
+def approve_request(
+    request_id: str,
+    background_tasks: BackgroundTasks,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    current_user: dict[str, Any] = Depends(require_admin_or_permission(UserPermission.MANAGE_REQUESTS)),
+    lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
+) -> dict[str, Any]:
+    """Approves a request: marks it processing and notifies at once; the search/grab runs after the response."""
+    req = db.get_request(request_id)
+    if not req:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Request not found")
+
+    res_req = _mark_approved(db, req, current_user)
+    background_tasks.add_task(_dispatch_approved, db, config, [req], _actor_id(current_user), lidarr_client)
+    return res_req
+
+
+@router.post("/bulk-approve", response_model=BulkApproveResult, response_model_exclude_unset=True)
+def bulk_approve_requests(
+    body: BulkApprovePayload,
+    background_tasks: BackgroundTasks,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    current_user: dict[str, Any] = Depends(require_admin_or_permission(UserPermission.MANAGE_REQUESTS)),
+    lidarr_client: Optional[LidarrClient] = Depends(get_lidarr_client),
+) -> dict[str, int]:
+    """Approves many pending requests (all of them, or the given ids); their searches run one at a time afterwards."""
+    if body.ids is None:
+        candidates = db.list_requests(status=RequestStatus.PENDING, source=body.source)
+    else:
+        candidates = [db.get_request(i) for i in body.ids]
+    approved: list[dict[str, Any]] = []
+    skipped = 0
+    for req in candidates:
+        if not req or req.get("status") != RequestStatus.PENDING:
+            skipped += 1
+            continue
+        _mark_approved(db, req, current_user)
+        approved.append(req)
+    if approved:
+        background_tasks.add_task(_dispatch_approved, db, config, approved, _actor_id(current_user), lidarr_client)
+    return {"approved": len(approved), "skipped": skipped}
 
 
 @router.post("/{request_id}/reject", response_model=RequestRecord, response_model_exclude_unset=True)

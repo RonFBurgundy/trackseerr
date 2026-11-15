@@ -65,6 +65,11 @@ class RequestDeleted(ApiModel):
     id: str
 
 
+class BulkApproveResult(ApiModel):
+    approved: int
+    skipped: int
+
+
 class RetryResult(ApiModel):
     success: bool
     status: str
