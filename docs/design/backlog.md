@@ -230,6 +230,16 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
 34. **DONE 2026-10-15 · P3 · Library Retag and MusicBrainz Release Match report no progress** (`progress: null` while running,
     so the bar is indeterminate for a 70-minute task). Add current/total via `job_tracker` and `_task_progress`.
 
+## User QA list (2026-11-15)
+
+1. **P2 · Bulk edit user permissions.** Row selection on Settings → Users plus an "add / remove permissions for
+   selected users" action. Needs a bulk endpoint (`POST /api/admin/users/bulk-permissions` with `ids`, `add`, `remove`
+   bits), guarded so an admin can't strip their own admin bit, and the same `PermissionSwitches` component the
+   create/edit dialogs use. Start: `trackseerr/api/routes/admin_users.py` (`apply_user_changes`), `UsersPanel.tsx`.
+2. **P3 · Select individual pending requests to approve or reject together.** "Approve all" (2026-11-15) covers the
+   common case; per-row checkboxes on Requests → Pending would feed the existing `POST /api/requests/bulk-approve`
+   `ids` field. Add a matching bulk reject.
+
 ## Post-1.0 features
 
 35. **P2 · Collect your way: ripping and buying, not only downloading** (requested 2026-11-07). Help users get music
