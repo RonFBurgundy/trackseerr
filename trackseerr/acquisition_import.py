@@ -907,8 +907,6 @@ class ImportPipelineMixin(ImportCatalogMixin):
         candidate_src = self._resolve_candidate_source(db, ctx, job)
         if candidate_src is None and not self.allowed_roots:
             return False
-        if candidate_src and self._source_not_arrived(db, job, candidate_src):
-            return False
 
         selected_files = _parse_job_selected_files(job.item)
         if selected_files:
@@ -927,6 +925,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 return False
             job.audio_files = sorted(dict.fromkeys(existing))
         else:
+            if candidate_src and self._source_not_arrived(db, job, candidate_src):
+                return False
             search_term = job.item.get("title") or job.item.get("artist") or ""
             self._archive_errors = []
             job.audio_files = self._find_audio_files(candidate_src, search_term)

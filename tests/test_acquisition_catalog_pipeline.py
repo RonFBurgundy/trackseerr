@@ -528,9 +528,12 @@ def test_failing_download_automatically_blocklists(test_db: Database, workspace_
         )
     )
 
+    # A completed download whose folder is missing waits (not a failure), so
+    # create the folder empty to exercise the genuine no-audio failure.
+    (downloads_dir / "empty_folder").mkdir(parents=True, exist_ok=True)
     mock_driver.get_status.return_value = {
         "status": DownloadStatus.COMPLETED.value,
-        "source_path": str(downloads_dir / "nonexistent_folder"),
+        "source_path": str(downloads_dir / "empty_folder"),
     }
 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver):
