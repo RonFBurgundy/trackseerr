@@ -12,6 +12,7 @@ import {
 import { PERMISSION_PRESETS } from '@/types/account';
 import type { CreateLocalUserPayload, CreateLocalUserResult } from '@/types/account';
 import { errorMessage } from '@/services/apiClient';
+import { PermissionSwitches } from './PermissionSwitches';
 
 export interface CreateUserModalProps {
   isOpen: boolean;
@@ -24,7 +25,7 @@ const USERNAME_RE = /^[a-z0-9._-]{3,32}$/;
 export const CreateUserModal: React.FC<CreateUserModalProps> = ({ isOpen, onClose, onCreate }) => {
   const [username, setUsername] = useState<string>('');
   const [email, setEmail] = useState<string>('');
-  const [presetId, setPresetId] = useState<string>(PERMISSION_PRESETS[0].id);
+  const [permissions, setPermissions] = useState<number>(PERMISSION_PRESETS[0].permissions);
   const [isBusy, setIsBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   // The invite link exists only in the creation response; it is held here until closed.
@@ -33,7 +34,7 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ isOpen, onClos
   const close = () => {
     setUsername('');
     setEmail('');
-    setPresetId(PERMISSION_PRESETS[0].id);
+    setPermissions(PERMISSION_PRESETS[0].permissions);
     setError(null);
     setInviteUrl(null);
     onClose();
@@ -41,18 +42,19 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ isOpen, onClos
 
   const normalized = username.trim().toLowerCase();
   const valid = USERNAME_RE.test(normalized);
+  // Derived, so the preset chip lights only while the switches still match it.
+  const presetId = PERMISSION_PRESETS.find((p) => p.permissions === permissions)?.id ?? '';
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!valid || isBusy) return;
-    const preset = PERMISSION_PRESETS.find((p) => p.id === presetId) ?? PERMISSION_PRESETS[0];
     setIsBusy(true);
     setError(null);
     try {
       const res = await onCreate({
         username: normalized,
         ...(email.trim() ? { email: email.trim() } : {}),
-        permissions: preset.permissions,
+        permissions,
       });
       setInviteUrl(res.invite_url);
     } catch (err: unknown) {
@@ -127,19 +129,32 @@ export const CreateUserModal: React.FC<CreateUserModalProps> = ({ isOpen, onClos
           </FormField>
           <fieldset className="space-y-2">
             <legend className="text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)] mb-1.5">
-              Permissions preset
+              Start from
             </legend>
             <SegmentedChoice
               name="preset"
-              ariaLabel="Permissions preset"
+              ariaLabel="Start from"
               options={PERMISSION_PRESETS}
               value={presetId}
-              onChange={setPresetId}
+              onChange={(id) => {
+                const preset = PERMISSION_PRESETS.find((p) => p.id === id);
+                if (preset) setPermissions(preset.permissions);
+              }}
             />
-            <p className="text-[11px] font-mono text-[var(--text-muted)]">
-              Fine-tune permissions and quotas after creating the user.
-            </p>
           </fieldset>
+          <fieldset className="space-y-2">
+            <legend className="text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)] mb-1.5">
+              Permissions
+            </legend>
+            <PermissionSwitches
+              idPrefix="new-user-permission"
+              value={permissions}
+              onChange={setPermissions}
+            />
+          </fieldset>
+          <p className="text-[11px] font-mono text-[var(--text-muted)]">
+            Quotas can be changed after creating the user.
+          </p>
           {error && <StatusMessage variant="error">{error}</StatusMessage>}
         </form>
       )}

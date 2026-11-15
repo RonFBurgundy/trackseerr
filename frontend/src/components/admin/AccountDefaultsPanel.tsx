@@ -8,6 +8,7 @@ import {
   TapeDeckButton,
   inputClass,
 } from '@/components/ui';
+import { PermissionSwitches } from './PermissionSwitches';
 import type { AccountDefaultSettings } from '@/types/account';
 import { errorMessage } from '@/services/apiClient';
 
@@ -16,7 +17,10 @@ export interface AccountDefaultsPanelProps {
   onSave: (next: AccountDefaultSettings) => Promise<void>;
 }
 
-type NumericKey = Exclude<keyof AccountDefaultSettings, 'require_mfa_local'>;
+type NumericKey = Exclude<
+  keyof AccountDefaultSettings,
+  'require_mfa_local' | 'default_user_permissions'
+>;
 
 const FIELDS: ReadonlyArray<{ key: NumericKey; label: string }> = [
   { key: 'default_quota_tracks', label: 'Tracks per window' },
@@ -78,6 +82,21 @@ export const AccountDefaultsPanel: React.FC<AccountDefaultsPanelProps> = ({ defa
             </FormField>
           ))}
         </div>
+        <fieldset>
+          <legend className="text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)] mb-2">
+            Default permissions for new users
+          </legend>
+          <p className="text-[11px] font-mono text-[var(--text-muted)] mb-2">
+            Given to people the first time they sign in with Plex or are added from your media server.
+            Existing users don't change.
+          </p>
+          <PermissionSwitches
+            idPrefix="default-permission"
+            value={draft.default_user_permissions}
+            onChange={(next) => setDraft({ ...draft, default_user_permissions: next })}
+            hideAdmin
+          />
+        </fieldset>
         {error && <StatusMessage variant="error">{error}</StatusMessage>}
         {saved && <StatusMessage variant="success">Defaults saved.</StatusMessage>}
         <TapeDeckButton
