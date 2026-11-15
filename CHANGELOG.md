@@ -130,6 +130,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- If `ADMIN_PASSWORD` is turned down (for example because it is too common), the sign-in page now says why no admin account was created, instead of only "Invalid username or password".
 - Adding an artist whose name contains characters that aren't allowed in folder names (for example AC/DC) no longer creates a folder inside a folder; the name is cleaned the same way the naming settings clean it.
 - The `MUSICBRAINZ_URL` and `MUSICBRAINZ_MIRROR_URL` environment variables now work: when set, they choose the MusicBrainz server and lock the setting on the Metadata Sources page.
 - Adding a Spotify playlist works again. Spotify stopped sending cover art for some playlists, which made adding them fail.

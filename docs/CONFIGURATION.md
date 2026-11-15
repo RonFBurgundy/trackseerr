@@ -50,7 +50,7 @@ The gateway refuses to start if any of these are set on it: `PLEX_TOKEN`, `SUBSO
 | Variable | Default | Description |
 |---|---|---|
 | `ADMIN_USERNAME` | `admin` | Name of the first local admin. |
-| `ADMIN_PASSWORD` | unset | Creates the first local admin if none exists. At least 12 characters. Needed when there is no Plex server to sign in with. Ignored once an admin exists. |
+| `ADMIN_PASSWORD` | unset | Creates the first local admin if none exists. At least 12 characters, not a common password, and not containing the username. Needed when there is no Plex server to sign in with. Ignored once an admin exists. |
 
 ## Media server
 
