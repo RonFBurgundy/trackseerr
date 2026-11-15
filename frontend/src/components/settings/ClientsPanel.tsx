@@ -357,6 +357,55 @@ export const ClientsPanel: React.FC<ClientsPanelProps> = ({ clients, reload, onT
             </div>
           )}
 
+          <fieldset className="space-y-2 border border-[#2a2a2a] rounded-[4px] p-2.5 sm:col-span-2">
+            <legend className="px-1 text-[10px] font-mono uppercase tracking-wider text-neutral-400">Remote path mappings</legend>
+            <p className="text-[10px] font-mono text-neutral-500">
+              Only needed when the download client sees a different folder than TrackSeerr, for example a seedbox or another
+              container. The client&apos;s path is replaced with TrackSeerr&apos;s path.
+            </p>
+            {draft.pathMappings.map((m, i) => (
+              <div key={i} className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-2 items-end">
+                <div>
+                  <label htmlFor={`client-map-remote-${i}`} className={compactLabelClass}>Client path</label>
+                  <input
+                    id={`client-map-remote-${i}`}
+                    name="remote_path"
+                    type="text"
+                    value={m.remote_path}
+                    onChange={(e) => draft.updatePathMapping(i, 'remote_path', e.target.value)}
+                    placeholder="/home/user/downloads"
+                    autoComplete="off"
+                    className={`${compactInputClass} font-mono`}
+                  />
+                </div>
+                <div>
+                  <label htmlFor={`client-map-local-${i}`} className={compactLabelClass}>TrackSeerr path</label>
+                  <input
+                    id={`client-map-local-${i}`}
+                    name="local_path"
+                    type="text"
+                    value={m.local_path}
+                    onChange={(e) => draft.updatePathMapping(i, 'local_path', e.target.value)}
+                    placeholder="/mnt/seedbox"
+                    autoComplete="off"
+                    className={`${compactInputClass} font-mono`}
+                  />
+                </div>
+                <TapeDeckButton
+                  type="button"
+                  size="sm"
+                  aria-label="Remove path mapping"
+                  title="Remove path mapping"
+                  onClick={() => draft.removePathMapping(i)}
+                  icon={<Trash2 className="h-4 w-4" />}
+                />
+              </div>
+            ))}
+            <TapeDeckButton type="button" size="sm" onClick={draft.addPathMapping} icon={<Plus className="h-4 w-4" />}>
+              Add mapping
+            </TapeDeckButton>
+          </fieldset>
+
           <div>
             <label htmlFor="client-priority" className={compactLabelClass}>Priority</label>
             <input
