@@ -615,6 +615,7 @@ def test_account_settings_get_put_roundtrip(env):
     assert client.get("/api/admin/settings/accounts", headers=admin).json() == {
         "require_mfa_local": False, "default_quota_tracks": 25, "default_quota_albums": 10,
         "default_quota_discographies": 1, "default_quota_window_days": 7,
+        "default_user_permissions": 34,
     }
     res = client.put(
         "/api/admin/settings/accounts",
@@ -625,12 +626,23 @@ def test_account_settings_get_put_roundtrip(env):
     assert res.json() == {
         "require_mfa_local": True, "default_quota_tracks": 40, "default_quota_albums": 10,
         "default_quota_discographies": 1, "default_quota_window_days": 30,
+        "default_user_permissions": 34,
     }
     assert db.get_account_settings()["default_quota_tracks"] == 40
     # the new default applies to users without an override
     users = {u["username"]: u for u in client.get("/api/admin/users", headers=admin).json()}
     assert users["alice"]["quotas"]["effective"]["tracks"] == 40
     assert users["alice"]["quotas"]["effective"]["window_days"] == 30
+
+
+def test_default_user_permissions_roundtrip(env):
+    client, admin, db = env["client"], env["admin"], env["db"]
+    wanted = 2 | 4 | 8 | 32
+    res = client.put("/api/admin/settings/accounts", json={"default_user_permissions": wanted}, headers=admin)
+    assert res.status_code == 200
+    assert res.json()["default_user_permissions"] == wanted
+    assert client.get("/api/admin/settings/accounts", headers=admin).json()["default_user_permissions"] == wanted
+    assert db.default_user_permissions() == wanted
 
 
 @pytest.mark.parametrize(
@@ -643,6 +655,9 @@ def test_account_settings_get_put_roundtrip(env):
         {"require_mfa_local": "yes"},
         {"default_quota_tracks": "5"},
         {"default_quota_tracks": True},
+        {"default_user_permissions": 1 | 2},
+        {"default_user_permissions": "2"},
+        {"default_user_permissions": 4096},
         {},
     ],
 )

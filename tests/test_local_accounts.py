@@ -953,6 +953,7 @@ def test_migration_v27_schema_and_defaults(db):
     assert db.get_account_settings() == {
         "require_mfa_local": False, "default_quota_tracks": 25, "default_quota_albums": 10,
         "default_quota_discographies": 1, "default_quota_window_days": 7,
+        "default_user_permissions": 34,
     }
     top = db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
     assert top == SCHEMA_VERSION
@@ -1035,3 +1036,20 @@ def test_no_credential_ever_logged(core, db, caplog):
     server = "\n".join(r.getMessage() for r in caplog.records if not r.name.startswith(("httpx", "asyncio")))
     for needle in (PW, "wrong password here", "ghost password here", secret, creds["password_hash"], *codes):
         assert needle and needle not in server, needle
+
+
+def test_new_user_gets_configured_default_permissions(db):
+    db.update_account_settings({"default_user_permissions": 2 | 4})
+    assert db.upsert_user("5001", "pia")["permissions"] == 6
+    assert db.ensure_user("5002", "quinn")["permissions"] == 6
+    imported = db.import_media_server_user("5003", "rex", auth_type="jellyfin")
+    assert imported is not None and imported["permissions"] == 6
+
+    db.update_account_settings({"default_user_permissions": 2 | 8})
+    assert db.upsert_user("5001", "pia")["permissions"] == 6
+    assert db.ensure_user("5002", "quinn")["permissions"] == 6
+    again = db.import_media_server_user("5003", "rex", auth_type="jellyfin")
+    assert again is not None and again["permissions"] == 6
+    # a brand-new user gets the new value; admins keep the fixed admin value
+    assert db.upsert_user("5004", "sam")["permissions"] == 10
+    assert db.upsert_user("5005", "root", is_admin=True)["permissions"] == 35

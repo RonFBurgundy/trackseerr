@@ -194,6 +194,7 @@ class AccountSettingsBody(BaseModel):
     default_quota_albums: Optional[StrictInt] = None
     default_quota_discographies: Optional[StrictInt] = None
     default_quota_window_days: Optional[StrictInt] = None
+    default_user_permissions: Optional[StrictInt] = None
 
     @field_validator("default_quota_tracks", "default_quota_albums", "default_quota_discographies")
     @classmethod
@@ -204,6 +205,16 @@ class AccountSettingsBody(BaseModel):
     @classmethod
     def _check_window(cls, value: Optional[int]) -> Optional[int]:
         return _validate_quota(value, window=True)
+
+    @field_validator("default_user_permissions")
+    @classmethod
+    def _check_default_permissions(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        value = validate_permissions(value)
+        if value & int(UserPermission.ADMIN):
+            raise ValueError("The default cannot include admin")
+        return value
 
 
 # --------------------------------------------------------------------------- serialisation

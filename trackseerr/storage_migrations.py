@@ -85,6 +85,7 @@ class MigrationsMixin:
                 (95, self._migration_v95),
                 (96, self._migration_v96),
                 (97, self._migration_v97),
+                (98, self._migration_v98),
             ]
 
             applied = 0
@@ -305,6 +306,14 @@ class MigrationsMixin:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_exclusions_scope_mbid ON exclusions(scope, mbid)"
         )
+
+    def _migration_v98(self, cur: sqlite3.Cursor) -> None:
+        """v98: Add general_settings.default_user_permissions (bitmask new non-admin users start with)."""
+        cur.execute("PRAGMA table_info(general_settings)")
+        if "default_user_permissions" not in {row[1] for row in cur.fetchall()}:
+            cur.execute(
+                "ALTER TABLE general_settings ADD COLUMN default_user_permissions INTEGER NOT NULL DEFAULT 34"
+            )
 
     def _migration_v97(self, cur: sqlite3.Cursor) -> None:
         """v97: Expression index on the album date key so the release-date scrubber and sort read an index."""

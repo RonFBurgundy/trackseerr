@@ -6731,6 +6731,8 @@ export interface components {
             default_quota_tracks: number;
             /** Default Quota Window Days */
             default_quota_window_days: number;
+            /** Default User Permissions */
+            default_user_permissions: number;
             /** Require Mfa Local */
             require_mfa_local: boolean;
         };
@@ -6744,6 +6746,8 @@ export interface components {
             default_quota_tracks?: number | null;
             /** Default Quota Window Days */
             default_quota_window_days?: number | null;
+            /** Default User Permissions */
+            default_user_permissions?: number | null;
             /** Require Mfa Local */
             require_mfa_local?: boolean | null;
         };

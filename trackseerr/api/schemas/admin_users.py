@@ -69,3 +69,4 @@ class AccountSettings(ApiModel):
     default_quota_albums: int
     default_quota_discographies: int
     default_quota_window_days: int
+    default_user_permissions: int

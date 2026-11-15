@@ -208,7 +208,7 @@ def test_admin_users_full_lifecycle(client, db, admin):
     assert _ok(client.request("DELETE", "/api/admin/users/1001", json={"confirm_username": "alice"}, headers=admin))["status"] == "deleted"
     assert _ok(client.post("/api/admin/users/1001/restore", headers=admin)) == {"status": "restored", "id": "1001"}
     settings = _ok(client.get("/api/admin/settings/accounts", headers=admin))
-    assert set(settings) == {"require_mfa_local", "default_quota_tracks", "default_quota_albums", "default_quota_discographies", "default_quota_window_days"}
+    assert set(settings) == {"require_mfa_local", "default_quota_tracks", "default_quota_albums", "default_quota_discographies", "default_quota_window_days", "default_user_permissions"}
     assert _ok(client.put("/api/admin/settings/accounts", json={"default_quota_tracks": 7}, headers=admin))["default_quota_tracks"] == 7
 
 
