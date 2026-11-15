@@ -1092,6 +1092,33 @@ class TestMusicRequestsAPI:
             _dispatch_approved(test_db, test_config, reqs, None, None)
         assert [c.kwargs["request_id"] for c in mock_grab.call_args_list] == ["r1", "r2"]
 
+    def test_dispatch_approved_drains_items_queued_while_running(self, test_db, test_config):
+        from trackseerr.api.routes import requests as routes
+        from trackseerr.api.routes.requests import _APPROVAL_DISPATCH_LOCK, _dispatch_approved
+
+        r1 = {"id": "r1", "artist": "A", "title": "One", "item_type": "track"}
+        r2 = {"id": "r2", "artist": "B", "title": "Two", "item_type": "track"}
+        order = []
+        nested_returned_before_first_finished = []
+
+        def fake_one(db, req, actor):
+            order.append(req["id"])
+            if req["id"] == "r1":
+                _dispatch_approved(test_db, test_config, [r2], None, None)
+                nested_returned_before_first_finished.append("r2" not in order)
+
+        with (
+            patch("trackseerr.api.routes.requests.run_for_mode", side_effect=lambda db, native, lidarr: native()),
+            patch("trackseerr.api.routes.requests.native_is_configured", return_value=True),
+            patch("trackseerr.api.routes.requests._native_dispatch_one", side_effect=fake_one),
+        ):
+            _dispatch_approved(test_db, test_config, [r1], None, None)
+        assert order == ["r1", "r2"]
+        assert nested_returned_before_first_finished == [True]
+        assert not routes._approval_queue
+        assert _APPROVAL_DISPATCH_LOCK.acquire(blocking=False)
+        _APPROVAL_DISPATCH_LOCK.release()
+
     def test_native_approve_seed_failure_still_grabs(
         self, app_and_client, test_db, test_config, seeded_users
     ):

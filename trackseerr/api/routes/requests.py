@@ -1,5 +1,6 @@
 """Requests REST API endpoints for user requests, approval workflows, and Lidarr dispatch."""
 
+import collections
 import logging
 import os
 import threading
@@ -349,6 +350,9 @@ def _actor_id(user: dict[str, Any]) -> Optional[str]:
 
 # Approval searches run one at a time so approving many requests doesn't fire many indexer searches at once.
 _APPROVAL_DISPATCH_LOCK = threading.Lock()
+_approval_queue: collections.deque[
+    tuple[Database, Config, list[dict[str, Any]], Optional[str], Optional[LidarrClient]]
+] = collections.deque()
 
 
 class BulkApprovePayload(BaseModel):
@@ -398,14 +402,8 @@ def _native_dispatch_one(db: Database, req: dict[str, Any], actor_user_id: Optio
         logger.error("Error in native acquisition for approved request %s (%s)", request_id, type(e).__name__)
 
 
-def _dispatch_approved(
-    db: Database,
-    config: Config,
-    reqs: list[dict[str, Any]],
-    actor_user_id: Optional[str],
-    lidarr_client: Optional[LidarrClient],
-) -> None:
-    """Runs the search/grab for approved requests, one dispatch at a time (runs after the HTTP response)."""
+def _run_dispatch(item: tuple[Database, Config, list[dict[str, Any]], Optional[str], Optional[LidarrClient]]) -> None:
+    db, config, reqs, actor_user_id, lidarr_client = item
 
     def _lidarr() -> None:
         dispatch_to_lidarr(db, lidarr_client, [_lidarr_item(r) for r in reqs], config)
@@ -416,11 +414,32 @@ def _dispatch_approved(
         for r in reqs:
             _native_dispatch_one(db, r, actor_user_id)
 
-    with _APPROVAL_DISPATCH_LOCK:
+    try:
+        run_for_mode(db, native=_native, lidarr=_lidarr)
+    except ModeChanged:
+        logger.warning("Library manager kept changing; %d approved request(s) stay in processing", len(reqs))
+
+
+def _dispatch_approved(
+    db: Database,
+    config: Config,
+    reqs: list[dict[str, Any]],
+    actor_user_id: Optional[str],
+    lidarr_client: Optional[LidarrClient],
+) -> None:
+    """Queues approved requests for search/grab and drains the queue if nobody else is.
+
+    Never waits: if another thread holds the lock it will run this item, so no server thread parks here.
+    """
+    _approval_queue.append((db, config, reqs, actor_user_id, lidarr_client))
+    while _approval_queue:
+        if not _APPROVAL_DISPATCH_LOCK.acquire(blocking=False):
+            return
         try:
-            run_for_mode(db, native=_native, lidarr=_lidarr)
-        except ModeChanged:
-            logger.warning("Library manager kept changing; %d approved request(s) stay in processing", len(reqs))
+            while _approval_queue:
+                _run_dispatch(_approval_queue.popleft())
+        finally:
+            _APPROVAL_DISPATCH_LOCK.release()
 
 
 def _mark_approved(db: Database, req: dict[str, Any], current_user: dict[str, Any]) -> dict[str, Any]:
