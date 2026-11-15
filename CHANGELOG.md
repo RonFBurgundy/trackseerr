@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- **rTorrent / ruTorrent** can be added as a torrent download client (Settings → Media Management → Clients). It connects through rTorrent's XML-RPC address (usually `/RPC2`), with an optional username and password, and sets a ruTorrent label. TrackSeerr sends the .torrent file itself, so a remote seedbox doesn't need to reach your indexers. See "Client setup notes" in the Acquisition guide.
 - New **Media Management → Metadata Sources** page with a **MusicBrainz server** setting and a **Test** button, so you can use your own MusicBrainz mirror (for example `http://192.168.1.10:5000`; adding `/ws/2` is fine). AcoustID fingerprinting settings moved here from Root Folders & Naming. Both can be found from the navigation search.
 - `{Album Type}` can be a folder of its own in the track formats (for example `Artist/EP/…`), and `{medium:00}` can be used in the Standard Track Format too. The naming token list offers both.
 - Songs inside torrent packs and pools can now be found and downloaded on their own. Turn on **Index packs** for a torrent indexer and TrackSeerr reads the song lists inside its pack, pool, chart and "VA" torrents (only the small .torrent file is downloaded). Searches then find songs buried in those packs, Manual search marks them **In pack**, and qBittorrent downloads just that song instead of the whole pack. Needs qBittorrent. See "Songs inside packs and pools" in the Acquisition guide.
@@ -130,6 +131,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- A finished download whose files haven't reached TrackSeerr yet (for example while a seedbox sync is still copying them) now waits with "Waiting for files to appear" and is tried again, instead of being marked failed and blocklisted.
 - If `ADMIN_PASSWORD` is turned down (for example because it is too common), the sign-in page now says why no admin account was created, instead of only "Invalid username or password".
 - Adding an artist whose name contains characters that aren't allowed in folder names (for example AC/DC) no longer creates a folder inside a folder; the name is cleaned the same way the naming settings clean it.
 - The `MUSICBRAINZ_URL` and `MUSICBRAINZ_MIRROR_URL` environment variables now work: when set, they choose the MusicBrainz server and lock the setting on the Metadata Sources page.

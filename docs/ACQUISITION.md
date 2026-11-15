@@ -46,6 +46,7 @@ Add clients in **Settings > Media Management > Clients**.
 | qBittorrent | BitTorrent | Web UI address, username, password |
 | Transmission | BitTorrent | RPC address, RPC path, username (optional), password (optional) |
 | Deluge | BitTorrent | Web UI address, password |
+| rTorrent / ruTorrent | BitTorrent | XML-RPC address, RPC path, username (optional), password (optional) |
 | SABnzbd | Usenet | Address, API key |
 | NZBGet | Usenet | Address, username, password |
 | slskd | Soulseek | Address, API key |
@@ -58,6 +59,8 @@ TrackSeerr asks each client where it saves files. If TrackSeerr cannot see that 
 
 - **Transmission:** Enable RPC in Transmission preferences. The default RPC path is `/transmission/rpc`. Basic authentication is optional. TrackSeerr passes its category as torrent labels.
 - **Deluge:** Enable the Deluge Web UI. TrackSeerr connects with the Web UI password and attaches to the Deluge daemon. Enable the Label plugin in Deluge preferences if you want category labels.
+- **rTorrent / ruTorrent:** TrackSeerr talks to rTorrent's XML-RPC address. On most seedboxes this is `https://your-server/RPC2`, behind the same username and password as ruTorrent. Enter the server address, keep the RPC path as `/RPC2` unless your provider gives another one, and add the username and password if it asks for them. The label appears in ruTorrent's Label column. TrackSeerr downloads the .torrent file itself and sends it to rTorrent, so rTorrent does not need to reach your indexers. rTorrent can't delete files through this connection, so removing a torrent from TrackSeerr leaves its files on the server, and seed limits are not sent to it (TrackSeerr's own seeding rules still apply).
+- **Remote seedbox:** if your torrent client runs on another machine, copying finished files to a folder TrackSeerr can see is up to you (for example with rclone, Syncthing or a network mount). When a download is finished on the seedbox but its files have not arrived yet, TrackSeerr shows "Waiting for files to appear" and tries again on its next check, instead of failing the download.
 - **NZBGet:** Enter the NZBGet web address and your ControlUsername and ControlPassword. Category defaults to `music`. NZBGet leaves files on disk (TrackSeerr's import step moves them).
 - **qBittorrent:** Enable the Web UI. Enter the address, username, and password. Category defaults to `trackseerr`.
 - **SABnzbd:** Enter the address and API key from SABnzbd General settings.
@@ -110,7 +113,7 @@ How it works:
 2. Searches, automatic and manual, also look in this list. A song found inside a pack shows **In pack** in Manual search, with the pack's name.
 3. When TrackSeerr grabs a song from a pack, qBittorrent downloads only that song, not the whole pack. Your indexer's seeding rules still apply to what was downloaded.
 
-Downloading part of a torrent needs **qBittorrent**. Packs are skipped when your torrent client is Transmission or Deluge. Packs whose torrent link is only a magnet link can't be read in advance and are skipped. TrackSeerr keeps the list for 90 days.
+Downloading part of a torrent needs **qBittorrent**. Packs are skipped when your torrent client is Transmission, Deluge or rTorrent. Packs whose torrent link is only a magnet link can't be read in advance and are skipped. TrackSeerr keeps the list for 90 days.
 
 ## Quality and profiles
 
