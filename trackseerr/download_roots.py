@@ -196,7 +196,13 @@ def build_allowed_roots(
     extra_roots: Iterable[str] = (),
     driver: Any = None,
 ) -> AllowedRoots:
-    """Allowed roots for the given clients (each translated through its own mappings) plus legacy staging."""
+    """Allowed roots for the given clients plus legacy staging.
+
+    Each client contributes the folders it reports (translated through its own remote path mappings), and also
+    the local side of every remote path mapping: mappings are admin-configured download locations, so they count
+    as that client's download folders even when the client itself cannot be read. Library, config-dir and symlink
+    guards still apply in ``AllowedRoots.check``.
+    """
     out = AllowedRoots(config_dirs=_config_dirs())
     library_raw = str(media_settings.get("root_folder_path") or "").strip()
     if library_raw:
@@ -209,6 +215,10 @@ def build_allowed_roots(
         if error:
             out.errors.append(f"Could not read download folder from {cfg.get('name') or cfg.get('id')}: {error}")
         seen.extend(roots)
+        for mapping in client_mappings(cfg):
+            local = str(mapping.get("local_path") or "").strip()
+            if local:
+                seen.append(local)
     legacy = _legacy_staging(media_settings)
     if legacy:
         seen.append(legacy)
