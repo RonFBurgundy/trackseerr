@@ -232,6 +232,9 @@ class _PollContext:
     lidarr_mode: bool
 
 
+_SOURCE_WAIT_PREFIX = "Waiting for files to appear"
+
+
 @dataclass
 class _ImportJob:
     """State across import pipeline phases for a single completed download."""
@@ -872,6 +875,27 @@ class ImportPipelineMixin(ImportCatalogMixin):
                 candidate_src = None
         return candidate_src
 
+    def _source_not_arrived(self, db: Database, job: _ImportJob, candidate_src: str) -> bool:
+        """Return True and keep the download COMPLETED while its mapped source is not on disk yet.
+
+        Remote clients report a download complete before a sync delivers the files, so a missing
+        source folder is retried on the next poll instead of failing and blocklisting the release.
+        """
+        try:
+            arrived = Path(candidate_src).exists()
+        except OSError as err:
+            logger.warning("Could not check source path %s for download %s: %s", candidate_src, job.download_id, err)
+            arrived = False
+        if arrived:
+            # Clear our own stale wait message so a retried download does not keep it after it arrives.
+            if str(job.item.get("error_message") or "").startswith(_SOURCE_WAIT_PREFIX):
+                db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message="")
+            return False
+        msg = f"{_SOURCE_WAIT_PREFIX} at {candidate_src} (check the remote path mapping or your sync)"
+        logger.info("Download %s is complete but %s is not on disk yet; will retry", job.download_id, candidate_src)
+        db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message=msg)
+        return True
+
     def _locate_audio_files(
         self,
         db: Database,
@@ -882,6 +906,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
         """Locate downloaded audio files with remote path translation."""
         candidate_src = self._resolve_candidate_source(db, ctx, job)
         if candidate_src is None and not self.allowed_roots:
+            return False
+        if candidate_src and self._source_not_arrived(db, job, candidate_src):
             return False
 
         selected_files = _parse_job_selected_files(job.item)
