@@ -8014,12 +8014,26 @@ export interface components {
             /** Username */
             username?: string | null;
         };
+        /** DownloadRootFolder */
+        DownloadRootFolder: {
+            /** Client Path */
+            client_path: string;
+            /** Found */
+            found: boolean;
+            /** Local Path */
+            local_path: string;
+        };
         /** DownloadRootsItem */
         DownloadRootsItem: {
             /** Client Id */
             client_id: string;
             /** Error */
             error?: string | null;
+            /**
+             * Folders
+             * @default []
+             */
+            folders: components["schemas"]["DownloadRootFolder"][];
             /** Name */
             name: string;
             /** Roots */
