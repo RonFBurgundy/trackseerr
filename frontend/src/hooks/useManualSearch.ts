@@ -147,6 +147,7 @@ export function useManualSearch(
           item_type: target.itemType,
           album_id: target.albumId != null ? String(target.albumId) : null,
           track_id: target.trackId != null ? String(target.trackId) : null,
+          request_id: target.requestId ?? undefined,
         });
         setGrabbedIds((prev) => new Set(prev).add(release.id));
         onToast(`Sent to ${res.client || 'download client'}`);

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, X, Trash2, Clock, CheckCircle2, AlertTriangle, Info, RotateCw } from 'lucide-react';
+import { Check, X, Trash2, Clock, CheckCircle2, AlertTriangle, Info, RotateCw, Search } from 'lucide-react';
 import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
 import { MEDIA_ISSUE_TYPES, REQUEST_ISSUE_TYPES } from '@/types/models';
@@ -15,10 +15,12 @@ import {
 import { PageFrame } from '@/components/layout';
 import { FlatList, ScrubberRail, type FlatListColumn } from '@/components/lists';
 import { AdminIssuesPanel, IssueReportButton, MyIssuesList, untilTime } from '@/components/issues';
+import { ManualSearchModal } from '@/components/manualSearch';
 import { formatRequestSourceBadge, formatSourceLabel } from '@/components/requests';
 import { useToast } from '@/hooks/useToast';
 import type { UseIssuesReturn } from '@/hooks/useIssues';
 import type { AccountInfo } from '@/types/account';
+import type { ManualSearchTarget } from '@/types/manualSearch';
 import { QuotaBars } from '@/components/account';
 import type { RequestsSub, NavigateOptions } from '@/hooks/useAppRoute';
 
@@ -74,11 +76,13 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
     reject,
     remove,
     retry,
+    refresh,
   } = requestsHook;
   const { toast, showToast } = useToast();
 
   const [processingId, setProcessingId] = useState<string | null>(null);
   const [approvingAll, setApprovingAll] = useState<boolean>(false);
+  const [searchTarget, setSearchTarget] = useState<ManualSearchTarget | null>(null);
   const section: 'requests' | 'issues' = sub === 'issues' ? 'issues' : 'requests';
 
   // The request list loads through the hook's filter; keep it in step with the route.
@@ -355,6 +359,27 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
               </TapeDeckButton>
             </>
           )}
+          {isAdmin && (req.status === 'approved' || req.status === 'processing') && (
+            <TapeDeckButton
+              size="sm"
+              disabled={isBusy}
+              onClick={(e) => {
+                e.stopPropagation();
+                setSearchTarget({
+                  artist: req.artist,
+                  album: req.album ?? null,
+                  title: req.item_type === 'album' ? null : req.title,
+                  itemType: req.item_type === 'album' ? 'album' : 'track',
+                  requestId: req.id,
+                });
+              }}
+              collapseLabel
+              aria-label="Manual search"
+              icon={<Search className="h-3.5 w-3.5" />}
+            >
+              Manual search
+            </TapeDeckButton>
+          )}
           {isAdmin && req.status_reason && !isInfoNote(req) && req.status !== 'pending' && req.status !== 'rejected' && (
             <TapeDeckButton
               size="sm"
@@ -394,6 +419,22 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           icon: <X className="h-3.5 w-3.5" />,
           disabled: isBusy,
           onSelect: () => void handleReject(req),
+        });
+      }
+      if (isAdmin && (req.status === 'approved' || req.status === 'processing')) {
+        items.push({
+          key: 'manual-search',
+          label: 'Manual search',
+          icon: <Search className="h-3.5 w-3.5" />,
+          disabled: isBusy,
+          onSelect: () =>
+            setSearchTarget({
+              artist: req.artist,
+              album: req.album ?? null,
+              title: req.item_type === 'album' ? null : req.title,
+              itemType: req.item_type === 'album' ? 'album' : 'track',
+              requestId: req.id,
+            }),
         });
       }
       if (isAdmin && req.status_reason && !isInfoNote(req) && req.status !== 'pending' && req.status !== 'rejected') {
@@ -594,6 +635,12 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           />
         </div>
       )}
+      <ManualSearchModal
+        target={searchTarget}
+        onClose={() => setSearchTarget(null)}
+        onToast={showToast}
+        onGrabbed={() => void refresh()}
+      />
     </PageFrame>
   );
 };
