@@ -74,6 +74,11 @@ export const RENAME_REASONS: Readonly<Record<string, RenameReasonInfo>> = {
     help: 'AcoustID confirms this file is the track it is linked to.',
     risky: false,
   },
+  same_song: {
+    label: 'Same song, other edition',
+    help: 'AcoustID matched this song under a different edition (for example a remaster or single version), so the link is fine.',
+    risky: false,
+  },
   audio_mismatch: {
     label: 'Audio is a different track',
     help: 'AcoustID identifies this audio as another track. Renaming is blocked until the file is linked to the right track.',

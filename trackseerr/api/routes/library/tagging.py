@@ -64,6 +64,7 @@ from trackseerr.rename_reasons import (
     AUDIO_MISMATCH,
     COLLISION,
     COPY_SUFFIX,
+    SAME_SONG as SAME_SONG_REASON,
     VERIFIED as VERIFIED_REASON,
     classify_rename,
     flag_collisions,
@@ -72,6 +73,7 @@ from trackseerr.rename_reasons import (
 )
 from trackseerr.rename_verification import (
     MISMATCH,
+    SAME_SONG,
     VERIFIED,
     get_verification_status,
     start_verification,
@@ -269,6 +271,8 @@ def _attach_verification(db: Database, rows: list[dict[str, Any]]) -> None:
         if verdict["status"] == VERIFIED:
             row["reasons"] = [*row["reasons"], VERIFIED_REASON]
             row["default_selected"] = COLLISION not in row["reasons"]
+        elif verdict["status"] == SAME_SONG:
+            row["reasons"] = [*row["reasons"], SAME_SONG_REASON]
         elif verdict["status"] == MISMATCH:
             cosmetic = is_cosmetic_only(row["reasons"]) and COLLISION not in row["reasons"]
             row["reasons"] = [*row["reasons"], AUDIO_MISMATCH]

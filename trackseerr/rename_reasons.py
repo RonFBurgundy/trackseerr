@@ -21,6 +21,7 @@ FILE_NAME_FORMAT = "file_name_format"
 FILE_TITLE = "file_title"
 COLLISION = "collision"
 VERIFIED = "verified"
+SAME_SONG = "same_song"
 AUDIO_MISMATCH = "audio_mismatch"
 COMPILATION_LINK = "compilation_link"
 NAME_TOO_LONG = "name_too_long"
@@ -28,7 +29,9 @@ COPY_SUFFIX = "copy_suffix"
 
 # A move is pre-selected only when it is purely cosmetic or tidies a stray file: anything that touches numbering,
 # titles, years, disc layout or collisions needs a human decision.
-SAFE_REASONS = frozenset({ARTIST_FOLDER, LOOSE_FILE, ALBUM_FOLDER_FORMAT, FILE_NAME_FORMAT, NAME_TOO_LONG, COPY_SUFFIX})
+SAFE_REASONS = frozenset({
+    ARTIST_FOLDER, LOOSE_FILE, ALBUM_FOLDER_FORMAT, FILE_NAME_FORMAT, NAME_TOO_LONG, COPY_SUFFIX, SAME_SONG,
+})
 
 _YEAR_RE = re.compile(r"\((\d{4})\)")
 _PREFIXED_NUMBER_RE = re.compile(r"^(?:.*? - )?(\d{1,3}) - (.+)$")
@@ -151,5 +154,5 @@ def is_default_selected(reasons: Iterable[str]) -> bool:
 
 def is_cosmetic_only(reasons: Iterable[str]) -> bool:
     """True when the only change is a dropped copy number or stray spaces (verification reasons are ignored)."""
-    relevant = [r for r in reasons if r not in (VERIFIED, AUDIO_MISMATCH)]
+    relevant = [r for r in reasons if r not in (VERIFIED, SAME_SONG, AUDIO_MISMATCH)]
     return bool(relevant) and all(r == COPY_SUFFIX for r in relevant)
