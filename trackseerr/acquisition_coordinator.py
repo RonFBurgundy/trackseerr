@@ -1540,6 +1540,16 @@ class AcquisitionCoordinator:
             if claimed is not None and not grabbed:  # the gate claimed the parked row; a failed grab must not lose it
                 db.restore_pending_release(claimed)
 
+    @staticmethod
+    def _clear_stale_request_note(db: Database, request_id: Optional[str], req_row: Optional[dict[str, Any]]) -> None:
+        """A new grab supersedes an earlier download failure or sync-wait note on the request."""
+        if not request_id or not req_row or req_row.get("status_reason") not in ("download_failed", "awaiting_sync"):
+            return
+        try:
+            db.set_request_outcome(request_id, None, None, schedule=False)
+        except sqlite3.Error as exc:
+            logger.warning("Could not clear the stale note on request %s: %s", request_id, exc)
+
     def grab_candidate(
         self,
         db: Database,
@@ -1663,6 +1673,7 @@ class AcquisitionCoordinator:
             logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
 
         req_row = db.get_request(request_id) if request_id else None
+        self._clear_stale_request_note(db, request_id, req_row)
         try:
             notification_dispatcher.dispatch(
                 NotificationEvent.DOWNLOAD_STARTED,

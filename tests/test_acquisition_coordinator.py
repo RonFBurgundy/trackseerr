@@ -2002,6 +2002,34 @@ def test_dispatch_all_fail_returns_last_error(test_db):
     assert res["success"] is False and "two down" in res["message"]
 
 
+@pytest.mark.parametrize(
+    "reason,cleared",
+    [("download_failed", True), ("awaiting_sync", True), ("rate_limited", False)],
+)
+def test_successful_grab_clears_only_stale_download_notes(test_db, reason, cleared):
+    from trackseerr.models import MusicRequest
+
+    _mk_client(test_db, "first", priority=1)
+    test_db.upsert_user("u-note", "note_user", "note@example.com")
+    test_db.create_request(
+        MusicRequest(id="req-note", user_id="u-note", item_type="track", title="T", artist="A")
+    )
+    test_db.set_request_outcome("req-note", reason, "some note", schedule=False)
+    drv = MagicMock()
+    drv.download.return_value = "hash-note-1"
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", side_effect=_drivers(first=drv)):
+        res = AcquisitionCoordinator().grab_candidate(
+            test_db, _torrent_candidate(), parsed_quality="FLAC", score=1, artist="A", album=None, item_type="track",
+            request_id="req-note", track_id=None, album_id=None, trigger=GrabTrigger("request"),
+        )
+    assert res["success"] is True
+    req = test_db.get_request("req-note")
+    if cleared:
+        assert req["status_reason"] is None and req["status_message"] is None
+    else:
+        assert req["status_reason"] == reason and req["status_message"] == "some note"
+
+
 def test_dispatch_no_client_raises(test_db):
     with pytest.raises(NoClientAvailable):
         AcquisitionCoordinator().dispatch_with_failover(test_db, _torrent_candidate())
