@@ -49,6 +49,11 @@ export const RENAME_REASONS: Readonly<Record<string, RenameReasonInfo>> = {
     help: 'The file name differs from the naming format only in formatting.',
     risky: false,
   },
+  copy_suffix: {
+    label: 'Copy number removed',
+    help: 'Only a copy number like " (1)" or stray spaces would be removed from the name.',
+    risky: false,
+  },
   file_title: {
     label: 'Track title changed',
     help: 'The track title in the file name would change, not just its formatting.',

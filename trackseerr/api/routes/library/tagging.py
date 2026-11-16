@@ -63,9 +63,11 @@ from trackseerr.artist_folders import resolve_artist_folder
 from trackseerr.rename_reasons import (
     AUDIO_MISMATCH,
     COLLISION,
+    COPY_SUFFIX,
     VERIFIED as VERIFIED_REASON,
     classify_rename,
     flag_collisions,
+    is_cosmetic_only,
     is_default_selected,
 )
 from trackseerr.rename_verification import (
@@ -162,6 +164,45 @@ def _cached_row(
     return cache.get(key)
 
 
+def _proposed_move(
+    db: Database,
+    t: dict[str, Any],
+    f: dict[str, Any],
+    album: dict[str, Any],
+    artist: dict[str, Any],
+    media_settings: dict[str, Any],
+    caches: dict[str, dict[Any, Any]],
+) -> tuple[str, list[str]]:
+    """(proposed path, reason codes) for moving a track's file to its template-rendered destination."""
+    current_path = f["file_path"]
+    meta = _rename_meta(db, t, album, artist, f, current_path, caches, media_settings)
+    proposed_path = build_track_path(meta, media_settings)
+    reasons = classify_rename(
+        _root_relative(current_path, media_settings), _root_relative(proposed_path, media_settings)
+    )
+    return proposed_path, reasons
+
+
+def _is_cosmetic_move(
+    db: Database, track: dict[str, Any], f: dict[str, Any], media_settings: dict[str, Any]
+) -> bool:
+    """True when the file's rename only drops a copy number or stray spaces."""
+    album = db.get_library_album(track["album_id"])
+    artist = db.get_library_artist(track["artist_id"])
+    if not album or not artist:
+        return False
+    _, reasons = _proposed_move(db, track, f, album, artist, media_settings, {})
+    return is_cosmetic_only(reasons)
+
+
+def _same_file(a: str, b: str) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError as exc:
+        logger.debug("samefile check failed for %s vs %s: %s", a, b, exc)
+        return False
+
+
 def _preview_row(
     db: Database,
     t: dict[str, Any],
@@ -179,11 +220,7 @@ def _preview_row(
     album = _cached_row(caches.setdefault("albums", {}), t["album_id"], db.get_library_album)
     if not artist or not album:
         return None
-    meta = _rename_meta(db, t, album, artist, f, current_path, caches, media_settings)
-    proposed_path = build_track_path(meta, media_settings)
-    reasons = classify_rename(
-        _root_relative(current_path, media_settings), _root_relative(proposed_path, media_settings)
-    )
+    proposed_path, reasons = _proposed_move(db, t, f, album, artist, media_settings, caches)
     return {
         "file_id": f["id"],
         "track_id": t["id"],
@@ -209,6 +246,9 @@ def _flag_collisions(rows: list[dict[str, Any]]) -> None:
     """Adds the ``collision`` reason (and clears ``default_selected``) on rows that share a proposed path."""
     flags = flag_collisions([os.path.normpath(r["proposed_path"]) for r in rows])
     for row, collides in zip(rows, flags):
+        if not collides and COPY_SUFFIX in row["reasons"]:
+            target = row["proposed_path"]
+            collides = os.path.exists(target) and not _same_file(row["current_path"], target)
         if collides:
             row["reasons"] = [*row["reasons"], COLLISION]
             row["default_selected"] = False
@@ -230,8 +270,10 @@ def _attach_verification(db: Database, rows: list[dict[str, Any]]) -> None:
             row["reasons"] = [*row["reasons"], VERIFIED_REASON]
             row["default_selected"] = COLLISION not in row["reasons"]
         elif verdict["status"] == MISMATCH:
+            cosmetic = is_cosmetic_only(row["reasons"]) and COLLISION not in row["reasons"]
             row["reasons"] = [*row["reasons"], AUDIO_MISMATCH]
-            row["default_selected"] = False
+            if not cosmetic:
+                row["default_selected"] = False
 
 
 def _preview_targeted_files(
@@ -555,7 +597,9 @@ def rename_apply(
                 errors.append(f"Track '{f['track_id']}' not found for file '{fid}'")
                 continue
 
-            blocked = _mismatch_block(db, fid, track, current_path_str)
+            blocked = None if _is_cosmetic_move(db, track, f, media_settings) else _mismatch_block(
+                db, fid, track, current_path_str
+            )
             if blocked:
                 errors.append(blocked)
                 blocked_count += 1

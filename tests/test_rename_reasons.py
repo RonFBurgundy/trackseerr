@@ -31,6 +31,11 @@ CASES = [
      "LMFAO/Now 79 (2011)/01 - Song.flac", ["artist_folder", "compilation_link"], False),
     ("compilation_link_to_va", "Toots & The Maytals/Funky Kingston (1973)/01 - Song.flac",
      "Various Artists/Funky Kingston (1973)/01 - Song.flac", ["artist_folder", "compilation_link"], False),
+    ("copy_suffix_file", "Kesha/TiK-Tok (2009)/07 - TiK ToK (1).flac", "Kesha/TiK-Tok (2009)/07 - TiK ToK.flac",
+     ["copy_suffix"], True),
+    ("copy_suffix_folder", "A/Song (1)/01 - Song.flac", "A/Song/01 - Song.flac", ["copy_suffix"], True),
+    ("trailing_space_file", "A/B (2000)/01 - X .flac", "A/B (2000)/01 - X.flac", ["copy_suffix"], True),
+    ("copy_suffix_plus_title_change", "A/B (2000)/01 - X (1).flac", "A/B (2000)/01 - Y.flac", ["file_title"], False),
     ("name_too_long", "Artist/Album (2000)/01 - " + "a" * 220 + ".flac",
      "Artist/Album (2000)/01 - " + "a" * 220 + ".flac", ["name_too_long"], True),
 ]
@@ -92,3 +97,17 @@ def test_compilation_link_recognises_various_alias():
     assert "compilation_link" not in got_comp
 
 
+
+
+def test_year_is_not_a_copy_suffix():
+    assert "copy_suffix" not in classify_rename("A/B/01 - X.flac", "A/B (1988)/01 - X.flac")
+
+
+def test_is_cosmetic_only_ignores_verification_reasons():
+    from trackseerr.rename_reasons import is_cosmetic_only
+
+    assert is_cosmetic_only(["copy_suffix", "audio_mismatch"]) is True
+    assert is_cosmetic_only(["copy_suffix", "verified"]) is True
+    assert is_cosmetic_only(["copy_suffix", "collision"]) is False
+    assert is_cosmetic_only(["audio_mismatch"]) is False
+    assert is_cosmetic_only([]) is False
