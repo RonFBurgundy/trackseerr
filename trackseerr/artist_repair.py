@@ -453,7 +453,11 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
     """
     from trackseerr.backup import create_backup
     from trackseerr.mb_metadata_store import get_shared_enricher
-    from trackseerr.release_matching import link_albums_by_recording, match_album_releases
+    from trackseerr.release_matching import (
+        fill_recordings_from_fingerprints,
+        link_albums_by_recording,
+        match_album_releases,
+    )
 
     def stop() -> bool:
         return bool(run.should_stop() or (extra_stop is not None and extra_stop()))
@@ -467,6 +471,16 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
     run.message = f"repair: {_format_counts(repair)}"
     if stop():
         return
+    api_key = str(db.get_media_management_settings().get("acoustid_api_key") or "").strip()
+    if api_key:
+        filled = fill_recordings_from_fingerprints(
+            db, enricher, api_key, should_stop=stop, on_progress=run.set_progress
+        )
+        run.message = f"{run.message}; fill: {_format_counts(filled)}"
+        if stop():
+            return
+    else:
+        run.message = f"{run.message}; fill: skipped (no AcoustID key)"
     linked = link_albums_by_recording(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; link: {_format_counts(linked)}"
     if stop():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import logging
 import sqlite3
 from collections.abc import Callable
@@ -245,6 +246,163 @@ def link_albums_by_recording(
                 on_progress(processed, total)
 
     logger.info("Recording release-group link finished: %s", counts)
+    return counts
+
+
+def _rg_recording_ids(enricher: Any, rg_id: str) -> set[str]:
+    if not rg_id:
+        return set()
+    rec_ids: set[str] = set()
+    for rel in enricher.get_release_group_releases(rg_id) or []:
+        rec_ids.update(_extract_release_rec_ids(rel))
+    return rec_ids
+
+
+def _usable_matches(matches: list[dict[str, Any]], used_rec_ids: set[str]) -> list[dict[str, Any]]:
+    usable: list[dict[str, Any]] = []
+    for m in matches:
+        rec_id = str(m.get("recording_id") or "").strip()
+        if rec_id and rec_id not in used_rec_ids:
+            usable.append(m)
+    return sorted(usable, key=lambda m: float(m.get("score") or 0.0), reverse=True)
+
+
+def _pick_recording(
+    matches: list[dict[str, Any]],
+    track_title: str,
+    rg_rec_ids: set[str],
+    used_rec_ids: set[str],
+) -> Optional[dict[str, Any]]:
+    """Picks the best unused AcoustID match: inside the release group first, else >= 0.90 with a matching title."""
+    from trackseerr.lidarr_release import titles_match
+
+    available = _usable_matches(matches, used_rec_ids)
+    if rg_rec_ids:
+        for m in available:
+            if str(m["recording_id"]).strip() in rg_rec_ids:
+                return m
+    for m in available:
+        if float(m.get("score") or 0.0) >= 0.90 and titles_match(m.get("title"), track_title):
+            return m
+    return None
+
+
+def _missing_recording_tracks(tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for t in tracks:
+        if t.get("has_file") and not str(t.get("mb_recording_id") or "").strip():
+            out.append(t)
+    return out
+
+
+def _first_lookup_rejected(fp: dict[str, Any], state: dict[str, bool]) -> bool:
+    from trackseerr.rename_verification import _key_rejected
+
+    if not state["first_lookup_pending"] or fp.get("cached") or fp.get("error") == "file missing":
+        return False
+    state["first_lookup_pending"] = False
+    return _key_rejected(fp)
+
+
+def _fill_album(
+    db: Any,
+    enricher: Any,
+    album: dict[str, Any],
+    api_key: str,
+    counts: dict[str, int],
+    state: dict[str, bool],
+) -> bool:
+    """Fills missing track recording IDs on one album. Returns True when the whole step must stop."""
+    from trackseerr.rename_verification import verify_file
+
+    all_tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
+    missing = _missing_recording_tracks(all_tracks)
+    if not missing:
+        return False
+
+    used_rec_ids = _extract_owned_rec_ids(all_tracks)
+    rg_id = str(album.get("mb_release_group_id") or "").strip()
+    rg_rec_ids: Optional[set[str]] = None
+
+    for track in missing:
+        files = db.list_library_files_for_track(track["id"])
+        if not files:
+            continue
+        fp = verify_file(db, files[0], api_key)
+        if _first_lookup_rejected(fp, state):
+            logger.warning("Fingerprint recording fill stopped: AcoustID rejected the API key")
+            return True
+
+        counts["tracks"] += 1
+        matches = fp.get("matches") or []
+        if fp.get("status") != "ok" or not matches:
+            counts["no_fingerprint"] += 1
+            continue
+
+        if rg_rec_ids is None:
+            rg_rec_ids = _rg_recording_ids(enricher, rg_id)
+
+        track_title = str(track.get("title") or "")
+        chosen = _pick_recording(matches, track_title, rg_rec_ids, used_rec_ids)
+        if chosen is None:
+            counts["no_match"] += 1
+            continue
+
+        rec_id = str(chosen["recording_id"]).strip()
+        db.set_track_mb_recording_id(str(track["id"]), rec_id)
+        used_rec_ids.add(rec_id)
+        counts["filled"] += 1
+        logger.info(
+            "Filled recording for album %s track %r: %s (score=%.2f)",
+            album["id"],
+            track_title,
+            rec_id,
+            float(chosen.get("score") or 0.0),
+        )
+    return False
+
+
+def fill_recordings_from_fingerprints(
+    db: Any,
+    enricher: Any,
+    api_key: str,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+) -> dict[str, int]:
+    """Fills missing track mb_recording_id values from AcoustID fingerprints on albums missing a release."""
+    from trackseerr.library import FingerprintUnavailable
+
+    counts = {"tracks": 0, "filled": 0, "no_fingerprint": 0, "no_match": 0, "errors": 0}
+    state = {"first_lookup_pending": True}
+
+    total: Optional[int] = None
+    if on_progress is not None:
+        total = db.count_albums_without_release_group() + db.count_albums_missing_release()
+        on_progress(0, total)
+
+    albums = itertools.chain(
+        db.iter_albums_without_release_group(batch=200),
+        db.iter_albums_missing_release(batch=200),
+    )
+    processed = 0
+    for album in albums:
+        if should_stop is not None and should_stop():
+            logger.info("Fingerprint recording fill stopped early: %s", counts)
+            return counts
+        try:
+            if _fill_album(db, enricher, album, api_key, counts, state):
+                return counts
+        except FingerprintUnavailable:
+            logger.warning("Fingerprint recording fill stopped: fingerprinting unavailable")
+            return counts
+        except sqlite3.Error as exc:
+            counts["errors"] += 1
+            logger.warning("Fingerprint recording fill failed for album %s: %s", album.get("id"), exc)
+        processed += 1
+        if on_progress is not None:
+            on_progress(processed, total)
+
+    logger.info("Fingerprint recording fill finished: %s", counts)
     return counts
 
 

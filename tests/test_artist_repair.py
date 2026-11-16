@@ -379,6 +379,42 @@ def test_repair_and_match_continues_when_backup_fails(db: Database, monkeypatch:
     assert ran == ["m"]
 
 
+def test_run_repair_and_match_skips_fill_without_key(db: Database, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.backup
+    import trackseerr.mb_metadata_store
+
+    monkeypatch.setattr(trackseerr.backup, "create_backup", lambda *a, **k: None)
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: FakeEnricher({}))
+    run = _Run()
+
+    artist_repair.run_repair_and_match(db, run)
+
+    assert "fill: skipped" in run.message
+
+
+def test_run_repair_and_match_runs_fill_with_key(db: Database, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.backup
+    import trackseerr.mb_metadata_store
+    import trackseerr.release_matching
+
+    db.update_media_management_settings({"acoustid_api_key": "test-acoustid-key"})
+    monkeypatch.setattr(trackseerr.backup, "create_backup", lambda *a, **k: None)
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: FakeEnricher({}))
+    called: list[str] = []
+
+    def fake_fill(d, enricher, api_key, should_stop=None, on_progress=None):
+        called.append(api_key)
+        return {"tracks": 2, "filled": 1, "no_fingerprint": 0, "no_match": 1, "errors": 0}
+
+    monkeypatch.setattr(trackseerr.release_matching, "fill_recordings_from_fingerprints", fake_fill)
+    run = _Run()
+
+    artist_repair.run_repair_and_match(db, run)
+
+    assert called == ["test-acoustid-key"]
+    assert "fill: tracks=2, filled=1" in run.message
+
+
 def test_startup_repair_runs_once(db: Database, monkeypatch: pytest.MonkeyPatch):
     calls: list[int] = []
     monkeypatch.setattr(artist_repair, "run_repair_and_match", lambda d, run, stop=None: calls.append(1))
