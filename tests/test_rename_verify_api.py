@@ -179,6 +179,69 @@ def test_apply_blocks_mismatch_but_moves_others(app_and_client, test_db, admin):
     assert not good_path.exists()
 
 
+def _seed_copy_suffix(db: Database, root: Path, rec: str) -> tuple[str, Path, Path]:
+    """A file already in its template folder whose name only carries a " (1)" copy number."""
+    fid, old = _seed(db, root, 1, rec)
+    folder = root / "Radiohead" / "The Bends (1995)"
+    path = folder / "03 - Song 1 (1).flac"
+    folder.mkdir(parents=True)
+    old.rename(path)
+    db.upsert_library_file({
+        "id": fid, "track_id": "trk-1", "file_path": str(path),
+        "relative_path": f"Radiohead/The Bends (1995)/{path.name}", "codec": "FLAC",
+    })
+    return fid, path, folder / "03 - Song 1.flac"
+
+
+def test_preview_selects_copy_suffix_despite_mismatch(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    fid, path, _target = _seed_copy_suffix(test_db, root, R1)
+    _cache(test_db, fid, path, [R2])
+    row = _preview(client, headers)[fid]
+    assert "copy_suffix" in row["reasons"] and "audio_mismatch" in row["reasons"]
+    assert row["default_selected"] is True
+
+
+def test_preview_copy_suffix_with_existing_target_is_collision(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    fid, path, target = _seed_copy_suffix(test_db, root, R1)
+    _create_minimal_flac(target)
+    _cache(test_db, fid, path, [R2])
+    row = _preview(client, headers)[fid]
+    assert "copy_suffix" in row["reasons"] and "collision" in row["reasons"]
+    assert row["default_selected"] is False
+
+
+def test_apply_moves_copy_suffix_despite_mismatch(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    fid, path, target = _seed_copy_suffix(test_db, root, R1)
+    _cache(test_db, fid, path, [R2])
+    resp = client.post("/api/library/rename/apply", json={"file_ids": [fid]}, headers=headers)
+    assert resp.status_code == 200
+    res = resp.json()
+    assert res["renamed_count"] == 1 and res["blocked_count"] == 0 and res["errors"] == []
+    assert target.exists() and not path.exists()
+
+
+def test_apply_still_blocks_mismatch_on_title_change(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    fid, path, target = _seed_copy_suffix(test_db, root, R1)
+    renamed = path.with_name("03 - Other Title (1).flac")
+    path.rename(renamed)
+    test_db.upsert_library_file({
+        "id": fid, "track_id": "trk-1", "file_path": str(renamed),
+        "relative_path": f"Radiohead/The Bends (1995)/{renamed.name}", "codec": "FLAC",
+    })
+    _cache(test_db, fid, renamed, [R2])
+    res = client.post("/api/library/rename/apply", json={"file_ids": [fid]}, headers=headers).json()
+    assert res["renamed_count"] == 0 and res["blocked_count"] == 1
+    assert renamed.exists() and not target.exists()
+
+
 def test_verify_routes_require_admin(app_and_client, test_db, test_config, seeded_users):
     _, client = app_and_client
     headers = _auth_headers(seeded_users["alice"], test_db, test_config)

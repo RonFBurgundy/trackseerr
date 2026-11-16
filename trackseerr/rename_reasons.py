@@ -24,14 +24,24 @@ VERIFIED = "verified"
 AUDIO_MISMATCH = "audio_mismatch"
 COMPILATION_LINK = "compilation_link"
 NAME_TOO_LONG = "name_too_long"
+COPY_SUFFIX = "copy_suffix"
 
 # A move is pre-selected only when it is purely cosmetic or tidies a stray file: anything that touches numbering,
 # titles, years, disc layout or collisions needs a human decision.
-SAFE_REASONS = frozenset({ARTIST_FOLDER, LOOSE_FILE, ALBUM_FOLDER_FORMAT, FILE_NAME_FORMAT, NAME_TOO_LONG})
+SAFE_REASONS = frozenset({ARTIST_FOLDER, LOOSE_FILE, ALBUM_FOLDER_FORMAT, FILE_NAME_FORMAT, NAME_TOO_LONG, COPY_SUFFIX})
 
 _YEAR_RE = re.compile(r"\((\d{4})\)")
 _PREFIXED_NUMBER_RE = re.compile(r"^(?:.*? - )?(\d{1,3}) - (.+)$")
 _LEADING_NUMBER_RE = re.compile(r"^(\d{1,3})(?:\s*-\s*|\s+)(.+)$")
+_COPY_SUFFIX_RE = re.compile(r"\s\(\d{1,2}\)$")
+
+
+def _strip_copy_suffix(name: str) -> str:
+    """``name`` without surrounding spaces and one trailing " (N)" copy number (N is 1-2 digits, so never a year).
+
+    For a file name pass the stem: the extension is the caller's concern.
+    """
+    return _COPY_SUFFIX_RE.sub("", name.strip()).strip()
 
 
 def _segments(rel_path: str) -> list[str]:
@@ -62,6 +72,8 @@ def _parse_track_name(stem: str) -> tuple[int | None, str]:
 
 
 def _album_reasons(current: str, proposed: str) -> list[str]:
+    if current != proposed and _strip_copy_suffix(current) == proposed.strip():
+        return [COPY_SUFFIX]
     cur_title, cur_year = _album_parts(current)
     new_title, new_year = _album_parts(proposed)
     reasons: list[str] = []
@@ -84,6 +96,10 @@ def _disc_reasons(current: Sequence[str], proposed: Sequence[str]) -> list[str]:
 
 
 def _file_reasons(current: str, proposed: str) -> list[str]:
+    cur_stem, cur_ext = _split_stem(current)
+    new_stem, new_ext = _split_stem(proposed)
+    if cur_stem != new_stem and cur_ext == new_ext and _strip_copy_suffix(cur_stem) == new_stem.strip():
+        return [COPY_SUFFIX]
     cur_number, cur_title = _parse_track_name(_split_stem(current)[0])
     new_number, new_title = _parse_track_name(_split_stem(proposed)[0])
     reasons: list[str] = []
@@ -131,3 +147,9 @@ def flag_collisions(proposed_paths: Sequence[str]) -> list[bool]:
 def is_default_selected(reasons: Iterable[str]) -> bool:
     """True when every reason is a cosmetic or tidy-up one (safe to apply in bulk)."""
     return all(r in SAFE_REASONS for r in reasons)
+
+
+def is_cosmetic_only(reasons: Iterable[str]) -> bool:
+    """True when the only change is a dropped copy number or stray spaces (verification reasons are ignored)."""
+    relevant = [r for r in reasons if r not in (VERIFIED, AUDIO_MISMATCH)]
+    return bool(relevant) and all(r == COPY_SUFFIX for r in relevant)
