@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { CheckSquare, Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, SlidersHorizontal, Tag, User, UserPlus, X } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
@@ -7,6 +7,7 @@ import type { AlbumItem, ArtistDiscographyAlbum, AudioPreviewTrack, DiscoveryIte
 import { useAddToCollection } from '@/hooks/useAddToCollection';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
+import { useLibrarySearch, type LibrarySearchItem } from '@/hooks/useLibrarySearch';
 import { useLibraryFacets } from '@/hooks/useLibraryFacets';
 import { useLibraryFilters } from '@/hooks/useLibraryFilters';
 import { useSmartCollections } from '@/hooks/useSmartCollections';
@@ -28,6 +29,7 @@ import {
   CollectionsPanel,
   LibraryFilterSheet,
   LibraryScanBanner,
+  LibrarySearchResults,
   LibraryStatsBar,
   type LibrarySelectAction,
   LidarrMigrationBanner,
@@ -247,6 +249,33 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   const openAlbumById = (albumId: string): void =>
     onNavigate({ tab: 'library', sub: route.sub, detail: { ...route.detail, albumId } });
+
+  // Library-wide search dropdown under the filter box (native mode only; the tab filter is unaffected).
+  const searchListId = useId();
+  const [searchAnchor, setSearchAnchor] = useState<HTMLDivElement | null>(null);
+  const searchPanelOpenRef = useRef<boolean>(false);
+  const pickSearchItem = (item: LibrarySearchItem): void => {
+    librarySearch.setOpen(false);
+    if (item.kind === 'suggestion') setSearchInput(item.text);
+    else if (item.kind === 'artist') drill.openArtist(item.id);
+    else if (item.kind === 'album') openAlbumById(item.id);
+    else openAlbumById(item.albumId);
+  };
+  const librarySearch = useLibrarySearch(query, !lidarrMode, pickSearchItem, searchInput.trim().length);
+  searchPanelOpenRef.current = librarySearch.open;
+  const { setOpen: setSearchOpen } = librarySearch;
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent): void => {
+      if (!searchPanelOpenRef.current) return;
+      const target = e.target;
+      if (!(target instanceof Node)) return;
+      if (searchAnchor?.contains(target)) return;
+      if (target instanceof Element && target.closest(`[role="listbox"][id="${CSS.escape(searchListId)}"]`)) return;
+      setSearchOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [searchAnchor, searchListId, setSearchOpen]);
 
   // Modals are portaled and mounted once, whichever page is showing, so their triggers always find them.
   const overlays = (
@@ -515,12 +544,43 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           <SearchBar
             id="library-search"
             name="library-filter"
-            ariaLabel={`Filter ${activeTab}`}
+            ariaLabel={`Search library and filter ${activeTab}`}
             value={searchInput}
-            onChange={setSearchInput}
-            placeholder={`Filter ${activeTab}...`}
+            onChange={(v) => {
+              setSearchInput(v);
+              setSearchOpen(true);
+            }}
+            placeholder="Search library…"
             className="flex-1 min-w-0"
+            containerRef={setSearchAnchor}
+            onKeyDown={librarySearch.onKeyDown}
+            onFocus={() => setSearchOpen(true)}
+            combobox={
+              lidarrMode
+                ? undefined
+                : {
+                    expanded: librarySearch.open,
+                    controls: searchListId,
+                    activeDescendant: librarySearch.open && librarySearch.flatItems.length > 0 ? `${searchListId}-${librarySearch.activeIndex}` : undefined,
+                  }
+            }
           />
+          {librarySearch.open && (
+            <LibrarySearchResults
+              results={librarySearch.results}
+              items={librarySearch.flatItems}
+              loading={librarySearch.loading}
+              error={librarySearch.error}
+              activeIndex={librarySearch.activeIndex}
+              listId={searchListId}
+              anchor={searchAnchor}
+              onHover={librarySearch.setActiveIndex}
+              onPickArtist={(id) => pickSearchItem({ kind: 'artist', id, name: '', albumCount: 0 })}
+              onPickAlbum={(id) => pickSearchItem({ kind: 'album', id, title: '', artistName: '', year: null })}
+              onPickTrack={(albumId) => pickSearchItem({ kind: 'track', id: '', title: '', artistName: '', albumId, albumTitle: '' })}
+              onPickSuggestion={(text) => pickSearchItem({ kind: 'suggestion', text })}
+            />
+          )}
           {/* Select and sort controls from the active panel are portaled here. */}
           <div ref={setToolbarSlot} className="contents" />
           {toolItems.length > 0 && (

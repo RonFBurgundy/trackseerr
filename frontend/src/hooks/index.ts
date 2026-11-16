@@ -5,6 +5,7 @@ export * from './useDiscoveryAlbum';
 export * from './useDiscoveryTrack';
 export * from './useRequests';
 export * from './useLibrary';
+export * from './useLibrarySearch';
 export * from './usePlexPlaylists';
 export * from './useScrobbling';
 export * from './useTailoredMixes';
