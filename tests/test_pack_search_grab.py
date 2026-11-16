@@ -490,7 +490,7 @@ def test_non_qbit_client_skips_pack_candidate(db: Database) -> None:
         trigger=GrabTrigger(kind="manual"),
     )
     assert res["success"] is False
-    assert "Only qBittorrent can download part of a torrent" in res["reason"]
+    assert "Only qBittorrent or rTorrent can download part of a torrent" in res["reason"]
 
     # 2. search_and_grab falls back to normal non-pack candidate if available
     normal_cand = AcquisitionSearchResult(
@@ -1092,3 +1092,255 @@ def test_seed_cleanup_removes_when_no_other_song_pending(db: Database) -> None:
     driver.cleanup_completed.assert_called_once_with("packhash123", delete_files=False)
     assert outcome.status == DownloadStatus.IMPORTED.value
     assert outcome.removed is True
+
+
+def _bencode_test(val: object) -> bytes:
+    if isinstance(val, int):
+        return f"i{val}e".encode("ascii")
+    if isinstance(val, bytes):
+        return f"{len(val)}:".encode("ascii") + val
+    if isinstance(val, str):
+        raw = val.encode("utf-8")
+        return f"{len(raw)}:".encode("ascii") + raw
+    if isinstance(val, list):
+        return b"l" + b"".join(_bencode_test(item) for item in val) + b"e"
+    if isinstance(val, dict):
+        items = sorted(
+            ((k.encode("utf-8") if isinstance(k, str) else k), v)
+            for k, v in val.items()
+        )
+        return b"d" + b"".join(_bencode_test(k) + _bencode_test(v) for k, v in items) + b"e"
+    raise TypeError(f"Unsupported bencode type: {type(val)}")
+
+
+def _make_album_torrent_bytes() -> bytes:
+    return _bencode_test(
+        {
+            "info": {
+                "files": [
+                    {"length": 15_000_000, "path": ["01 - Intro.flac"]},
+                    {"length": 42_000_000, "path": ["02 - Liquid Hook (Zentura Remix).flac"]},
+                    {"length": 400_000, "path": ["cover.jpg"]},
+                ],
+                "name": "Ace Ventura - Album [FLAC]",
+                "piece length": 16384,
+                "pieces": b"0" * 20,
+            }
+        }
+    )
+
+
+def test_track_request_album_torrent_selects_file(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from trackseerr import track_file_selection
+    from trackseerr.models import MusicRequest, RequestStatus
+
+    db.upsert_user("user-1", "tester")
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-qbit-album",
+            name="qBit",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qbittorrent:8080",
+        )
+    )
+    db.create_request(
+        MusicRequest(
+            id="req-track-1",
+            user_id="user-1",
+            item_type="track",
+            title="Liquid Hook (Zentura Remix)",
+            artist="Ace Ventura",
+            status=RequestStatus.APPROVED,
+        )
+    )
+
+    album_bytes = _make_album_torrent_bytes()
+    monkeypatch.setattr(track_file_selection, "fetch_torrent_bytes", lambda _res, timeout=15.0: album_bytes)
+
+    cand = AcquisitionSearchResult(
+        download_id="album-guid-1",
+        title="Ace Ventura - Album [FLAC]",
+        artist="Ace Ventura",
+        download_url="http://indexer.local/dl/album.torrent",
+        protocol="torrent",
+        size_bytes=57_400_000,
+    )
+
+    coord = AcquisitionCoordinator()
+    dispatched: list[AcquisitionSearchResult] = []
+
+    def fake_dispatch(_db: Database, candidate: AcquisitionSearchResult):
+        dispatched.append(candidate)
+        return {"id": "c-qbit-album", "name": "qBit", "driver_type": "qbittorrent"}, "hash-album-1"
+
+    with patch.object(coord, "dispatch_with_failover", side_effect=fake_dispatch), \
+         patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=MagicMock()):
+        res = coord.grab_candidate(
+            db,
+            cand,
+            parsed_quality="FLAC 16bit",
+            score=1000,
+            artist="Ace Ventura",
+            album="Album",
+            item_type="track",
+            request_id="req-track-1",
+            track_id=None,
+            album_id=None,
+            trigger=GrabTrigger(kind="manual"),
+        )
+
+    assert res["success"] is True
+    assert len(dispatched) == 1
+    assert dispatched[0].extra["file_indices"] == [1]
+    assert dispatched[0].extra["file_paths"] == [
+        "Ace Ventura - Album [FLAC]/02 - Liquid Hook (Zentura Remix).flac"
+    ]
+    assert dispatched[0].extra["torrent_bytes_size"] == 42_000_000
+
+
+def test_track_request_without_match_downloads_whole_and_notes_request(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from trackseerr import track_file_selection
+    from trackseerr.models import MusicRequest, RequestStatus
+
+    db.upsert_user("user-1", "tester")
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-qbit-whole",
+            name="qBit",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qbittorrent:8080",
+        )
+    )
+    db.create_request(
+        MusicRequest(
+            id="req-track-whole",
+            user_id="user-1",
+            item_type="track",
+            title="Unlisted Bonus Track",
+            artist="Ace Ventura",
+            status=RequestStatus.APPROVED,
+        )
+    )
+
+    album_bytes = _make_album_torrent_bytes()
+    monkeypatch.setattr(track_file_selection, "fetch_torrent_bytes", lambda _res, timeout=15.0: album_bytes)
+
+    cand = AcquisitionSearchResult(
+        download_id="album-guid-whole",
+        title="Ace Ventura - Album [FLAC]",
+        artist="Ace Ventura",
+        download_url="http://indexer.local/dl/album.torrent",
+        protocol="torrent",
+        size_bytes=57_400_000,
+    )
+
+    coord = AcquisitionCoordinator()
+    dispatched: list[AcquisitionSearchResult] = []
+
+    def fake_dispatch(_db: Database, candidate: AcquisitionSearchResult):
+        dispatched.append(candidate)
+        return {"id": "c-qbit-whole", "name": "qBit", "driver_type": "qbittorrent"}, "hash-album-whole"
+
+    with patch.object(coord, "dispatch_with_failover", side_effect=fake_dispatch), \
+         patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=MagicMock()):
+        res = coord.grab_candidate(
+            db,
+            cand,
+            parsed_quality="FLAC 16bit",
+            score=1000,
+            artist="Ace Ventura",
+            album="Album",
+            item_type="track",
+            request_id="req-track-whole",
+            track_id=None,
+            album_id=None,
+            trigger=GrabTrigger(kind="manual"),
+        )
+
+    assert res["success"] is True
+    assert len(dispatched) == 1
+    assert not (dispatched[0].extra or {}).get("file_indices")
+    req = db.get_request("req-track-whole")
+    assert req is not None
+    assert req["status_reason"] == "whole_release"
+    assert req["status_message"] == (
+        "Only available inside a full release: the whole release is downloading and only the requested track is imported."
+    )
+
+
+def test_album_request_is_never_split(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from trackseerr import track_file_selection
+    from trackseerr.models import MusicRequest, RequestStatus
+
+    db.upsert_user("user-1", "tester")
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-qbit-alb-req",
+            name="qBit",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qbittorrent:8080",
+        )
+    )
+    db.create_request(
+        MusicRequest(
+            id="req-album-1",
+            user_id="user-1",
+            item_type="album",
+            title="Intro",
+            artist="Ace Ventura",
+            status=RequestStatus.APPROVED,
+        )
+    )
+
+    fetch_called = False
+
+    def fail_if_called(_res, timeout=15.0):
+        nonlocal fetch_called
+        fetch_called = True
+        return _make_album_torrent_bytes()
+
+    monkeypatch.setattr(track_file_selection, "fetch_torrent_bytes", fail_if_called)
+
+    cand = AcquisitionSearchResult(
+        download_id="album-guid-full",
+        title="Ace Ventura - Intro [FLAC]",
+        artist="Ace Ventura",
+        download_url="http://indexer.local/dl/album.torrent",
+        protocol="torrent",
+        size_bytes=57_400_000,
+    )
+
+    coord = AcquisitionCoordinator()
+    dispatched: list[AcquisitionSearchResult] = []
+
+    def fake_dispatch(_db: Database, candidate: AcquisitionSearchResult):
+        dispatched.append(candidate)
+        return {"id": "c-qbit-alb-req", "name": "qBit", "driver_type": "qbittorrent"}, "hash-album-full"
+
+    with patch.object(coord, "dispatch_with_failover", side_effect=fake_dispatch), \
+         patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=MagicMock()):
+        res = coord.grab_candidate(
+            db,
+            cand,
+            parsed_quality="FLAC 16bit",
+            score=1000,
+            artist="Ace Ventura",
+            album="Intro",
+            item_type="album",
+            request_id="req-album-1",
+            track_id=None,
+            album_id=None,
+            trigger=GrabTrigger(kind="manual"),
+        )
+
+    assert res["success"] is True
+    assert fetch_called is False
+    assert len(dispatched) == 1
+    assert not (dispatched[0].extra or {}).get("file_indices")
+
