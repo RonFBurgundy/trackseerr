@@ -1597,15 +1597,19 @@ class MbidEnricherClient:
                         all_releases.append(parsed)
 
             offset += len(raw_releases)
-            if len(raw_releases) < limit or len(all_releases) >= max_releases:
+            if not raw_releases or len(all_releases) >= max_releases:
                 break
-            total_count = data.get("release-count")
-            if total_count is not None:
-                try:
-                    if offset >= int(total_count):
-                        break
-                except (ValueError, TypeError):
-                    pass
+            # MusicBrainz caps a page by track count, so a short page is not
+            # the last page; trust release-count when it is usable.
+            try:
+                total_count: Optional[int] = int(data.get("release-count"))
+            except (ValueError, TypeError):
+                total_count = None
+            if total_count is None:
+                if len(raw_releases) < limit:
+                    break
+            elif offset >= total_count:
+                break
 
         return all_releases[:max_releases]
 
@@ -1620,7 +1624,7 @@ class MbidEnricherClient:
         if self._store is not None:
             clean_rg_id = self._store.resolve_redirect(clean_rg_id)
 
-        cache_key = f"releases:rg:v1:{clean_rg_id.lower()}"
+        cache_key = f"releases:rg:v2:{clean_rg_id.lower()}"
         hit, cached_data = self._lookup(cache_key, force=force)
         if hit and isinstance(cached_data, list):
             return cached_data
