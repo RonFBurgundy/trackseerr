@@ -129,9 +129,9 @@ How it works:
 
 1. When TrackSeerr checks the indexer's newest releases (every 15 minutes) it notes the packs. The **Pack Index** task (Settings > System > Tasks) then downloads each pack's small .torrent file and reads its list of songs. Once a day it also looks back through older releases. Only the .torrent file is downloaded, never the music.
 2. Searches, automatic and manual, also look in this list. A song found inside a pack shows **In pack** in Manual search, with the pack's name.
-3. When TrackSeerr grabs a song from a pack, qBittorrent downloads only that song, not the whole pack. Your indexer's seeding rules still apply to what was downloaded.
+3. When TrackSeerr grabs a song from a pack, your torrent client downloads only that song, not the whole pack. Your indexer's seeding rules still apply to what was downloaded.
 
-Downloading part of a torrent needs **qBittorrent**. Packs are skipped when your torrent client is Transmission, Deluge or rTorrent. Packs whose torrent link is only a magnet link can't be read in advance and are skipped. TrackSeerr keeps the list for 90 days.
+Downloading part of a torrent needs **qBittorrent** or **rTorrent**. Packs are skipped when your torrent client is Transmission or Deluge. Packs whose torrent link is only a magnet link can't be read in advance and are skipped. TrackSeerr keeps the list for 90 days.
 
 ## Quality and profiles
 
@@ -162,6 +162,10 @@ TrackSeerr searches in three ways:
 - **On request.** When a request is approved, TrackSeerr searches at once.
 - **RSS.** Every 15 minutes it reads the newest releases from each indexer and grabs anything you want.
 - **Backlog.** Every 60 minutes it searches for monitored music that is still missing or below the cutoff.
+
+**One song from an album torrent.** When a song request's best result is a whole-album torrent, TrackSeerr reads the album's file list from the .torrent and has qBittorrent or rTorrent download only that song. If it can't tell which file is the song (or your client is Transmission or Deluge), the whole album downloads, only the requested song is imported, and the request says so. The other files stay where the client put them, so the torrent can keep seeding.
+
+**Choosing the release yourself (admins).** TrackSeerr picks the best release on its own. To see the alternatives and pick one, open **Manual search** from a request on the Requests page, from **Wanted**, or from an album. It lists every result with its source (Usenet or torrent), indexer, size and seeders, and why any were rejected. Grabbing from a request links the download to it. People you invite only see the simple request button.
 
 You can change the intervals with [environment variables](CONFIGURATION.md#background-jobs) and run each job by hand in **Settings > System > Tasks**.
 

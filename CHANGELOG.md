@@ -13,6 +13,9 @@ heading becomes the version and date.
 
 ### Added
 
+- A song request no longer downloads a whole album when the song is only on an album torrent: TrackSeerr picks the song's file and qBittorrent or rTorrent downloads just that file. When it can't tell which file is the song, the request now says the whole release is downloading.
+- rTorrent can download part of a torrent, so songs inside indexed packs work with rTorrent too, not just qBittorrent.
+- Admins can open **Manual search** from a request on the Requests page to see every release and choose which one to grab.
 - **Library Self-Heal** task (Tasks page, weekly by default): runs the MusicBrainz release match and then applies the renames Rename Files marks as safe. It never rewrites tags. Pause it to stop automatic renames.
 - MusicBrainz Release Match fills in missing MusicBrainz recording IDs from AcoustID when you have an AcoustID API key, so more albums get linked and matched to an edition.
 - **Search the whole library** from the Library search box: as you type, a list shows matching artists, albums and tracks from every tab, and suggests the right spelling when you're close ("Zac Brian" → Zach Bryan). The box still filters the page you're on.
@@ -141,6 +144,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The Requests page updates on its own while requests are in progress, so a finished request moves to Fulfilled without a refresh.
+- On phones, the Library search results now span the whole toolbar instead of only the search box, so long names are no longer cut off.
 - Rename Files no longer flags a file as "Audio is a different track" when AcoustID found the same song under another edition (a remaster, album or single version). These now show as "Same song, other edition" and can be renamed.
 - Re-applying a rename no longer moves a file from "Song (1)" to "Song (2)" (and so on) when its proper name is taken by another file; it now stays where it is. Shorten name works the same way.
 - MusicBrainz Release Match now finds the right edition for albums with many editions (Abbey Road, Rubber Soul and the like). It used to read only the first part of the edition list and give up. Run it again after updating.
