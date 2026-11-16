@@ -40,3 +40,4 @@ export * from './SmartCollectionDetail';
 export * from './AddArtistDialog';
 export * from './MbUnlinkedModal';
 export * from './ExcludeConfirm';
+export * from './LibrarySearchResults';

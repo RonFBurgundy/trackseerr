@@ -13,6 +13,7 @@ import type {
   MbReleaseSeed,
   MbUnlinkedKind,
   MbUnlinkedPage,
+  LibrarySearchResponse,
 } from '@/types/models';
 import type {
   BulkAlbumEditRequest,
@@ -338,6 +339,13 @@ export type LibraryFacetsResponse = Schema<'LibraryFacetsResponse'>;
 
 export async function getLibraryFacets(signal?: AbortSignal): Promise<Schema<'LibraryFacetsResponse'>> {
   return apiRequest<Schema<'LibraryFacetsResponse'>>('/api/library/facets', { signal });
+}
+
+export async function searchLibrary(q: string, limit = 6, signal?: AbortSignal): Promise<LibrarySearchResponse> {
+  const params = new URLSearchParams();
+  params.set('q', q);
+  params.set('limit', String(limit));
+  return apiRequest<LibrarySearchResponse>(`/api/library/search?${params.toString()}`, { signal });
 }
 
 export interface GetMbUnlinkedOptions {

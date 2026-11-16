@@ -444,6 +444,7 @@ export type ArtistProfileTarget = { discoveryId: string } | { libraryArtistId: s
 
 export type MbUnlinkedAlbum = Schema<'MbUnlinkedAlbum'>;
 export type MbUnlinkedPage = Schema<'MbUnlinkedPage'>;
+export type LibrarySearchResponse = Schema<'LibrarySearchResponse'>;
 export type MbReleaseSeed = Schema<'MbReleaseSeed'>;
 export type MbLinkRequest = Schema<'MbLinkRequest'>;
 export type MbUnlinkedKind = 'no_release_group' | 'no_release';
