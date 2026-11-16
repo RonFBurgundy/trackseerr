@@ -283,6 +283,7 @@ def test_pausable_tasks_are_interval_tasks():
         "backup",
         "update_check",
         "health_check",
+        "library_self_heal",
     }
     assert task_manager.PAUSABLE_TASKS == expected
     for tid in task_manager.PAUSABLE_TASKS:
@@ -1400,4 +1401,19 @@ def test_retag_library_endpoint_trigger_and_running(app_and_client, seeded_users
     resp_conflict = client.post("/api/library/retag/library", cookies=admin_cookies)
     assert resp_conflict.status_code == 409
     assert "already running" in resp_conflict.json()["detail"]
+
+
+def test_library_self_heal_is_pausable_interval_task(db):
+    spec = task_manager.TASKS["library_self_heal"]
+    assert spec.kind == task_manager.KIND_INTERVAL
+    assert spec.default_interval_seconds == 7 * 86400
+    assert spec.editable is True
+    assert spec.group == task_manager.GROUP_LIBRARY
+    assert "library_self_heal" in task_manager.PAUSABLE_TASKS
+    assert task_manager.is_paused(db, "library_self_heal") is False
+    task_manager.set_paused(db, "library_self_heal", True)
+    assert task_manager.is_paused(db, "library_self_heal") is True
+    task_manager.set_paused(db, "library_self_heal", False)
+    assert task_manager.is_paused(db, "library_self_heal") is False
+
 

@@ -344,17 +344,33 @@ def rename_preview(
         truncated = len(tracks) >= limit
         return {"items": preview_diffs, "total": total, "truncated": truncated}
 
+    preview_diffs, total = _scan_library_rename_rows(db, limit=limit)
+    return {"items": preview_diffs, "total": total, "truncated": total > len(preview_diffs)}
+
+
+def _scan_library_rename_rows(
+    db: Database, limit: Optional[int] = None
+) -> tuple[list[dict[str, Any]], int]:
+    """Scans the whole library for files needing a rename, returning (rows up to limit, total count)."""
+    media_settings = db.get_media_management_settings()
+    caches: dict[str, dict[Any, Any]] = {}
+    rows: list[dict[str, Any]] = []
     total = 0
     for t, f in db.iter_library_files_for_rename(_RENAME_PAGE_SIZE):
         row = _preview_row(db, t, f, media_settings, caches)
         if row and row["needs_rename"]:
             total += 1
-            if len(preview_diffs) < limit:
-                preview_diffs.append(row)
-    _flag_collisions(preview_diffs)
-    _attach_verification(db, preview_diffs)
-    truncated = total > len(preview_diffs)
-    return {"items": preview_diffs, "total": total, "truncated": truncated}
+            if limit is None or len(rows) < limit:
+                rows.append(row)
+    _flag_collisions(rows)
+    _attach_verification(db, rows)
+    return rows, total
+
+
+def safe_rename_file_ids(db: Database) -> list[str]:
+    """Library-wide scan returning file IDs that need a rename and are marked safe (default_selected)."""
+    rows, _ = _scan_library_rename_rows(db)
+    return [str(r["file_id"]) for r in rows if r.get("default_selected")]
 
 
 
@@ -565,14 +581,8 @@ def rename_library_file(
     return new_path
 
 
-@router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameApplyResponse, response_model_exclude_unset=True)
-def rename_apply(
-    body: RenameApplyRequest,
-    db: Database = Depends(get_db),
-    plex_client: Optional[Any] = Depends(get_media_client),
-    _admin: dict[str, Any] = Depends(require_admin),
-) -> dict[str, Any]:
-    """Applies batch renaming to specified library files, moving them to their template-rendered destinations and updating the catalog."""
+def apply_renames(db: Database, file_ids: list[str], media_server: Any = None) -> dict[str, Any]:
+    """Applies template renames to ``file_ids``, skipping mismatches and refreshing ``media_server``."""
     renamed_count = 0
     blocked_count = 0
     errors: list[str] = []
@@ -582,7 +592,7 @@ def rename_apply(
     root_dir = Path(root_folder_str).resolve()
     renamed_paths: list[str] = []
 
-    for fid in body.file_ids:
+    for fid in file_ids:
         f = db.get_library_file(fid)
         if not f:
             errors.append(f"Library file ID '{fid}' not found")
@@ -630,15 +640,26 @@ def rename_apply(
             logger.exception("Failed to rename file ID %s: %s", fid, redact_text(str(exc)))
             errors.append(f"Error renaming file '{fid}': {redact_text(str(exc))}")
 
-    if plex_client:
+    if media_server:
         request_library_refresh(
-            as_media_server(plex_client),
+            as_media_server(media_server),
             reason="rename",
             paths=renamed_paths,
             db=db,
         )
 
     return {"renamed_count": renamed_count, "errors": errors, "blocked_count": blocked_count}
+
+
+@router.post("/rename/apply", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=RenameApplyResponse, response_model_exclude_unset=True)
+def rename_apply(
+    body: RenameApplyRequest,
+    db: Database = Depends(get_db),
+    plex_client: Optional[Any] = Depends(get_media_client),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Applies batch renaming to specified library files, moving them to their template-rendered destinations and updating the catalog."""
+    return apply_renames(db, body.file_ids, as_media_server(plex_client))
 
 TAG_DIFF_FIELDS: tuple[tuple[str, str], ...] = (
     ("artist", "artist"),
