@@ -525,7 +525,10 @@ def rename_library_file(
     if current_path.resolve() == Path(proposed).resolve():
         return None  # Already matches target format
 
-    target_path = resolve_collision(proposed)
+    target_path = resolve_collision(proposed, own_path=current_path)
+    if current_path.resolve() == target_path.resolve():
+        return None  # Already at resolved target path
+
     old_parent = current_path.parent
     new_path = safe_atomic_move(current_path, target_path)
 
