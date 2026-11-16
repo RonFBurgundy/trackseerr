@@ -169,6 +169,12 @@ def candidate_rank(
 
 
 CLIENT_BACKOFF_SECONDS = 300.0
+PARTIAL_DOWNLOAD_DRIVERS = ("qbittorrent", "rtorrent")
+
+
+def supports_partial_download(client: dict[str, Any]) -> bool:
+    """Whether ``client`` can download a subset of files from a torrent."""
+    return (client.get("driver_type") or client.get("service_type") or "").lower() in PARTIAL_DOWNLOAD_DRIVERS
 
 
 class NoClientAvailable(RuntimeError):
@@ -1261,13 +1267,10 @@ class AcquisitionCoordinator:
         make_driver = driver_factory or get_acquisition_driver
         clients = self.clients_for_protocol(candidate.protocol, db)
         if candidate.extra and candidate.extra.get("file_indices"):
-            clients = [
-                c for c in clients
-                if (c.get("driver_type") or c.get("service_type") or "").lower() == "qbittorrent"
-            ]
+            clients = [c for c in clients if supports_partial_download(c)]
         if not clients:
             if candidate.extra and candidate.extra.get("file_indices"):
-                raise AcquisitionUnavailableError("Only qBittorrent can download part of a torrent")
+                raise AcquisitionUnavailableError("Only qBittorrent or rTorrent can download part of a torrent")
             raise NoClientAvailable(f"No enabled download client available for {candidate.protocol}")
         last_error: Optional[Exception] = None
         for client in clients:
@@ -1287,21 +1290,20 @@ class AcquisitionCoordinator:
         ranked: list[tuple[AcquisitionSearchResult, EvaluationResult]],
         db: Database,
     ) -> tuple[Optional[AcquisitionSearchResult], Optional[EvaluationResult], Optional[str]]:
-        """Picks the top candidate, skipping pack-file candidates when no qBittorrent client is available."""
+        """Picks the top candidate, skipping pack-file candidates when no partial-download client is available."""
         has_pack = False
         for cand, res in ranked:
             if cand.extra and cand.extra.get("file_indices"):
                 has_pack = True
                 clients = self.clients_for_protocol(cand.protocol, db)
-                has_qbit = any(
-                    (c.get("driver_type") or c.get("service_type") or "").lower() == "qbittorrent"
-                    for c in clients
-                )
-                if not has_qbit:
-                    logger.info("Skipping candidate '%s': Only qBittorrent can download part of a torrent", cand.title)
+                if not any(supports_partial_download(c) for c in clients):
+                    logger.info(
+                        "Skipping candidate '%s': Only qBittorrent or rTorrent can download part of a torrent",
+                        cand.title,
+                    )
                     continue
             return cand, res, None
-        skip_reason = "Only qBittorrent can download part of a torrent" if has_pack else None
+        skip_reason = "Only qBittorrent or rTorrent can download part of a torrent" if has_pack else None
         return None, None, skip_reason
 
     def search_and_grab(
@@ -1559,10 +1561,7 @@ class AcquisitionCoordinator:
             logger.warning("Could not clear the stale note on request %s: %s", request_id, exc)
 
     def _has_partial_torrent_client(self, db: Database, protocol: str = "torrent") -> bool:
-        return any(
-            (c.get("driver_type") or c.get("service_type") or "").lower() in ("qbittorrent", "rtorrent")
-            for c in self.clients_for_protocol(protocol, db)
-        )
+        return any(supports_partial_download(c) for c in self.clients_for_protocol(protocol, db))
 
     def _can_select_track_file(
         self, db: Database, top_candidate: AcquisitionSearchResult, item_type: str

@@ -1344,3 +1344,114 @@ def test_album_request_is_never_split(
     assert len(dispatched) == 1
     assert not (dispatched[0].extra or {}).get("file_indices")
 
+
+def test_dispatch_partial_candidate_to_rtorrent(db: Database) -> None:
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-rtorrent",
+            name="rTorrent",
+            driver_type=DownloadDriverType.RTORRENT,
+            host_url="http://rtorrent:8080/RPC2",
+        )
+    )
+    coord = AcquisitionCoordinator()
+    cand = AcquisitionSearchResult(
+        download_id="packhash:0",
+        title="Daft Punk - One More Time [FLAC] (in pack: Best)",
+        artist="Daft Punk",
+        protocol="torrent",
+        extra={"file_indices": [0], "file_paths": ["01 - One More Time.flac"]},
+    )
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "hash-rtorrent"
+
+    client, dl_hash = coord.dispatch_with_failover(db, cand, driver_factory=lambda _c: mock_driver)
+    assert client["id"] == "c-rtorrent"
+    assert dl_hash == "hash-rtorrent"
+    mock_driver.download.assert_called_once_with(cand)
+
+
+def test_dispatch_partial_candidate_skips_transmission(db: Database) -> None:
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-trans",
+            name="Transmission",
+            driver_type=DownloadDriverType.TRANSMISSION,
+            host_url="http://transmission:9091",
+            priority=1,
+        )
+    )
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-rtorrent",
+            name="rTorrent",
+            driver_type=DownloadDriverType.RTORRENT,
+            host_url="http://rtorrent:8080/RPC2",
+            priority=2,
+        )
+    )
+    coord = AcquisitionCoordinator()
+    cand = AcquisitionSearchResult(
+        download_id="packhash:0",
+        title="Daft Punk - One More Time [FLAC] (in pack: Best)",
+        artist="Daft Punk",
+        protocol="torrent",
+        extra={"file_indices": [0], "file_paths": ["01 - One More Time.flac"]},
+    )
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "hash-rtorrent"
+
+    client, dl_hash = coord.dispatch_with_failover(db, cand, driver_factory=lambda _c: mock_driver)
+    assert client["id"] == "c-rtorrent"
+    assert dl_hash == "hash-rtorrent"
+    mock_driver.download.assert_called_once_with(cand)
+
+
+def test_dispatch_partial_candidate_no_capable_client(db: Database) -> None:
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-trans",
+            name="Transmission",
+            driver_type=DownloadDriverType.TRANSMISSION,
+            host_url="http://transmission:9091",
+        )
+    )
+    coord = AcquisitionCoordinator()
+    cand = AcquisitionSearchResult(
+        download_id="packhash:0",
+        title="Daft Punk - One More Time [FLAC] (in pack: Best)",
+        artist="Daft Punk",
+        protocol="torrent",
+        extra={"file_indices": [0], "file_paths": ["01 - One More Time.flac"]},
+    )
+    with pytest.raises(AcquisitionUnavailableError) as exc_info:
+        coord.dispatch_with_failover(db, cand)
+    assert "Only qBittorrent or rTorrent can download part of a torrent" in str(exc_info.value)
+
+
+def test_select_grab_candidate_keeps_pack_for_rtorrent(db: Database) -> None:
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-rtorrent",
+            name="rTorrent",
+            driver_type=DownloadDriverType.RTORRENT,
+            host_url="http://rtorrent:8080/RPC2",
+        )
+    )
+    coord = AcquisitionCoordinator()
+    pack_cand = AcquisitionSearchResult(
+        download_id="packhash:0",
+        title="Daft Punk - One More Time [FLAC] (in pack: Best)",
+        artist="Daft Punk",
+        protocol="torrent",
+        extra={"file_indices": [0], "file_paths": ["01 - One More Time.flac"]},
+    )
+    eval_pack = EvaluationResult(
+        is_acceptable=True, score=2000, rejection_reasons=[], parsed_quality="FLAC 16bit", meets_cutoff=True
+    )
+    cand, res, skip_reason = coord._select_grab_candidate([(pack_cand, eval_pack)], db)
+    assert cand is pack_cand
+    assert res is eval_pack
+    assert skip_reason is None
+
+
