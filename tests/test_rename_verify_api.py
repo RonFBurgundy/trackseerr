@@ -55,12 +55,14 @@ def _seed(db: Database, root: Path, idx: int, rec: str | None, number: int = 3, 
     return f"fl-{idx}", path
 
 
-def _cache(db: Database, fid: str, path: Path, rids: list[str], file_path: str | None = None) -> None:
+def _cache(
+    db: Database, fid: str, path: Path, rids: list[str], file_path: str | None = None, title: str = "Actual"
+) -> None:
     st = os.stat(path)
     db.upsert_file_fingerprint({
         "file_id": fid, "file_path": file_path or str(path), "size_bytes": st.st_size, "mtime_ns": st.st_mtime_ns,
         "status": "ok", "duration": 100.0, "fingerprint": "fp", "error": None,
-        "matches": [{"recording_id": r, "title": "Actual", "artist": "Radiohead", "score": 0.95} for r in rids],
+        "matches": [{"recording_id": r, "title": title, "artist": "Radiohead", "score": 0.95} for r in rids],
     })
 
 
@@ -201,6 +203,30 @@ def test_preview_selects_copy_suffix_despite_mismatch(app_and_client, test_db, a
     row = _preview(client, headers)[fid]
     assert "copy_suffix" in row["reasons"] and "audio_mismatch" in row["reasons"]
     assert row["default_selected"] is True
+
+
+def test_preview_same_song_copy_suffix_is_selected(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    fid, path, _target = _seed_copy_suffix(test_db, root, R1)
+    _cache(test_db, fid, path, [R2], title="Song 1 (Remastered)")
+    row = _preview(client, headers)[fid]
+    assert "copy_suffix" in row["reasons"] and "same_song" in row["reasons"]
+    assert "audio_mismatch" not in row["reasons"]
+    assert row["default_selected"] is True
+    assert row["verification"]["status"] == "same_song"
+
+
+def test_apply_does_not_block_same_song(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    fid, path = _seed(test_db, root, 1, R1)
+    _cache(test_db, fid, path, [R2], title="Song 1 (Remastered)")
+    resp = client.post("/api/library/rename/apply", json={"file_ids": [fid]}, headers=headers)
+    assert resp.status_code == 200
+    res = resp.json()
+    assert res["renamed_count"] == 1 and res["blocked_count"] == 0 and res["errors"] == []
+    assert not path.exists()
 
 
 def test_preview_copy_suffix_with_existing_target_is_collision(app_and_client, test_db, admin):

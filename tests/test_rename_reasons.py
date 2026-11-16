@@ -111,3 +111,10 @@ def test_is_cosmetic_only_ignores_verification_reasons():
     assert is_cosmetic_only(["copy_suffix", "collision"]) is False
     assert is_cosmetic_only(["audio_mismatch"]) is False
     assert is_cosmetic_only([]) is False
+
+
+def test_is_cosmetic_only_ignores_same_song():
+    from trackseerr.rename_reasons import is_cosmetic_only
+
+    assert is_cosmetic_only(["copy_suffix", "same_song"]) is True
+    assert is_cosmetic_only(["same_song"]) is False

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import threading
 import time
 from typing import Any, Callable, Optional
@@ -29,8 +30,19 @@ from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 logger = logging.getLogger(__name__)
 
 VERIFIED = "verified"
+SAME_SONG = "same_song"
 MISMATCH = "mismatch"
 UNKNOWN = "unknown"
+
+_YEAR_MIX_SUFFIX = re.compile(
+    r"(?:\s*[\(\[]\s*\d{4}\s+mix\s*[\)\]]|\s*[-–—]\s*\d{4}\s+mix)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _same_song(a: str, b: str) -> bool:
+    """True when two titles name the same song, ignoring edition qualifiers and trailing YYYY mix labels."""
+    return titles_match(_YEAR_MIX_SUFFIX.sub("", a), _YEAR_MIX_SUFFIX.sub("", b))
 
 RISKY_REASONS = frozenset({TRACK_NUMBER, FILE_TITLE, ALBUM_TITLE, ALBUM_YEAR, DISC_LAYOUT, COLLISION})
 KEY_REJECTED_MESSAGE = "AcoustID rejected the API key"
@@ -92,15 +104,17 @@ def verdict_for(db: Any, fp_row: Optional[dict[str, Any]], track: dict[str, Any]
             return _verdict(VERIFIED, scores[rid])
         if not target and _same_recording_other_album(hit, track):
             return _verdict(UNKNOWN, None)  # a single and its album release share a recording: not a mismatch
+        status = SAME_SONG if _same_song(str(hit.get("title") or ""), str(track.get("title") or "")) else MISMATCH
         return _verdict(
-            MISMATCH,
+            status,
             scores[rid],
             actual_track_id=hit["id"],
             actual_album_id=hit.get("album_id"),
             actual_title=hit.get("title"),
         )
     if target:
-        return _verdict(MISMATCH, top["score"], actual_title=top.get("title"), actual_artist=top.get("artist"))
+        status = SAME_SONG if _same_song(str(top.get("title") or ""), str(track.get("title") or "")) else MISMATCH
+        return _verdict(status, top["score"], actual_title=top.get("title"), actual_artist=top.get("artist"))
     return _verdict(UNKNOWN, None)
 
 
@@ -175,7 +189,7 @@ def _bump(**counts: int) -> None:
             _state[key] += n
 
 
-_VERDICT_COUNTER = {VERIFIED: "verified", MISMATCH: "mismatched", UNKNOWN: "unknown"}
+_VERDICT_COUNTER = {VERIFIED: "verified", SAME_SONG: "verified", MISMATCH: "mismatched", UNKNOWN: "unknown"}
 
 
 def _verify_one(db: Any, file_id: str, api_key: str) -> Optional[dict[str, Any]]:

@@ -170,6 +170,53 @@ def test_verdict_mismatch_without_library_track_uses_acoustid_title(lib: Databas
     }
 
 
+def test_verdict_same_song_library_hit_album_version(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", R1, "Rain King (album version)")
+    _track(lib, "t2", "al2", R2, "Rain King")
+    v = rv.verdict_for(lib, _fp(matches=[_m(R2, 0.94, "Rain King")]), trk, "/m/a.flac")
+    assert v == {
+        "status": rv.SAME_SONG,
+        "score": 0.94,
+        "actual_track_id": "t2",
+        "actual_album_id": "al2",
+        "actual_title": "Rain King",
+        "actual_artist": None,
+    }
+
+
+def test_verdict_same_song_acoustid_title_remaster(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", R1, "Miss You (Remastered)")
+    v = rv.verdict_for(lib, _fp(matches=[_m(R2, 0.92, "Miss You", "The Rolling Stones")]), trk, "/m/a.flac")
+    assert v == {
+        "status": rv.SAME_SONG,
+        "score": 0.92,
+        "actual_track_id": None,
+        "actual_album_id": None,
+        "actual_title": "Miss You",
+        "actual_artist": "The Rolling Stones",
+    }
+
+
+def test_verdict_same_song_year_mix(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", R1, "Something - Remastered 2009")
+    v = rv.verdict_for(lib, _fp(matches=[_m(R2, 0.96, "Something (2019 mix)", "The Beatles")]), trk, "/m/a.flac")
+    assert v is not None and v["status"] == rv.SAME_SONG and v["score"] == 0.96
+
+
+def test_verdict_remix_vs_other_remix_stays_mismatch(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", R1, "Fit Your Heart (Demon remix)")
+    v = rv.verdict_for(
+        lib, _fp(matches=[_m(R2, 0.91, "Fit Your Heart (Do Me Remix by Krikor)")]), trk, "/m/a.flac"
+    )
+    assert v is not None and v["status"] == rv.MISMATCH
+
+
+def test_verdict_instrumental_stays_mismatch(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", R1, "Kill Your Masters")
+    v = rv.verdict_for(lib, _fp(matches=[_m(R2, 0.91, "Kill Your Masters (instrumental)")]), trk, "/m/a.flac")
+    assert v is not None and v["status"] == rv.MISMATCH
+
+
 def test_verdict_unknown_without_target_recording_or_result(lib: Database) -> None:
     no_rec = _track(lib, "t1", "al1", None)
     v = rv.verdict_for(lib, _fp(matches=[_m(R2)]), no_rec, "/m/a.flac")
@@ -230,7 +277,7 @@ def test_is_risky() -> None:
 
 def _file(lib: Database, tmp_path: Path, fid: str = "f1", tid: str = "t1", rec: str | None = R1) -> dict[str, Any]:
     if lib.get_library_track(tid) is None:
-        _track(lib, tid, "al1", rec)
+        _track(lib, tid, "al1", rec, title=f"Song {tid}")
     audio = tmp_path / f"{fid}.flac"
     audio.write_bytes(b"audio" + fid.encode())
     return lib.upsert_library_file(
