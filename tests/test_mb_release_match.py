@@ -9,8 +9,13 @@ from unittest.mock import MagicMock
 import pytest
 
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.library import FingerprintUnavailable
 from trackseerr.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
-from trackseerr.release_matching import choose_release, match_album_releases
+from trackseerr.release_matching import (
+    choose_release,
+    fill_recordings_from_fingerprints,
+    match_album_releases,
+)
 from trackseerr.storage import Database
 
 
@@ -528,5 +533,168 @@ def test_match_reports_progress(db: Database, tmp_path: Path):
     assert calls[0] == (0, 2)
     assert calls[-1] == (2, 2)
     assert calls == [(0, 2), (1, 2), (2, 2)]
+
+
+# =============================================================================
+# fill_recordings_from_fingerprints tests
+# =============================================================================
+
+
+def test_fill_picks_match_inside_release_group(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-rg",
+        rg_id="rg-1",
+        tracks=[{"num": 1, "title": "Song One", "rec_id": None, "file": True}],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_release_group_releases.return_value = [
+        _make_release("rel-1", track_count=1, recordings=["rec-B"], titles=["Song One"])
+    ]
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, _file, _key: {
+            "status": "ok",
+            "matches": [
+                {"recording_id": "rec-A", "score": 0.99, "title": "Song One"},
+                {"recording_id": "rec-B", "score": 0.95, "title": "Song One"},
+            ],
+            "cached": True,
+        },
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["filled"] == 1
+    assert counts["tracks"] == 1
+    track = db.get_library_track("alb-rg-1")
+    assert track is not None
+    assert track["mb_recording_id"] == "rec-B"
+
+
+def test_fill_without_group_requires_title_and_score(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-norg",
+        rg_id=None,
+        tracks=[
+            {"num": 1, "title": "Exact Song", "rec_id": None, "file": True},
+            {"num": 2, "title": "Expected Title", "rec_id": None, "file": True},
+            {"num": 3, "title": "Low Score Song", "rec_id": None, "file": True},
+        ],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    responses = {
+        "file-alb-norg-1": {
+            "status": "ok",
+            "matches": [{"recording_id": "rec-ok", "score": 0.95, "title": "Exact Song"}],
+            "cached": True,
+        },
+        "file-alb-norg-2": {
+            "status": "ok",
+            "matches": [{"recording_id": "rec-diff", "score": 0.98, "title": "Completely Different"}],
+            "cached": True,
+        },
+        "file-alb-norg-3": {
+            "status": "ok",
+            "matches": [{"recording_id": "rec-low", "score": 0.80, "title": "Low Score Song"}],
+            "cached": True,
+        },
+    }
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, file_row, _key: responses[file_row["id"]],
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["tracks"] == 3
+    assert counts["filled"] == 1
+    assert counts["no_match"] == 2
+    assert db.get_library_track("alb-norg-1")["mb_recording_id"] == "rec-ok"
+    assert db.get_library_track("alb-norg-2")["mb_recording_id"] is None
+    assert db.get_library_track("alb-norg-3")["mb_recording_id"] is None
+
+
+def test_fill_skips_recording_used_in_same_album(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-dup",
+        rg_id=None,
+        tracks=[
+            {"num": 1, "title": "Same Song", "rec_id": "rec-already", "file": True},
+            {"num": 2, "title": "Same Song", "rec_id": None, "file": True},
+        ],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, _file, _key: {
+            "status": "ok",
+            "matches": [{"recording_id": "rec-already", "score": 0.99, "title": "Same Song"}],
+            "cached": True,
+        },
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["tracks"] == 1
+    assert counts["filled"] == 0
+    assert counts["no_match"] == 1
+    assert db.get_library_track("alb-dup-2")["mb_recording_id"] is None
+
+
+def test_fill_no_fingerprint_counts(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-nofp",
+        rg_id=None,
+        tracks=[{"num": 1, "title": "Mystery Track", "rec_id": None, "file": True}],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, _file, _key: {"status": "no_result"},
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["tracks"] == 1
+    assert counts["no_fingerprint"] == 1
+    assert counts["filled"] == 0
+
+
+def test_fill_stops_when_fingerprinting_unavailable(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-unavail",
+        rg_id=None,
+        tracks=[{"num": 1, "title": "Track 1", "rec_id": None, "file": True}],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+
+    def _raise_unavail(_db, _file, _key):
+        raise FingerprintUnavailable("fpcalc missing")
+
+    monkeypatch.setattr(trackseerr.rename_verification, "verify_file", _raise_unavail)
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["filled"] == 0
+
 
 
