@@ -65,6 +65,22 @@ class TestCollisionDetection:
         resolved_mem = resolve_collision("/music/song.mp3", existing_paths=simulated)
         assert resolved_mem == Path("/music/song (2).mp3")
 
+    def test_resolve_collision_own_path_is_free(self, tmp_path):
+        f1 = tmp_path / "track.flac"
+        f1.touch()
+        f2 = tmp_path / "track (1).flac"
+        f2.touch()
+
+        resolved = resolve_collision(f1, own_path=f2)
+        assert resolved == f2
+
+    def test_resolve_collision_own_path_is_the_destination(self, tmp_path):
+        f1 = tmp_path / "track.flac"
+        f1.touch()
+
+        resolved = resolve_collision(f1, own_path=f1)
+        assert resolved == f1
+
 
 class TestInspectAudioFile:
     """Validates audio tag extraction across container formats."""

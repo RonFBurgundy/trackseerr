@@ -226,6 +226,20 @@ def test_apply_moves_copy_suffix_despite_mismatch(app_and_client, test_db, admin
     assert target.exists() and not path.exists()
 
 
+def test_apply_with_taken_name_does_not_bump_copy_number(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    fid, path, target = _seed_copy_suffix(test_db, root, R1)
+    _create_minimal_flac(target)
+    resp = client.post("/api/library/rename/apply", json={"file_ids": [fid]}, headers=headers)
+    assert resp.status_code == 200
+    res = resp.json()
+    assert res["renamed_count"] == 0 and res["errors"] == []
+    assert path.exists()
+    assert not path.with_name("03 - Song 1 (2).flac").exists()
+    assert target.exists()
+
+
 def test_apply_still_blocks_mismatch_on_title_change(app_and_client, test_db, admin):
     _, client = app_and_client
     headers, root = admin

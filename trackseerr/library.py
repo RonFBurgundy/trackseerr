@@ -471,13 +471,28 @@ def detect_path_collision(
         return False
 
 
+def _is_own_path(candidate: Path, own_path: str | Path | None) -> bool:
+    """Checks if candidate refers to the same file as own_path."""
+    if own_path is None:
+        return False
+    if os.path.normpath(str(candidate)) == os.path.normpath(str(own_path)):
+        return True
+    try:
+        return candidate.samefile(own_path)
+    except OSError as exc:
+        logger.debug("samefile check failed for %s and %s: %s", candidate, own_path, exc)
+        return False
+
+
 def resolve_collision(
     destination_path: str | Path,
     existing_paths: set[str] | None = None,
+    *,
+    own_path: str | Path | None = None,
 ) -> Path:
     """Appends an incrementing counter (e.g. 'Song (1).flac') if a collision is detected."""
     dest = Path(destination_path)
-    if not detect_path_collision(dest, existing_paths):
+    if _is_own_path(dest, own_path) or not detect_path_collision(dest, existing_paths):
         return dest
 
     parent = dest.parent
@@ -487,7 +502,7 @@ def resolve_collision(
     counter = 1
     while True:
         candidate = parent / f"{stem} ({counter}){suffix}"
-        if not detect_path_collision(candidate, existing_paths):
+        if _is_own_path(candidate, own_path) or not detect_path_collision(candidate, existing_paths):
             return candidate
         counter += 1
 

@@ -431,7 +431,9 @@ def _shorten_file(
 
     proposed_name = f"{truncated_stem}{suffix}"
     proposed_path = current_file.parent / proposed_name
-    target_path = resolve_collision(proposed_path)
+    target_path = resolve_collision(proposed_path, own_path=current_file)
+    if target_path.resolve() == current_file.resolve():
+        return current_file, "rename"
     new_path = safe_atomic_move(current_file, target_path)
 
     if not file_row:
