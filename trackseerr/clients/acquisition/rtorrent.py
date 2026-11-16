@@ -167,6 +167,27 @@ def _resolve_hash(torrent_bytes: Optional[bytes], target_url: str, result: Acqui
     )
 
 
+def _basename(path: Any) -> str:
+    return posixpath.basename(str(path or "").replace("\\", "/"))
+
+
+def _verify_file_paths(rows: list[Any], wanted: list[int], wanted_paths: list[str]) -> None:
+    for pos, w_idx in enumerate(wanted):
+        if w_idx < 0 or w_idx >= len(rows):
+            raise AcquisitionUnavailableError(
+                f"Wanted file index {w_idx} not found in rTorrent file list",
+                reason="release_unavailable",
+            )
+        if pos < len(wanted_paths):
+            row = rows[w_idx]
+            f_path = row[0] if isinstance(row, list) and row else row
+            if _basename(f_path) != _basename(wanted_paths[pos]):
+                raise AcquisitionUnavailableError(
+                    f"Index drift: file {w_idx} path {f_path!r} does not match expected {wanted_paths[pos]!r}",
+                    reason="release_unavailable",
+                )
+
+
 class RtorrentDriver(AcquisitionDriver):
     """Driver for rTorrent via its XML-RPC endpoint (SCGI behind an HTTP server such as nginx or ruTorrent)."""
 
@@ -282,14 +303,61 @@ class RtorrentDriver(AcquisitionDriver):
             cmds.append(f"d.custom1.set={self.category}")
         return cmds
 
+    def _fetch_file_list(self, client: httpx.Client, thash: str) -> list[Any]:
+        for _ in range(10):
+            try:
+                rows = self._call(client, "f.multicall", thash, "", "f.path=")
+                if isinstance(rows, list) and rows:
+                    return rows
+            except _RtorrentFault:
+                pass
+            time.sleep(0.5)
+        self._call(client, "d.erase", thash)
+        raise AcquisitionUnavailableError(
+            "rTorrent did not load the torrent's file list in time",
+            reason="release_unavailable",
+        )
+
+    def _load_partial(
+        self,
+        client: httpx.Client,
+        torrent_bytes: bytes,
+        torrent_hash: str,
+        wanted: list[int],
+        wanted_paths: list[str],
+        cmds: list[str],
+    ) -> None:
+        thash = torrent_hash.upper()
+        self._call(client, "load.raw", "", xmlrpc.client.Binary(torrent_bytes), *cmds)
+        rows = self._fetch_file_list(client, thash)
+        try:
+            _verify_file_paths(rows, wanted, wanted_paths)
+        except AcquisitionUnavailableError:
+            self._call(client, "d.erase", thash)
+            raise
+        wanted_set = set(wanted)
+        for idx in range(len(rows)):
+            self._call(client, "f.priority.set", f"{thash}:f{idx}", 1 if idx in wanted_set else 0)
+        self._call(client, "d.update_priorities", thash)
+        self._call(client, "d.start", thash)
+
     def download(self, result: AcquisitionSearchResult) -> str:
         """Uploads the .torrent (or hands over the magnet) to rTorrent and returns the lower-case info hash."""
         if not is_safe_service_url(self.host_url):
             raise ValueError("Prohibited host URL")
 
+        extra = result.extra if isinstance(result.extra, dict) else {}
+        wanted = list(extra.get("file_indices") or [])
+        wanted_paths = list(extra.get("file_paths") or [])
+
         torrent_bytes, target_url = _fetch_payload(result, self.timeout)
         if torrent_bytes is None and not target_url:
             raise ValueError("No magnet or download URL provided for torrent")
+        if wanted and torrent_bytes is None:
+            raise AcquisitionUnavailableError(
+                "rTorrent needs the .torrent file to download part of a torrent",
+                reason="release_unavailable",
+            )
         torrent_hash = _resolve_hash(torrent_bytes, target_url, result)
 
         cmds = self._load_commands()
@@ -297,10 +365,14 @@ class RtorrentDriver(AcquisitionDriver):
             with httpx.Client(timeout=self.timeout, auth=self._auth) as client:
                 if self._already_loaded(client, torrent_hash):
                     return torrent_hash
-                if torrent_bytes is not None:
+                if wanted and torrent_bytes is not None:
+                    self._load_partial(client, torrent_bytes, torrent_hash, wanted, wanted_paths, cmds)
+                elif torrent_bytes is not None:
                     self._call(client, "load.raw_start", "", xmlrpc.client.Binary(torrent_bytes), *cmds)
                 else:
                     self._call(client, "load.start", "", target_url, *cmds)
+        except AcquisitionUnavailableError:
+            raise
         except PermissionError as exc:
             raise PermissionError(f"rTorrent authentication failed: {exc}") from exc
         except httpx.HTTPError as exc:
