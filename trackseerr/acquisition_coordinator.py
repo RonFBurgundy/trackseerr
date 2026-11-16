@@ -1541,14 +1541,92 @@ class AcquisitionCoordinator:
                 db.restore_pending_release(claimed)
 
     @staticmethod
-    def _clear_stale_request_note(db: Database, request_id: Optional[str], req_row: Optional[dict[str, Any]]) -> None:
+    def _clear_stale_request_note(
+        db: Database,
+        request_id: Optional[str],
+        req_row: Optional[dict[str, Any]],
+        *,
+        keep_whole_release: bool = False,
+    ) -> None:
         """A new grab supersedes an earlier download failure or sync-wait note on the request."""
-        if not request_id or not req_row or req_row.get("status_reason") not in ("download_failed", "awaiting_sync"):
+        if keep_whole_release or not request_id or not req_row:
+            return
+        if req_row.get("status_reason") not in ("download_failed", "awaiting_sync", "whole_release"):
             return
         try:
             db.set_request_outcome(request_id, None, None, schedule=False)
         except sqlite3.Error as exc:
             logger.warning("Could not clear the stale note on request %s: %s", request_id, exc)
+
+    def _has_partial_torrent_client(self, db: Database, protocol: str = "torrent") -> bool:
+        return any(
+            (c.get("driver_type") or c.get("service_type") or "").lower() in ("qbittorrent", "rtorrent")
+            for c in self.clients_for_protocol(protocol, db)
+        )
+
+    def _can_select_track_file(
+        self, db: Database, top_candidate: AcquisitionSearchResult, item_type: str
+    ) -> bool:
+        if item_type != "track" or top_candidate.protocol != "torrent":
+            return False
+        if isinstance(top_candidate.extra, dict) and top_candidate.extra.get("file_indices"):
+            return False
+        return self._has_partial_torrent_client(db, top_candidate.protocol)
+
+    @staticmethod
+    def _wanted_track_title(db: Database, request_id: Optional[str], track_id: Optional[str]) -> Optional[str]:
+        if track_id:
+            trk = db.get_library_track(track_id)
+            if trk and trk.get("title"):
+                return str(trk["title"])
+        if request_id:
+            req = db.get_request(request_id)
+            if req and req.get("title"):
+                return str(req["title"])
+        return None
+
+    @staticmethod
+    def _note_whole_release(db: Database, request_id: str) -> None:
+        try:
+            db.set_request_outcome(
+                request_id,
+                "whole_release",
+                "Only available inside a full release: the whole release is downloading and only the requested track is imported.",
+                schedule=False,
+            )
+        except sqlite3.Error as exc:
+            logger.warning("Could not record whole-release note on request %s: %s", request_id, exc)
+
+    def _choose_track_file(
+        self,
+        db: Database,
+        top_candidate: AcquisitionSearchResult,
+        item_type: str,
+        artist: str,
+        request_id: Optional[str],
+        track_id: Optional[str],
+    ) -> bool:
+        from trackseerr import track_file_selection
+
+        if not self._can_select_track_file(db, top_candidate, item_type):
+            return False
+        wanted_title = self._wanted_track_title(db, request_id, track_id)
+        torrent_bytes = track_file_selection.fetch_torrent_bytes(top_candidate) if wanted_title else None
+        if not wanted_title or not torrent_bytes:
+            return False
+        entry, outcome = track_file_selection.select_track_file(torrent_bytes, wanted_title, artist)
+        if outcome == "selected" and entry is not None:
+            if not isinstance(top_candidate.extra, dict):
+                top_candidate.extra = {}
+            top_candidate.extra["file_indices"] = [entry["file_index"]]
+            top_candidate.extra["file_paths"] = [entry["path"]]
+            top_candidate.extra["torrent_bytes_size"] = entry["size_bytes"]
+            logger.info("Downloading only %s from %s", Path(entry["path"]).name, top_candidate.title)
+            return False
+        if outcome in ("no_match", "ambiguous") and request_id:
+            self._note_whole_release(db, request_id)
+            return True
+        return False
 
     def grab_candidate(
         self,
@@ -1568,14 +1646,12 @@ class AcquisitionCoordinator:
         trigger: GrabTrigger,
     ) -> dict[str, Any]:
         """Dispatches a chosen candidate to its protocol's client and records the download (no delay gate)."""
+        whole_release = self._choose_track_file(
+            db, top_candidate, item_type, artist, request_id, track_id
+        )
         if top_candidate.extra and top_candidate.extra.get("file_indices"):
-            clients = self.clients_for_protocol(top_candidate.protocol, db)
-            has_qbit = any(
-                (c.get("driver_type") or c.get("service_type") or "").lower() == "qbittorrent"
-                for c in clients
-            )
-            if not has_qbit:
-                reason = "Only qBittorrent can download part of a torrent"
+            if not self._has_partial_torrent_client(db, top_candidate.protocol):
+                reason = "Only qBittorrent or rTorrent can download part of a torrent"
                 logger.info("Skipping candidate '%s': %s", top_candidate.title, reason)
                 return {
                     "success": False,
@@ -1673,7 +1749,7 @@ class AcquisitionCoordinator:
             logger.warning("Failed to record grab history for %s: %s", download_id, type(hist_err).__name__)
 
         req_row = db.get_request(request_id) if request_id else None
-        self._clear_stale_request_note(db, request_id, req_row)
+        self._clear_stale_request_note(db, request_id, req_row, keep_whole_release=whole_release)
         try:
             notification_dispatcher.dispatch(
                 NotificationEvent.DOWNLOAD_STARTED,
