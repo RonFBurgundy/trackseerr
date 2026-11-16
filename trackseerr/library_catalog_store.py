@@ -978,6 +978,45 @@ class LibraryCatalogStoreMixin:
             )
             self.conn.commit()
 
+    def iter_albums_without_release_group(self, batch: int = 200) -> Iterator[dict[str, Any]]:
+        """Yields albums with at least one filed track and no release group ID, keyset-paginated by id."""
+        after_id: Optional[str] = None
+        while True:
+            sql = (
+                "SELECT a.id, a.title, a.artist_id FROM library_albums a "
+                "WHERE (a.mb_release_group_id IS NULL OR a.mb_release_group_id = '') "
+                "AND EXISTS (SELECT 1 FROM library_tracks t WHERE t.album_id = a.id "
+                "AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id))) "
+            )
+            params: list[Any] = []
+            if after_id is not None:
+                sql += "AND a.id > ? "
+                params.append(after_id)
+            sql += "ORDER BY a.id ASC LIMIT ?"
+            params.append(int(batch))
+            with self._lock:
+                rows = self.conn.execute(sql, params).fetchall()
+            if not rows:
+                return
+            for row in rows:
+                yield {"id": str(row["id"]), "title": str(row["title"] or ""), "artist_id": str(row["artist_id"] or "")}
+            after_id = str(rows[-1]["id"])
+            if len(rows) < batch:
+                return
+
+    def count_albums_without_release_group(self) -> int:
+        """Counts the albums iter_albums_without_release_group yields."""
+        return sum(1 for _ in self.iter_albums_without_release_group(batch=1000))
+
+    def artist_has_release_group(self, artist_id: str, release_group_id: str, exclude_album_id: str) -> bool:
+        """True when another album of the artist already holds the release group."""
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT 1 FROM library_albums WHERE artist_id = ? AND mb_release_group_id = ? AND id != ? LIMIT 1",
+                (str(artist_id), str(release_group_id), str(exclude_album_id)),
+            ).fetchone()
+        return row is not None
+
     def list_albums_without_mb_release(
         self, *, page: int, page_size: int, kind: str | None = None
     ) -> tuple[list[dict[str, Any]], int]:
