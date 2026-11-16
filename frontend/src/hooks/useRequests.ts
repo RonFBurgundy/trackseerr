@@ -15,6 +15,7 @@ import {
 } from '@/services/requestService';
 import { useVirtualPagedList, type FetchPage, type ListKey, type VirtualPagedList } from './useVirtualPagedList';
 import { useGroupIndex, type UseGroupIndexReturn } from './useGroupIndex';
+import { usePolling } from '@/hooks/usePolling';
 
 export type RequestFilter = 'all' | 'pending' | 'approved' | 'fulfilled' | 'rejected';
 
@@ -138,6 +139,26 @@ export function useRequests(enabled: boolean = true): UseRequestsReturn {
     void loadQuota();
   }, [enabled, loadSources, loadQuota]);
 
+  const loadedItems = useMemo(() => list.getLoadedItems(), [list]);
+  const hasActiveRequests = useMemo(
+    () =>
+      loadedItems.some(
+        (r) =>
+          r.status === 'approved' ||
+          r.status === 'processing' ||
+          Boolean(r.status_reason)
+      ),
+    [loadedItems]
+  );
+
+  usePolling(
+    () => {
+      void list.refresh();
+    },
+    15_000,
+    enabled && hasActiveRequests
+  );
+
   const submitRequest = useCallback(
     async (item: RequestableItem) => {
       setActionError(null);
@@ -248,7 +269,7 @@ export function useRequests(enabled: boolean = true): UseRequestsReturn {
 
   return {
     list,
-    requests: list.getLoadedItems(),
+    requests: loadedItems,
     index,
     quota,
     filter,
