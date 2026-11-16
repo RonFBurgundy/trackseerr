@@ -19,6 +19,7 @@ from trackseerr.api.schemas.library import (
     ArtistsPage,
     LibraryFacetsResponse,
     LibraryIndexResponse,
+    LibrarySearchResponse,
     LibraryStats,
     TracksPage,
 )
@@ -32,6 +33,7 @@ from trackseerr.clients.lidarr import (
 from trackseerr.album_track_hydration import hydrate_album_tracks
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
 from trackseerr.exclusions import annotate_exclusions
+from trackseerr.library_search import search_library
 from trackseerr.library_filters import LibraryFacetFilter, library_facets
 from trackseerr.storage import Database
 
@@ -82,6 +84,21 @@ def get_library_facets(
 ) -> dict[str, Any]:
     """Summary of library facets: genres, countries, decades, types, and value bounds."""
     return library_facets(db)
+
+@router.get(
+    "/search",
+    dependencies=[Depends(require_core_tier), Depends(native_only)],
+    response_model=LibrarySearchResponse,
+    response_model_exclude_unset=True,
+)
+def search_library_route(
+    q: str = Query(..., min_length=1, max_length=200),
+    limit: int = Query(8, ge=1, le=25),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Best matches across artists, albums and tracks, with a close-name suggestion for typos."""
+    return search_library(db, q, limit)
 
 @router.get("/artists/paged", dependencies=[Depends(require_core_tier)], response_model=ArtistsPage, response_model_exclude_unset=True)
 def paged_artists(

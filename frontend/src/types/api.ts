@@ -3209,6 +3209,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search Library Route
+         * @description Best matches across artists, albums and tracks, with a close-name suggestion for typos.
+         */
+        get: operations["search_library_route_api_library_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/stats": {
         parameters: {
             query?: never;
@@ -9905,6 +9925,56 @@ export interface components {
              * @enum {string}
              */
             mode: "native" | "lidarr";
+        };
+        /** LibrarySearchAlbum */
+        LibrarySearchAlbum: {
+            /** Artist Id */
+            artist_id: string;
+            /** Artist Name */
+            artist_name: string;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Year */
+            year?: number | null;
+        };
+        /** LibrarySearchArtist */
+        LibrarySearchArtist: {
+            /** Album Count */
+            album_count: number;
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+        };
+        /** LibrarySearchResponse */
+        LibrarySearchResponse: {
+            /** Albums */
+            albums: components["schemas"]["LibrarySearchAlbum"][];
+            /** Artists */
+            artists: components["schemas"]["LibrarySearchArtist"][];
+            /** Query */
+            query: string;
+            /** Suggestion */
+            suggestion?: string | null;
+            /** Tracks */
+            tracks: components["schemas"]["LibrarySearchTrack"][];
+        };
+        /** LibrarySearchTrack */
+        LibrarySearchTrack: {
+            /** Album Id */
+            album_id: string;
+            /** Album Title */
+            album_title: string;
+            /** Artist Id */
+            artist_id: string;
+            /** Artist Name */
+            artist_name: string;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
         };
         /** LibraryStats */
         LibraryStats: {
@@ -20621,6 +20691,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ScanStatus"];
+                };
+            };
+        };
+    };
+    search_library_route_api_library_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibrarySearchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
