@@ -908,16 +908,9 @@ def run_scheduled_task(  # noqa: C901, PLR0915
 
     elif task_id == "mb_release_match":
         def _match(run: RunHandle) -> None:
-            from trackseerr.mb_metadata_store import get_shared_enricher
-            from trackseerr.release_matching import match_album_releases
+            from trackseerr.artist_repair import run_repair_and_match
 
-            counts = match_album_releases(
-                db,
-                get_shared_enricher(db),
-                should_stop=run.should_stop,
-                on_progress=run.set_progress,
-            )
-            run.message = ", ".join(f"{k}={v}" for k, v in counts.items())
+            run_repair_and_match(db, run)
 
         _run_manual(db, task_id, "ManualMbReleaseMatchTask", _match, cancellable=True)
 

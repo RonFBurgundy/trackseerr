@@ -32,7 +32,7 @@ from trackseerr.task_manager import (
 logger = logging.getLogger(__name__)
 
 BACKUP_FILENAME_RE = re.compile(
-    r"^trackseerr_backup_(\d{8}_\d{6})_(manual|scheduled|pre_restore)\.zip$"
+    r"^trackseerr_backup_(\d{8}_\d{6})_(manual|scheduled|pre_restore|pre_repair)\.zip$"
 )
 
 DB_MEMBER_NAME = "sync_db.sqlite"
@@ -237,7 +237,7 @@ def create_backup(
     backup_dir: Optional[Path] = None,
 ) -> Path:
     """Snapshots the live SQLite database using the sqlite3 online backup API into a zip archive."""
-    if kind not in ("manual", "scheduled", "pre_restore"):
+    if kind not in ("manual", "scheduled", "pre_restore", "pre_repair"):
         raise ValueError(f"Invalid backup kind: {kind}")
 
     if _backup_cancel_event.is_set():

@@ -608,6 +608,9 @@ def _background_init(
             migrate_library_mode(db, config)  # before any worker can route a request
             _start_lidarr_trickle(db, config)
             _start_local_workers(db, config)
+            from .artist_repair import start_startup_artist_repair
+
+            start_startup_artist_repair(db, _stopping)  # one-time, native mode only, background thread
         boot_state.mark_ready()
         logger.info("[boot] ready after %.2fs (external connection checks continue in the background)", boot_state.elapsed())
     except Exception as e:  # last resort for a daemon thread: fail loudly instead of staying "starting" forever
