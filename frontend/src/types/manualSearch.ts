@@ -10,6 +10,8 @@ export interface ManualSearchTarget {
   itemType: 'album' | 'track';
   albumId?: string | number | null;
   trackId?: string | number | null;
+  /** Links the grab to this request so it is fulfilled by the download. */
+  requestId?: string | null;
 }
 
 export type ManualSearchFilter = 'all' | 'accepted' | 'rejected';
