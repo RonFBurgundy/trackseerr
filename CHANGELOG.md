@@ -139,6 +139,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Re-applying a rename no longer moves a file from "Song (1)" to "Song (2)" (and so on) when its proper name is taken by another file; it now stays where it is. Shorten name works the same way.
 - MusicBrainz Release Match now finds the right edition for albums with many editions (Abbey Road, Rubber Soul and the like). It used to read only the first part of the edition list and give up. Run it again after updating.
 - Many fewer albums show as "Not on MusicBrainz": single tracks from playlists are now matched through the song itself, and names like "Hotel California - 2013 Remaster" match the original album.
 - Artists are only matched to a MusicBrainz artist with the same name (so "FELIX" is no longer matched to Felix Mendelssohn).
