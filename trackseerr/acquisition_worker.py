@@ -340,6 +340,8 @@ class AcquisitionWorker(ImportPipelineMixin):
         self._archive_errors: list[str] = []
         self._last_challenge_scan: Optional[float] = None  # time.monotonic() of the last chat-challenge scan
         self._last_slskd_sweep: Optional[float] = None  # time.monotonic() of the last sweep; None = never ran
+        self._sync_wait_started: dict[str, float] = {}  # download id -> time.time() of the first sync-wait poll
+        self._sync_snapshots: dict[str, tuple[tuple[int, int, float], float]] = {}  # download id -> (files snapshot, first seen unchanged)
         self._excluded_paths: list[Path] = []  # effective recycle + quarantine folders, skipped by download-root walks
 
     def is_running(self) -> bool:
@@ -1086,6 +1088,16 @@ class AcquisitionWorker(ImportPipelineMixin):
             )
         except Exception as ex:
             logger.warning("Failed to dispatch DOWNLOAD_FAILED notification: %s", ex)
+        if item.get("request_id"):
+            try:  # give the request a visible reason instead of a bare "processing"
+                db.set_request_outcome(
+                    item["request_id"],
+                    "download_failed",
+                    f"Download failed: {err_text}. Will try another release.",
+                    schedule=False,
+                )
+            except sqlite3.Error as exc:
+                logger.warning("Could not record the download failure on request %s: %s", item["request_id"], exc)
 
     def _process_item(
         self,
