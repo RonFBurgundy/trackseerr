@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { ExternalLink } from 'lucide-react';
 import type { TrackItem } from '@/types/models';
 import { TactileSwitch, CassetteLoader } from '@/components/ui';
 import { ItemHistoryModal } from './ItemHistoryModal';
@@ -118,6 +119,18 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                 </span>
               )}
               {renderRowAction?.(t)}
+              {t.mb_recording_id && (
+                <a
+                  href={`https://musicbrainz.org/recording/${t.mb_recording_id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] bg-[#ba478f]/20 text-[#e599cf] border border-[#ba478f]/40 hover:bg-[#ba478f]/30 transition-colors after:absolute after:-inset-1 after:content-['']"
+                  title="Open recording on MusicBrainz"
+                  aria-label="Open recording on MusicBrainz"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
               {isAdmin && canMonitorTracks && (t.monitored !== null || t.excluded === true) && (
                 <div className="flex items-center gap-1.5 pl-1">
                   <span

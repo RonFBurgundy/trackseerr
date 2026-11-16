@@ -73,6 +73,8 @@ export interface ArtistDetailProps {
   onRenameFiles?: () => void;
   /** Opens Bulk Retag scoped to this artist (native mode, admin). */
   onRetagFiles?: () => void;
+  /** Opens the "Not on MusicBrainz" list (admin, native mode). */
+  onOpenMbUnlinked?: () => void;
   /** Called after a change that the paged lists should pick up. */
   onChanged: () => void;
   onToggleArtistMonitored: (artistId: number | string, monitored: boolean) => Promise<void>;
@@ -144,6 +146,7 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
   onImportAlbum,
   onRenameFiles,
   onRetagFiles,
+  onOpenMbUnlinked,
   onChanged,
   onToggleArtistMonitored,
   onToggleAlbumMonitored,
@@ -362,6 +365,14 @@ export const ArtistDetail: React.FC<ArtistDetailProps> = ({
       label: 'Retag files…',
       icon: <Tag className="h-3.5 w-3.5" />,
       onSelect: onRetagFiles,
+    });
+  }
+  if (isAdmin && !lidarrMode && onOpenMbUnlinked) {
+    artistToolItems.push({
+      key: 'musicbrainz-unlinked',
+      label: 'Not on MusicBrainz…',
+      icon: <Disc className="h-3.5 w-3.5" />,
+      onSelect: onOpenMbUnlinked,
     });
   }
   if (isAdmin && !lidarrMode) {
