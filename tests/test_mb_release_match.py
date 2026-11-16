@@ -14,6 +14,7 @@ from trackseerr.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryT
 from trackseerr.release_matching import (
     choose_release,
     fill_recordings_from_fingerprints,
+    link_albums_by_recording,
     match_album_releases,
 )
 from trackseerr.storage import Database
@@ -695,6 +696,174 @@ def test_fill_stops_when_fingerprinting_unavailable(db: Database, tmp_path: Path
 
     counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
     assert counts["filled"] == 0
+
+
+# =============================================================================
+# link_albums_by_recording single-album merge tests
+# =============================================================================
+
+
+def _seed_named_album_with_tracks(
+    db: Database,
+    tmp_path: Path,
+    album_id: str,
+    title: str,
+    rg_id: str | None,
+    tracks: list[dict],
+) -> None:
+    if db.get_library_artist("artist-1") is None:
+        db.upsert_library_artist(LibraryArtist(id="artist-1", name="The Beatles", monitored=False))
+    db.upsert_library_album(
+        LibraryAlbum(
+            id=album_id,
+            artist_id="artist-1",
+            title=title,
+            mb_release_group_id=rg_id,
+            total_tracks=len(tracks),
+            monitored=False,
+        )
+    )
+    for t in tracks:
+        tid = f"{album_id}-{t['num']}"
+        db.upsert_library_track(
+            LibraryTrack(
+                id=tid,
+                album_id=album_id,
+                artist_id="artist-1",
+                title=t["title"],
+                track_number=t["num"],
+                disc_number=t.get("disc", 1),
+                mb_recording_id=t.get("rec_id"),
+                monitored=False,
+            )
+        )
+        if t.get("file", True):
+            flac_path = tmp_path / f"{tid}.flac"
+            flac_path.write_bytes(b"dummy audio")
+            db.upsert_library_file(
+                LibraryFile(
+                    id=f"file-{tid}",
+                    track_id=tid,
+                    file_path=str(flac_path),
+                    relative_path=flac_path.name,
+                    codec="FLAC",
+                )
+            )
+
+
+def test_link_rg_taken_merges_single_into_holder(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-holder",
+        title="Abbey Road",
+        rg_id="rg-abbey",
+        tracks=[{"num": 2, "title": "Something", "rec_id": "rec-something", "file": False}],
+    )
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-single",
+        title="Abbey Road (2009 Remaster)",
+        rg_id=None,
+        tracks=[{"num": 1, "title": "Something", "rec_id": "rec-something", "file": True}],
+    )
+
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_recording_release_groups.return_value = [
+        {
+            "id": "rg-abbey",
+            "title": "Abbey Road",
+            "primary_type": "Album",
+            "secondary_types": [],
+            "first_release_date": "1969-09-26",
+        }
+    ]
+
+    counts = link_albums_by_recording(db, enricher)
+    assert counts["merged"] == 1
+    assert counts["rg_taken"] == 0
+    assert db.get_library_album("alb-single") is None
+    holder_track = db.get_library_track("alb-holder-2")
+    assert holder_track is not None and holder_track["has_file"] is True
+
+
+def test_link_no_title_match_merges_when_group_held(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-holder",
+        title="Abbey Road",
+        rg_id="rg-abbey",
+        tracks=[{"num": 2, "title": "Something", "rec_id": "rec-something", "file": False}],
+    )
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-single",
+        title="Something - Remastered 2009",
+        rg_id=None,
+        tracks=[{"num": 1, "title": "Something - Remastered 2009", "rec_id": "rec-something", "file": True}],
+    )
+
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_recording_release_groups.return_value = [
+        {
+            "id": "rg-abbey",
+            "title": "Abbey Road",
+            "primary_type": "Album",
+            "secondary_types": [],
+            "first_release_date": "1969-09-26",
+        }
+    ]
+
+    counts = link_albums_by_recording(db, enricher)
+    assert counts["merged"] == 1
+    assert counts["no_title_match"] == 0
+    assert db.get_library_album("alb-single") is None
+    holder_track = db.get_library_track("alb-holder-2")
+    assert holder_track is not None and holder_track["has_file"] is True
+
+
+def test_link_does_not_merge_large_album(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-holder",
+        title="Abbey Road",
+        rg_id="rg-abbey",
+        tracks=[{"num": 2, "title": "Something", "rec_id": "rec-something", "file": False}],
+    )
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-large",
+        title="Abbey Road (2009 Remaster)",
+        rg_id=None,
+        tracks=[
+            {"num": 1, "title": "Come Together", "rec_id": "rec-ct", "file": True},
+            {"num": 2, "title": "Something", "rec_id": "rec-something", "file": True},
+            {"num": 3, "title": "Maxwell's Silver Hammer", "rec_id": "rec-msh", "file": True},
+            {"num": 4, "title": "Oh! Darling", "rec_id": "rec-od", "file": True},
+        ],
+    )
+
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_recording_release_groups.return_value = [
+        {
+            "id": "rg-abbey",
+            "title": "Abbey Road",
+            "primary_type": "Album",
+            "secondary_types": [],
+            "first_release_date": "1969-09-26",
+        }
+    ]
+
+    counts = link_albums_by_recording(db, enricher)
+    assert counts["merged"] == 0
+    assert counts["rg_taken"] == 1
+    assert db.get_library_album("alb-large") is not None
+
 
 
 

@@ -1010,12 +1010,19 @@ class LibraryCatalogStoreMixin:
 
     def artist_has_release_group(self, artist_id: str, release_group_id: str, exclude_album_id: str) -> bool:
         """True when another album of the artist already holds the release group."""
+        return self.album_holding_release_group(artist_id, release_group_id, exclude_album_id) is not None
+
+    def album_holding_release_group(
+        self, artist_id: str, release_group_id: str, exclude_album_id: str
+    ) -> Optional[str]:
+        """ID of the oldest other album of the artist that holds the release group, or None."""
         with self._lock:
             row = self.conn.execute(
-                "SELECT 1 FROM library_albums WHERE artist_id = ? AND mb_release_group_id = ? AND id != ? LIMIT 1",
+                "SELECT id FROM library_albums WHERE artist_id = ? AND mb_release_group_id = ? AND id != ? "
+                "ORDER BY created_at ASC, rowid ASC LIMIT 1",
                 (str(artist_id), str(release_group_id), str(exclude_album_id)),
             ).fetchone()
-        return row is not None
+        return str(row["id"]) if row is not None else None
 
     def list_albums_without_mb_release(
         self, *, page: int, page_size: int, kind: str | None = None

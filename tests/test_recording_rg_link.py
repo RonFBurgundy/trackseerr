@@ -93,6 +93,10 @@ def test_no_link_without_title_match(db: Database, tmp_path: Path) -> None:
 def test_skips_rg_already_held_by_same_artist(db: Database, tmp_path: Path) -> None:
     _album(db, tmp_path, "held", "Hotel California", "recA", rg="rg-hc")
     _album(db, tmp_path, "a2", "Hotel California (Hi-Res Version)", "recB")
+    for n in range(2, 5):
+        db.upsert_library_track(
+            LibraryTrack(id=f"a2-t{n}", album_id="a2", artist_id="ar1", title=f"Song {n}", track_number=n)
+        )
     counts = link_albums_by_recording(db, FakeEnricher({"recB": [_rg("rg-hc", "Hotel California")]}))
     assert counts["rg_taken"] == 1
     assert counts["linked"] == 0
