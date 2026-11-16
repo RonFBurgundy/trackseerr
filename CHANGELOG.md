@@ -89,6 +89,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Rename Files now pre-selects renames that only remove a copy number like " (1)" or stray spaces from a name, even when AcoustID flags the audio, because the name still names the same song. If the name without the copy number is already taken by another file, the rename is marked as a name collision and left unselected.
 - After this update, TrackSeerr tidies your artists once in the background (it backs up the database first, and you can see it on the Tasks page): artists listed twice under different spellings ("Jay Z" and "JAY-Z") become one, artists that were matched to the wrong MusicBrainz artist are fixed, and combined names like "2Pac; Dr. Dre" are filed under the main artist. Files are not moved; run Rename Files afterwards if you want the folders to follow. The MusicBrainz release match task runs the same tidy-up.
 - Backups no longer pile up. Every backup older than 28 days is deleted automatically, including manual and pre-restore backups, and the newest scheduled backup is always kept so you always have one to restore. Change the number of days in Settings → System → Backups → Settings ("Keep Backups For"). Cleanup runs after each backup and as soon as you save a new value. This replaces the old "keep the last 7 scheduled backups" setting.
 - The web app loads much faster, especially on phones. Pages load only the code they need (the first download is about a quarter of its old size), responses are compressed, and the app's files are cached by the browser between visits.
@@ -138,6 +139,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- MusicBrainz Release Match now finds the right edition for albums with many editions (Abbey Road, Rubber Soul and the like). It used to read only the first part of the edition list and give up. Run it again after updating.
 - Many fewer albums show as "Not on MusicBrainz": single tracks from playlists are now matched through the song itself, and names like "Hotel California - 2013 Remaster" match the original album.
 - Artists are only matched to a MusicBrainz artist with the same name (so "FELIX" is no longer matched to Felix Mendelssohn).
 - Opening an album from "Not on MusicBrainz" no longer closes the list, so you keep your place. The list is also in the artist page's tools menu.
