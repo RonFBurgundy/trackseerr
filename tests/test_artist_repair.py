@@ -24,18 +24,29 @@ FELIX_REAL = "33333333-cccc-cccc-cccc-333333333333"
 class FakeEnricher:
     """Canned MusicBrainz answers; no HTTP."""
 
-    def __init__(self, names: dict[str, str], lookups: Optional[dict[str, Optional[str]]] = None) -> None:
+    def __init__(
+        self,
+        names: dict[str, str],
+        lookups: Optional[dict[str, Optional[str]]] = None,
+        unavailable: Optional[set[str]] = None,
+    ) -> None:
         self.names = names
         self.lookups = lookups or {}
+        self.unavailable = unavailable or set()
         self.lookup_calls: list[str] = []
 
     def get_artist_details(self, mbid: str, force: bool = False) -> Optional[dict[str, Any]]:
         name = self.names.get(mbid)
         return {"name": name} if name else None
 
-    def lookup_artist_mbid(self, artist_name: str) -> Optional[str]:
+    def resolve_artist_mbid(self, artist_name: str) -> tuple[bool, Optional[str]]:
         self.lookup_calls.append(artist_name)
-        return self.lookups.get(artist_name)
+        if artist_name in self.unavailable:
+            return False, None
+        return True, self.lookups.get(artist_name)
+
+    def lookup_artist_mbid(self, artist_name: str) -> Optional[str]:
+        return self.resolve_artist_mbid(artist_name)[1]
 
 
 @pytest.fixture
@@ -76,7 +87,7 @@ def _count(db: Database, sql: str, *params: Any) -> int:
 
 
 def _changes(counts: dict[str, int]) -> dict[str, int]:
-    return {k: v for k, v in counts.items() if k != "ids_kept_alias" and v}
+    return {k: v for k, v in counts.items() if k not in ("ids_kept_alias", "lookups_unavailable") and v}
 
 
 def test_merges_duplicate_mbid_artists_and_same_title_albums(db: Database, tmp_path: Path):
@@ -222,6 +233,7 @@ def test_refiles_joined_credit_artist(db: Database):
     enricher = FakeEnricher({"afro-id": "AFROJACK", JAYZ: "JAY-Z"}, {})
 
     counts = run_artist_repair(db, enricher)
+    assert counts["lookups_unavailable"] == 0
 
     assert counts["credits_refiled"] == 4
     assert _names(db) == ["2Pac", "AFROJACK", "Adam Ten, Rafael", "Brand New Act", "JAY-Z", "Simon & Garfunkel"]
@@ -404,3 +416,51 @@ def test_startup_repair_starts_in_native_mode(db: Database, monkeypatch: pytest.
     assert thread is not None
     thread.join(timeout=10)
     assert calls == [1] and db.get_kv(REPAIR_KV_KEY) is not None
+
+
+def test_transient_lookup_failure_leaves_id_and_albums_untouched(db: Database):
+    _artist(db, "f1", "FELIX", MENDEL)
+    _album(db, "w", "f1", "Elijah", rg="rg-elijah")
+    enricher = FakeEnricher({MENDEL: "Felix Mendelssohn"}, {}, unavailable={"FELIX"})
+
+    counts = run_artist_repair(db, enricher)
+
+    assert counts["lookups_unavailable"] == 1 and not _changes(counts)
+    assert db.conn.execute("SELECT mbid FROM library_artists WHERE id = 'f1'").fetchone()[0] == MENDEL
+    row = db.conn.execute("SELECT mb_release_group_id FROM library_albums WHERE id = 'w'").fetchone()
+    assert row[0] == "rg-elijah"
+
+
+def test_comma_split_needs_musicbrainz_to_deny_the_full_name(db: Database):
+    _artist(db, "e1", "Earth", "earth-id")
+    _artist(db, "e2", "Earth, Wind & Fire")
+    _album(db, "ewf", "e2", "That's the Way of the World")
+    _artist(db, "tc", "Tyler, The Creator")  # no "Tyler" artist at all
+    enricher = FakeEnricher({"earth-id": "Earth"}, {"Earth, Wind & Fire": "ewf-id"})
+
+    counts = run_artist_repair(db, enricher)
+
+    assert counts["credits_refiled"] == 0
+    assert db.conn.execute("SELECT artist_id FROM library_albums WHERE id = 'ewf'").fetchone()[0] == "e2"
+    assert _count(db, "SELECT COUNT(*) FROM library_artists WHERE name IN ('Earth, Wind & Fire', 'Tyler, The Creator')") == 2
+
+
+def test_ampersand_split_needs_a_target_with_an_id(db: Database):
+    _artist(db, "af1", "AFROJACK")  # no mbid: not enough
+    _artist(db, "af2", "AFROJACK & Martin Garrix")
+
+    counts = run_artist_repair(db, FakeEnricher({}, {}))
+
+    assert counts["credits_refiled"] == 0
+
+
+def test_ampersand_split_skipped_when_lookup_unavailable(db: Database):
+    _artist(db, "af1", "AFROJACK", "afro-id")
+    _artist(db, "af2", "AFROJACK & Martin Garrix")
+    _album(db, "a", "af2", "Turn Up")
+    enricher = FakeEnricher({"afro-id": "AFROJACK"}, {}, unavailable={"AFROJACK & Martin Garrix"})
+
+    counts = run_artist_repair(db, enricher)
+
+    assert counts["credits_refiled"] == 0 and counts["lookups_unavailable"] == 1
+    assert db.conn.execute("SELECT artist_id FROM library_albums WHERE id = 'a'").fetchone()[0] == "af2"

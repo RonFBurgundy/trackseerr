@@ -831,18 +831,24 @@ class MbidEnricherClient:
             return None
 
     def lookup_artist_mbid(self, artist_name: str) -> Optional[str]:
-        """Queries the mirror for the canonical artist MBID."""
+        """Queries the mirror for the canonical artist MBID (None for no match and for an unavailable mirror)."""
+        return self.resolve_artist_mbid(artist_name)[1]
+
+    def resolve_artist_mbid(self, artist_name: str) -> tuple[bool, Optional[str]]:
+        """``(answered, mbid)``: ``answered`` is True only when MusicBrainz actually replied (a parsed 200, a 404 or a
+        cached answer). Any request failure, other status or unparseable body gives ``(False, None)``, so callers can
+        tell "no such artist" from "could not ask"."""
         if is_system_folder_name(artist_name):
             logger.info("MbidEnricherClient: skipping artist lookup for system/trash folder name %r", artist_name)
-            return None
+            return True, None
         clean_name = _sanitize_lucene_query(artist_name)
         if not clean_name:
-            return None
+            return True, None
 
         cache_key = f"artist:v2:{clean_name.lower()}"
         hit, cached_data = self._lookup(cache_key)
         if hit:
-            return cached_data
+            return True, cached_data
 
         try:
             url = f"{self.base_url}/ws/2/artist"
@@ -851,9 +857,8 @@ class MbidEnricherClient:
             if resp is None or resp.status_code != 200:
                 if resp is not None and resp.status_code == 404:
                     self._remember(cache_key, "artist_lookup", None)
-                else:
-                    self._set_cached(cache_key, None)
-                return None
+                    return True, None
+                return False, None
 
             try:
                 data = resp.json()
@@ -863,29 +868,26 @@ class MbidEnricherClient:
                     cache_key,
                     exc,
                 )
-                self._set_cached(cache_key, None)
-                return None
+                return False, None
 
             if not isinstance(data, dict):
-                self._set_cached(cache_key, None)
-                return None
+                return False, None
 
             artists = data.get("artists") or []
             if not artists:
                 self._remember(cache_key, "artist_lookup", None)
-                return None
+                return True, None
 
             mbid = _first_matching_artist_id(artists, artist_name_key(artist_name))
             if mbid is None:
                 top = artists[0].get("name") if isinstance(artists[0], dict) else None
                 logger.info("no exact MusicBrainz artist match for %r (top hit %r)", artist_name, top)
             self._remember(cache_key, "artist_lookup", mbid)
-            return mbid
+            return True, mbid
 
         except Exception as exc:
             logger.warning("MbidEnricherClient: lookup_artist_mbid failed for '%s': %s", artist_name, exc)
-            self._set_cached(cache_key, None)
-            return None
+            return False, None
 
     def lookup_album_mbids(  # noqa: C901
         self, artist_name: str, album_title: str

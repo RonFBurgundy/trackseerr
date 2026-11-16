@@ -65,7 +65,7 @@ _REMOVABLE_ALBUMS_SQL = f"""
 
 _COUNT_KEYS = (
     "artists_merged", "albums_merged", "ids_kept_alias", "ids_replaced", "ids_cleared",
-    "wrong_albums_removed", "credits_refiled", "errors",
+    "wrong_albums_removed", "credits_refiled", "lookups_unavailable", "errors",
 )
 
 StopFn = Optional[Callable[[], bool]]
@@ -299,7 +299,11 @@ def _repair_one_mismatch(db: Any, enricher: Any, row: sqlite3.Row, counts: dict[
     mb_name = _mb_name(enricher, mbid)
     if mb_name is None or artist_name_key(str(row["name"])) == artist_name_key(mb_name):
         return  # unknown to MusicBrainz right now, or the name agrees: nothing to judge
-    found = enricher.lookup_artist_mbid(str(row["name"]))
+    answered, found = enricher.resolve_artist_mbid(str(row["name"]))
+    if not answered:
+        counts["lookups_unavailable"] += 1
+        logger.info("MusicBrainz could not be asked about %r; leaving its ID alone", row["name"])
+        return
     if found and str(found).lower() == mbid.lower():
         counts["ids_kept_alias"] += 1
         return
@@ -344,28 +348,47 @@ def _others(index: dict[str, list[tuple[str, bool]]], key: str, source_id: str) 
     return [entry for entry in index.get(key, []) if entry[0] != source_id]
 
 
-def _joined_credit_primary(name: str, source_id: str, index: dict[str, list[tuple[str, bool]]]) -> str:
-    """Primary artist of a possibly joined credit; ``name`` itself when it is not one."""
+def _joined_credit_primary(
+    name: str, source_id: str, index: dict[str, list[tuple[str, bool]]]
+) -> tuple[str, bool]:
+    """(primary, needs_check) for a possibly joined credit; ``name`` itself when it is not one.
+
+    ``needs_check`` marks a ", " / " & " / " x " split: it is only safe once MusicBrainz confirms the whole name is
+    not an artist ("Earth, Wind & Fire", "Tyler, The Creator").
+    """
 
     def known(candidate: str) -> bool:
         return bool(_others(index, artist_name_key(candidate), source_id))
 
     primary = primary_artist(name, known)
     if artist_name_key(primary) != artist_name_key(name):
-        return primary
+        return primary, False
     match = _JOIN_SEPARATOR_RE.search(name)
     if match:
         head = name[: match.start()].strip()
-        if head and known(head):
-            return head
-    return name
+        if head and any(has_id for _, has_id in _others(index, artist_name_key(head), source_id)):
+            return head, True
+    return name, False
 
 
-def _refile_one(db: Any, row: sqlite3.Row, index: dict[str, list[tuple[str, bool]]]) -> bool:
+def _full_name_is_not_an_artist(enricher: Any, name: str, counts: dict[str, int]) -> bool:
+    """True only when MusicBrainz answered and has no artist of exactly this name."""
+    answered, found = enricher.resolve_artist_mbid(name)
+    if not answered:
+        counts["lookups_unavailable"] += 1
+        return False
+    return found is None
+
+
+def _refile_one(
+    db: Any, enricher: Any, row: sqlite3.Row, index: dict[str, list[tuple[str, bool]]], counts: dict[str, int]
+) -> bool:
     source_id = str(row["id"])
-    primary = _joined_credit_primary(str(row["name"]), source_id, index)
+    primary, needs_check = _joined_credit_primary(str(row["name"]), source_id, index)
     key = artist_name_key(primary)
     if not key or key == artist_name_key(str(row["name"])):
+        return False
+    if needs_check and not _full_name_is_not_an_artist(enricher, str(row["name"]), counts):
         return False
     targets = _others(index, key, source_id)
     if targets:
@@ -383,7 +406,7 @@ def _refile_one(db: Any, row: sqlite3.Row, index: dict[str, list[tuple[str, bool
     return True
 
 
-def refile_joined_credit_artists(db: Any, counts: dict[str, int], should_stop: StopFn = None) -> None:
+def refile_joined_credit_artists(db: Any, enricher: Any, counts: dict[str, int], should_stop: StopFn = None) -> None:
     """Pass 3: file ID-less joined-credit artists under their primary artist."""
     rows = _fetchall(
         db, "SELECT id, name, monitored FROM library_artists WHERE mbid IS NULL OR TRIM(mbid) = '' ORDER BY name"
@@ -393,7 +416,7 @@ def refile_joined_credit_artists(db: Any, counts: dict[str, int], should_stop: S
         if should_stop is not None and should_stop():
             return
         try:
-            if _refile_one(db, row, index):
+            if _refile_one(db, enricher, row, index, counts):
                 counts["credits_refiled"] += 1
         except sqlite3.Error as exc:
             counts["errors"] += 1
@@ -414,7 +437,7 @@ def run_artist_repair(
     clear_mismatched_mbids(db, enricher, counts, should_stop, on_progress)
     if should_stop is not None and should_stop():
         return counts
-    refile_joined_credit_artists(db, counts, should_stop)
+    refile_joined_credit_artists(db, enricher, counts, should_stop)
     logger.info("Artist repair finished: %s", counts)
     return counts
 
