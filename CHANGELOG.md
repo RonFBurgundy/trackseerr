@@ -135,6 +135,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Downloads synced from a remote seedbox are no longer failed and blocklisted when the folder appears before the music does; TrackSeerr waits until the files finish syncing, and the request shows why it is waiting or why a download failed.
 - Downloads that your client moves after finishing (for example ruTorrent's AutoMove into a seeding folder) now import, as long as a remote path mapping covers the folder they move to. Before, they were refused as "outside every download folder".
 - Approving a request is now instant: the row leaves the Pending list straight away with an "Approved" message, and the search for it runs in the background instead of holding up the page. Approving many requests no longer starts many searches at once.
 - On desktop, the scroll bar's date labels (for example "Yesterday" or "Fri 13" in Activity) no longer spill out of the bar; the bar widens to fit them. Mobile is unchanged.
