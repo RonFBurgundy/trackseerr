@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Check, X, Trash2, Clock, CheckCircle2, AlertTriangle, RotateCw } from 'lucide-react';
+import { Check, X, Trash2, Clock, CheckCircle2, AlertTriangle, Info, RotateCw } from 'lucide-react';
 import type { UseRequestsReturn, RequestFilter } from '@/hooks/useRequests';
 import type { RequestItem } from '@/types/models';
 import { MEDIA_ISSUE_TYPES, REQUEST_ISSUE_TYPES } from '@/types/models';
@@ -23,6 +23,7 @@ import { QuotaBars } from '@/components/account';
 import type { RequestsSub, NavigateOptions } from '@/hooks/useAppRoute';
 
 const noop = (): void => undefined;
+const isInfoNote = (r: RequestItem): boolean => r.status_reason === 'whole_release';
 
 export interface RequestsViewProps {
   /** Route sub-page: a request filter, or 'issues'. */
@@ -278,11 +279,17 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
         render: (r) =>
           r.status_message ? (
             <span
-              className="inline-flex items-center gap-1 text-[11px] text-amber-300 font-mono"
+              className={`inline-flex items-center gap-1 text-[11px] font-mono ${
+                isInfoNote(r) ? 'text-neutral-400' : 'text-amber-300'
+              }`}
               role="status"
               data-reason={r.status_reason ?? undefined}
             >
-              <AlertTriangle className="h-3 w-3 shrink-0" />
+              {isInfoNote(r) ? (
+                <Info className="h-3 w-3 shrink-0" />
+              ) : (
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+              )}
               <span>
                 {r.status_message}
                 {r.next_attempt_at ? ` - next retry ${untilTime(r.next_attempt_at)}` : ''}
@@ -348,7 +355,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
               </TapeDeckButton>
             </>
           )}
-          {isAdmin && req.status_reason && req.status !== 'pending' && req.status !== 'rejected' && (
+          {isAdmin && req.status_reason && !isInfoNote(req) && req.status !== 'pending' && req.status !== 'rejected' && (
             <TapeDeckButton
               size="sm"
               disabled={isBusy}
@@ -389,7 +396,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
           onSelect: () => void handleReject(req),
         });
       }
-      if (isAdmin && req.status_reason && req.status !== 'pending' && req.status !== 'rejected') {
+      if (isAdmin && req.status_reason && !isInfoNote(req) && req.status !== 'pending' && req.status !== 'rejected') {
         items.push({
           key: 'retry',
           label: 'Retry now',
@@ -412,7 +419,7 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
 
   const rowTone = useCallback((req: RequestItem): 'warning' | 'error' | null => {
     if (req.status === 'rejected') return 'error';
-    if (req.status_reason) return 'warning';
+    if (req.status_reason && !isInfoNote(req)) return 'warning';
     return null;
   }, []);
 
@@ -433,11 +440,17 @@ export const RequestsView: React.FC<RequestsViewProps> = ({
         ))}
         {r.status_message && (
           <p
-            className="flex items-start gap-1.5 text-[11px] text-amber-300 font-mono mt-0.5"
+            className={`flex items-start gap-1.5 text-[11px] font-mono mt-0.5 ${
+              isInfoNote(r) ? 'text-neutral-400' : 'text-amber-300'
+            }`}
             role="status"
             data-reason={r.status_reason ?? undefined}
           >
-            <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
+            {isInfoNote(r) ? (
+              <Info className="h-3.5 w-3.5 shrink-0 mt-px" />
+            ) : (
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-px" />
+            )}
             <span>
               {r.status_message}
               {r.next_attempt_at ? ` - next retry ${untilTime(r.next_attempt_at)}` : ''}
