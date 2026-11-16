@@ -12,7 +12,7 @@ import trackseerr.library_self_heal as lsh
 from tests.test_rename_verify_api import R1, R2, _seed, _seed_copy_suffix, _settings
 from trackseerr.api.routes.library.tagging import safe_rename_file_ids
 from trackseerr.config import Config
-from trackseerr.library_self_heal import LibrarySelfHealWorker, run_self_heal
+from trackseerr.library_self_heal import LibrarySelfHealWorker, _seconds_since, run_self_heal
 from trackseerr.storage import Database
 from trackseerr.task_manager import RunHandle, set_paused
 
@@ -224,4 +224,30 @@ def test_run_if_due_runs_when_last_run_older_than_interval(db: Database, monkeyp
     worker = LibrarySelfHealWorker()
     assert worker.run_if_due(db, _cfg(), 7 * 86400) is True
     assert called == [True]
+
+
+def test_run_if_due_runs_when_finished_at_unparseable(
+    db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    run_id = db.start_task_run("library_self_heal", "scheduled", "not-a-date")
+    db.finish_task_run(run_id, "success", "not-a-date", "ok", 100)
+
+    worker = LibrarySelfHealWorker()
+    called: list[bool] = []
+
+    def fake_run_once(d: Any, cfg: Any = None) -> bool:
+        called.append(True)
+        return True
+
+    monkeypatch.setattr(worker, "run_once", fake_run_once)
+    assert worker.run_if_due(db, _cfg(), 7 * 86400) is True
+    assert called == [True]
+
+
+def test_seconds_since_parses_naive_as_utc() -> None:
+    naive_iso = (datetime.now(timezone.utc) - timedelta(seconds=120)).replace(tzinfo=None).isoformat()
+    elapsed = _seconds_since(naive_iso)
+    assert elapsed is not None
+    assert elapsed == pytest.approx(120.0, abs=5.0)
+
 

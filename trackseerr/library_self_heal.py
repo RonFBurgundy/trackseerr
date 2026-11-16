@@ -72,6 +72,20 @@ def _mb_release_match_running(db: Any) -> bool:
     return False
 
 
+def _seconds_since(finished_raw: str) -> Optional[float]:
+    """Seconds elapsed since an ISO timestamp, or None when empty or unparseable."""
+    if not isinstance(finished_raw, str) or not finished_raw:
+        return None
+    try:
+        finished = datetime.fromisoformat(finished_raw)
+    except ValueError:
+        logger.debug("LibrarySelfHealWorker: unparseable finished_at %r", finished_raw)
+        return None
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - finished).total_seconds()
+
+
 class LibrarySelfHealWorker:
     """Daemon thread: runs library self-heal on a configurable interval after an initial 30-minute delay."""
 
@@ -126,29 +140,20 @@ class LibrarySelfHealWorker:
         if is_paused(db, "library_self_heal"):
             logger.debug("LibrarySelfHealWorker: skipping run while library_self_heal is paused")
             return False
-        latest_fn = getattr(db, "latest_task_runs", None)
-        if callable(latest_fn):
-            try:
-                row = latest_fn().get("library_self_heal")
-            except sqlite3.Error as exc:
-                logger.warning("Could not read latest library_self_heal run: %s", safe_exc(exc))
-                row = None
-            finished_raw = row.get("finished_at") if isinstance(row, dict) else None
-            if isinstance(finished_raw, str) and finished_raw:
-                try:
-                    finished = datetime.fromisoformat(finished_raw)
-                    if finished.tzinfo is None:
-                        finished = finished.replace(tzinfo=timezone.utc)
-                    elapsed = (datetime.now(timezone.utc) - finished).total_seconds()
-                    if elapsed < interval_seconds:
-                        logger.debug(
-                            "LibrarySelfHealWorker: skipping run (last finished %.0fs ago, interval %.0fs)",
-                            elapsed,
-                            interval_seconds,
-                        )
-                        return False
-                except ValueError:
-                    pass
+        try:
+            row = db.latest_task_runs().get("library_self_heal")
+        except sqlite3.Error as exc:
+            logger.warning("Could not read latest library_self_heal run: %s", safe_exc(exc))
+            row = None
+        finished_raw = row.get("finished_at") if isinstance(row, dict) else ""
+        elapsed = _seconds_since(finished_raw if isinstance(finished_raw, str) else "")
+        if elapsed is not None and elapsed < interval_seconds:
+            logger.debug(
+                "LibrarySelfHealWorker: skipping run (last finished %.0fs ago, interval %.0fs)",
+                elapsed,
+                interval_seconds,
+            )
+            return False
         return self.run_once(db, config)
 
     def run_once(self, db: Any, config: Any = None) -> bool:
