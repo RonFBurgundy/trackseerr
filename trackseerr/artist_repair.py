@@ -39,6 +39,15 @@ _ALBUM_REF_COLUMNS: tuple[tuple[str, str], ...] = (
     ("search_log", "album_id"),
     ("music_requests", "catalog_album_id"),
 )
+_TRACK_REF_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("active_downloads", "track_id"),
+    ("download_history", "track_id"),
+    ("item_events", "track_id"),
+    ("pending_releases", "track_id"),
+    ("media_issues", "track_id"),
+    ("search_log", "track_id"),
+    ("music_requests", "catalog_track_id"),
+)
 # Same for library artist ids (artist_links has a unique index and is handled separately).
 _ARTIST_REF_COLUMNS: tuple[tuple[str, str], ...] = (("item_events", "artist_id"),)
 
@@ -127,6 +136,141 @@ def _merge_album_rows(cur: sqlite3.Cursor, keep_album: str, dupe_album: sqlite3.
     _fill_empty(cur, "library_albums", _ALBUM_FILL_COLUMNS, keep_album, dupe_album)
     if dupe_album["monitored"]:
         cur.execute("UPDATE library_albums SET monitored = 1 WHERE id = ?", (keep_album,))
+
+
+def _find_holder_track(
+    source_track: sqlite3.Row, holder_tracks: list[sqlite3.Row], used_ids: set[str]
+) -> Optional[sqlite3.Row]:
+    from trackseerr.lidarr_release import titles_match
+
+    available = [ht for ht in holder_tracks if str(ht["id"]) not in used_ids]
+    rec_id = str(source_track["mb_recording_id"] or "").strip()
+    if rec_id:
+        for ht in available:
+            if str(ht["mb_recording_id"] or "").strip() == rec_id:
+                return ht
+    title_matches = [ht for ht in available if titles_match(ht["title"], source_track["title"])]
+    return title_matches[0] if len(title_matches) == 1 else None
+
+
+def _track_has_file(cur: sqlite3.Cursor, track: sqlite3.Row) -> bool:
+    if int(track["has_file"] or 0):
+        return True
+    row = cur.execute("SELECT 1 FROM library_files WHERE track_id = ? LIMIT 1", (str(track["id"]),)).fetchone()
+    return row is not None
+
+
+def _merge_matched_track(cur: sqlite3.Cursor, source_track: sqlite3.Row, holder_track: sqlite3.Row) -> None:
+    source_tid = str(source_track["id"])
+    holder_tid = str(holder_track["id"])
+    cur.execute("UPDATE library_files SET track_id = ? WHERE track_id = ?", (holder_tid, source_tid))
+    rec_id = (
+        source_track["mb_recording_id"]
+        if _empty(holder_track["mb_recording_id"]) and not _empty(source_track["mb_recording_id"])
+        else holder_track["mb_recording_id"]
+    )
+    monitored = 1 if (holder_track["monitored"] or source_track["monitored"]) else 0
+    cur.execute(
+        "UPDATE library_tracks SET has_file = 1, mb_recording_id = ?, monitored = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE id = ?",
+        (rec_id, monitored, holder_tid),
+    )
+    for table, column in _TRACK_REF_COLUMNS:
+        cur.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (holder_tid, source_tid))
+    cur.execute("DELETE FROM library_tracks WHERE id = ?", (source_tid,))
+
+
+def _plan_track_merges(
+    cur: sqlite3.Cursor, source_tracks: list[sqlite3.Row], holder_tracks: list[sqlite3.Row]
+) -> Optional[list[tuple[sqlite3.Row, Optional[sqlite3.Row]]]]:
+    used_holder_ids: set[str] = set()
+    plan: list[tuple[sqlite3.Row, Optional[sqlite3.Row]]] = []
+    for st in source_tracks:
+        ht = _find_holder_track(st, holder_tracks, used_holder_ids)
+        if ht is not None:
+            if _track_has_file(cur, ht):
+                return None
+            used_holder_ids.add(str(ht["id"]))
+        plan.append((st, ht))
+    return plan
+
+
+def _apply_track_merges(
+    cur: sqlite3.Cursor,
+    plan: list[tuple[sqlite3.Row, Optional[sqlite3.Row]]],
+    holder_id: str,
+    holder_artist_id: str,
+) -> tuple[int, int]:
+    merged_count = 0
+    moved_count = 0
+    for st, ht in plan:
+        if ht is not None:
+            _merge_matched_track(cur, st, ht)
+            merged_count += 1
+        else:
+            cur.execute(
+                "UPDATE library_tracks SET album_id = ?, artist_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (holder_id, holder_artist_id, str(st["id"])),
+            )
+            moved_count += 1
+    return merged_count, moved_count
+
+
+def _repoint_and_delete_source_album(cur: sqlite3.Cursor, source_id: str, holder_id: str) -> None:
+    cur.execute(
+        "INSERT OR IGNORE INTO library_collection_albums (collection_id, album_id, order_index) "
+        "SELECT collection_id, ?, order_index FROM library_collection_albums WHERE album_id = ?",
+        (holder_id, source_id),
+    )
+    cur.execute("DELETE FROM library_collection_albums WHERE album_id = ?", (source_id,))
+    for table, column in _ALBUM_REF_COLUMNS:
+        cur.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (holder_id, source_id))
+    cur.execute("DELETE FROM library_albums WHERE id = ?", (source_id,))
+
+
+def merge_single_album_into(db: Any, source_album_id: str, holder_album_id: str) -> str:
+    """Folds a playlist single album into the album that holds its release group in one transaction.
+
+    Returns ``"merged"`` or ``"conflict"`` (when a matched holder track already owns a file).
+    """
+    source_id, holder_id = str(source_album_id), str(holder_album_id)
+    if source_id == holder_id:
+        return "conflict"
+    with db._lock:
+        try:
+            cur = db.conn.cursor()
+            source_album = cur.execute("SELECT * FROM library_albums WHERE id = ?", (source_id,)).fetchone()
+            holder_album = cur.execute("SELECT * FROM library_albums WHERE id = ?", (holder_id,)).fetchone()
+            if source_album is None or holder_album is None:
+                db.conn.rollback()
+                return "conflict"
+            source_tracks = cur.execute(
+                "SELECT * FROM library_tracks WHERE album_id = ? ORDER BY disc_number, track_number, id", (source_id,)
+            ).fetchall()
+            holder_tracks = cur.execute(
+                "SELECT * FROM library_tracks WHERE album_id = ? ORDER BY disc_number, track_number, id", (holder_id,)
+            ).fetchall()
+            plan = _plan_track_merges(cur, source_tracks, holder_tracks)
+            if plan is None:
+                db.conn.rollback()
+                return "conflict"
+            merged_count, moved_count = _apply_track_merges(cur, plan, holder_id, str(holder_album["artist_id"]))
+            _repoint_and_delete_source_album(cur, source_id, holder_id)
+            db.conn.commit()
+        except sqlite3.Error as exc:
+            db.conn.rollback()
+            logger.warning("Merging album %s into %s failed: %s", source_id, holder_id, safe_exc(exc))
+            raise
+    logger.info(
+        "Merged single album '%s' (%s) into '%s' (%s): %d tracks merged, %d moved",
+        source_album["title"],
+        source_id,
+        holder_album["title"],
+        holder_id,
+        merged_count,
+        moved_count,
+    )
+    return "merged"
 
 
 def _move_albums(cur: sqlite3.Cursor, keep_id: str, dupe_id: str) -> tuple[int, list[str]]:

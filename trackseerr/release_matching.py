@@ -182,6 +182,28 @@ def _pick_release_group(groups: list[dict[str, Any]], album_title: str) -> Optio
     )
 
 
+_SINGLE_ALBUM_MAX_TRACKS = 3
+
+
+def _merge_into_holder(db: Any, source_album_id: str, holder_album_id: str, counts: dict[str, int]) -> None:
+    from trackseerr.artist_repair import merge_single_album_into
+
+    outcome = merge_single_album_into(db, source_album_id, holder_album_id)
+    counts["merged" if outcome == "merged" else "merge_conflict"] += 1
+
+
+def _first_holder_for_groups(
+    db: Any, artist_id: str, group_ids: list[str], exclude_album_id: str
+) -> Optional[str]:
+    for rg_id in group_ids:
+        if not rg_id:
+            continue
+        holder = db.album_holding_release_group(artist_id, rg_id, exclude_album_id)
+        if holder is not None:
+            return holder
+    return None
+
+
 def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
     tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
     rec_ids = sorted(
@@ -200,13 +222,24 @@ def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], 
         for group in enricher.get_recording_release_groups(rec_id):
             groups.setdefault(str(group.get("id")), group)
 
+    can_merge = len(tracks) <= _SINGLE_ALBUM_MAX_TRACKS
     chosen = _pick_release_group(list(groups.values()), album["title"])
     if chosen is None:
+        holder = (
+            _first_holder_for_groups(db, album["artist_id"], list(groups.keys()), album["id"]) if can_merge else None
+        )
+        if holder is not None:
+            _merge_into_holder(db, album["id"], holder, counts)
+            return
         counts["no_title_match"] += 1
         return
 
     rg_id = str(chosen["id"])
-    if db.artist_has_release_group(album["artist_id"], rg_id, album["id"]):
+    holder = db.album_holding_release_group(album["artist_id"], rg_id, album["id"])
+    if holder is not None:
+        if can_merge:
+            _merge_into_holder(db, album["id"], holder, counts)
+            return
         counts["rg_taken"] += 1
         logger.info("Album %s not linked: release group %s is already held by the same artist", album["id"], rg_id)
         return
@@ -222,7 +255,16 @@ def link_albums_by_recording(
     on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
 ) -> dict[str, int]:
     """Links albums with no release group to MusicBrainz through the release groups of their tracks' recordings."""
-    counts = {"albums": 0, "linked": 0, "no_recordings": 0, "no_title_match": 0, "rg_taken": 0, "errors": 0}
+    counts = {
+        "albums": 0,
+        "linked": 0,
+        "merged": 0,
+        "merge_conflict": 0,
+        "no_recordings": 0,
+        "no_title_match": 0,
+        "rg_taken": 0,
+        "errors": 0,
+    }
 
     total: Optional[int] = None
     if on_progress is not None:
