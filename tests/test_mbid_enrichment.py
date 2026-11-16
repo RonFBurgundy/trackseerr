@@ -248,6 +248,12 @@ class TestMbidEnricher:
         assert artist_name_key("Crosby, Stills, Nash & Young") == artist_name_key("Crosby, Stills, Nash And Young")
         assert artist_name_key("Basement") != artist_name_key("Basement Jaxx")
 
+    def test_artist_name_key_ignores_leading_the(self):
+        assert artist_name_key("Beatles") == artist_name_key("The Beatles") == artist_name_key("Beatles, The") == "beatles"
+        assert artist_name_key("The The") != ""
+        assert artist_name_key("The") == "the"
+        assert artist_name_key("Theory of a Deadman") == "theoryofadeadman"
+
     @staticmethod
     def _artist_search(client: MbidEnricherClient, name: str, hits: list[dict[str, Any]]) -> str | None:
         resp = MagicMock(status_code=200)
@@ -264,6 +270,44 @@ class TestMbidEnricher:
         client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
         hits = [{"id": "mendelssohn", "name": "Felix Mendelssohn", "sort-name": "Mendelssohn, Felix"}]
         assert self._artist_search(client, "FELIX", hits) is None
+
+    def test_resolve_artist_mbid_distinguishes_no_match_from_unavailable(self):
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"artists": [{"id": "x", "name": "Someone Else"}]}
+        with patch.object(client._session, "get", return_value=resp):
+            assert client.resolve_artist_mbid("Nobody") == (True, None)
+
+        empty = MagicMock(status_code=200)
+        empty.json.return_value = {"artists": []}
+        with patch.object(client._session, "get", return_value=empty):
+            assert client.resolve_artist_mbid("Nobody Else") == (True, None)
+
+        for status in (500, 503, 429):
+            fresh = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+            bad = MagicMock(status_code=status)
+            with patch.object(fresh._session, "get", return_value=bad):
+                assert fresh.resolve_artist_mbid("Basement") == (False, None)
+                assert fresh.lookup_artist_mbid("Basement") is None
+
+        broken = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+        garbled = MagicMock(status_code=200)
+        garbled.json.side_effect = ValueError("bad json")
+        with patch.object(broken._session, "get", return_value=garbled):
+            assert broken.resolve_artist_mbid("Basement") == (False, None)
+
+        boom = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+        with patch.object(boom._session, "get", side_effect=RuntimeError("socket")):
+            assert boom.resolve_artist_mbid("Basement") == (False, None)
+
+    def test_resolve_artist_mbid_cached_answer_counts_as_answered(self):
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"artists": [{"id": "jay", "name": "JAY-Z"}]}
+        with patch.object(client._session, "get", return_value=resp):
+            assert client.resolve_artist_mbid("Jay Z") == (True, "jay")
+        with patch.object(client._session, "get", side_effect=RuntimeError("offline")):
+            assert client.resolve_artist_mbid("Jay Z") == (True, "jay")
 
     def test_lookup_artist_mbid_accepts_alias_and_sort_name(self):
         client = MbidEnricherClient(base_url="https://api.brainzmash.cc")

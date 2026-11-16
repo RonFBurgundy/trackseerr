@@ -417,6 +417,7 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualTrackCreditsTask": "track_credits_backfill",
     "ManualAcoustidContributeTask": "acoustid_contribute",
     "ManualMbReleaseMatchTask": "mb_release_match",
+    "StartupArtistRepairTask": "mb_release_match",
     "ManualLibraryRetagTask": "library_retag",
     "LidarrMigrationThread": "lidarr_migration",
 }
