@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
+import os
 import re
 import sqlite3
+import time
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -57,6 +61,7 @@ from trackseerr.lidarr_release import norm_title, titles_match
 from trackseerr.quality import QualityProfile, evaluate_release, parse_release_title
 from trackseerr.pack_index import clean_pool_title
 from trackseerr.storage import Database
+from trackseerr.system_paths import is_system_dirname
 
 from trackseerr.import_files import (
     _is_safe_cover_url,
@@ -233,6 +238,20 @@ class _PollContext:
 
 
 _SOURCE_WAIT_PREFIX = "Waiting for files to appear"
+_SYNC_WAIT_PREFIX = "Waiting for files to finish syncing"
+_SYNC_WAIT_TIMEOUT = timedelta(hours=6)
+_SYNC_SETTLE_SECONDS = 60.0
+# In-progress sync/download file names (matched lowercased); a folder holding any of these is still arriving.
+_SYNC_TEMP_PATTERNS = (
+    ".syncthing.*.tmp",
+    "~syncthing~*.tmp",
+    "*.part",
+    "*.partial",
+    "*.!qb",
+    "*.!sync",
+    "*.crdownload",
+    "*.tmp",
+)
 
 
 @dataclass
@@ -249,6 +268,7 @@ class _ImportJob:
     status_dict: dict[str, Any]
     target_lookup: Any
     db: Optional[Database] = None
+    source_mapped: bool = False  # a remote path mapping rewrote the client's source path
     audio_files: list[Path] = field(default_factory=list)
     probes: dict[str, Any] = field(default_factory=dict)
     req: Optional[dict[str, Any]] = None
@@ -859,6 +879,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
 
         raw_src = job.status_dict.get("source_path") or job.item.get("source_path")
         candidate_src = translate_remote_path(raw_src, mappings) if raw_src else None
+        job.source_mapped = bool(raw_src and candidate_src and str(candidate_src) != str(raw_src))
         client_label = str(job.client_config.get("name") or job.client_id or "download client")
         self.allowed_roots = allowed_roots_for_client(db, ctx.media_settings, job.client_config, driver=job.driver)
         if not self.allowed_roots.roots:
@@ -894,7 +915,94 @@ class ImportPipelineMixin(ImportCatalogMixin):
         msg = f"{_SOURCE_WAIT_PREFIX} at {candidate_src} (check the remote path mapping or your sync)"
         logger.info("Download %s is complete but %s is not on disk yet; will retry", job.download_id, candidate_src)
         db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message=msg)
+        self._set_request_wait_message(db, job, msg)
         return True
+
+    def _set_request_wait_message(self, db: Database, job: _ImportJob, message: Optional[str]) -> None:
+        """Show (or clear) the sync-wait reason on the request linked to this download."""
+        request_id = job.item.get("request_id")
+        if not request_id:
+            return
+        try:
+            if message:
+                db.set_request_outcome(request_id, "awaiting_sync", message, schedule=False)
+                return
+            req = db.get_request(request_id)
+            if req and req.get("status_reason") == "awaiting_sync":
+                db.set_request_outcome(request_id, None, None, schedule=False)
+        except sqlite3.Error as err:
+            logger.warning("Could not update the sync-wait message on request %s: %s", request_id, err)
+
+    def _scan_source_tree(self, candidate_src: str) -> tuple[bool, int, int, float]:
+        """Return (has_temp_files, file_count, total_bytes, newest_mtime) for a file or folder."""
+        has_temp = False
+        count = 0
+        total = 0
+        newest = 0.0
+        try:
+            if os.path.isfile(candidate_src):
+                walker: Any = [(os.path.dirname(candidate_src), [], [os.path.basename(candidate_src)])]
+            else:
+                walker = os.walk(candidate_src)
+            for dirpath, dirnames, filenames in walker:
+                dirnames[:] = [d for d in dirnames if not is_system_dirname(d)]
+                for name in filenames:
+                    if any(fnmatch.fnmatch(name.lower(), pat) for pat in _SYNC_TEMP_PATTERNS):
+                        has_temp = True
+                        continue
+                    try:
+                        st = os.stat(os.path.join(dirpath, name))
+                    except OSError as err:
+                        logger.debug("Could not stat %s while scanning %s: %s", name, candidate_src, err)
+                        continue
+                    count += 1
+                    total += st.st_size
+                    newest = max(newest, st.st_mtime)
+        except OSError as err:
+            logger.warning("Could not scan %s for sync progress: %s", candidate_src, err)
+            return (True, 0, 0, 0.0)
+        return (has_temp, count, total, newest)
+
+    def _settled(self, job: _ImportJob, snapshot: tuple[int, int, float], now: float) -> bool:
+        """True once a mapped source has looked identical for _SYNC_SETTLE_SECONDS and matches the client's size."""
+        key = str(job.download_id)
+        prev = self._sync_snapshots.get(key)
+        if prev is None or prev[0] != snapshot:
+            self._sync_snapshots[key] = (snapshot, now)
+            return False
+        if now - prev[1] < _SYNC_SETTLE_SECONDS:
+            return False
+        expected = int(job.item.get("size_bytes") or 0)
+        return not (expected > 0 and snapshot[1] < 0.98 * expected)
+
+    def _payload_not_ready(self, db: Database, job: _ImportJob, candidate_src: str) -> bool:
+        """Return True and keep the download COMPLETED while a synced payload is still arriving."""
+        key = str(job.download_id)
+        now = time.time()
+        started = self._sync_wait_started.setdefault(key, now)
+        has_temp, count, total, newest = self._scan_source_tree(candidate_src)
+        waiting = has_temp or count == 0
+        if not waiting and job.source_mapped:
+            waiting = not self._settled(job, (count, total, newest), now)
+        if waiting and now - started >= _SYNC_WAIT_TIMEOUT.total_seconds():
+            logger.warning(
+                "Download %s still not fully synced at %s after %s; importing what is there",
+                job.download_id, candidate_src, _SYNC_WAIT_TIMEOUT,
+            )
+            waiting = False
+        if waiting:
+            msg = f"{_SYNC_WAIT_PREFIX} at {candidate_src} (check your sync if this does not clear)"
+            logger.info("Download %s is waiting for files to finish syncing at %s", job.download_id, candidate_src)
+            db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message=msg)
+            self._set_request_wait_message(db, job, msg)
+            return True
+        self._sync_wait_started.pop(key, None)
+        self._sync_snapshots.pop(key, None)
+        err = str(job.item.get("error_message") or "")
+        if err.startswith((_SYNC_WAIT_PREFIX, _SOURCE_WAIT_PREFIX)):
+            db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message="")
+            self._set_request_wait_message(db, job, None)
+        return False
 
     def _locate_audio_files(
         self,
@@ -926,6 +1034,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
             job.audio_files = sorted(dict.fromkeys(existing))
         else:
             if candidate_src and self._source_not_arrived(db, job, candidate_src):
+                return False
+            if candidate_src and self._payload_not_ready(db, job, candidate_src):
                 return False
             search_term = job.item.get("title") or job.item.get("artist") or ""
             self._archive_errors = []

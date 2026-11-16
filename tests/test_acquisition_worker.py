@@ -572,6 +572,215 @@ def test_worker_imports_after_source_arrives(test_db, workspace_dirs):
     assert not (updated["error_message"] or "").startswith("Waiting for files to appear")
 
 
+def _seed_sync_download(test_db, tag, downloads_dir, *, mapped=False, request=False, size_bytes=0):
+    """Seed a completed download whose files arrive by sync; returns (driver, local_dir)."""
+    import json
+
+    local_dir = downloads_dir / f"Sync {tag}"
+    remote_dir = f"/remote/seedbox/Sync {tag}" if mapped else str(local_dir)
+    extra = None
+    if mapped:
+        extra = json.dumps({"remote_path_mappings": [
+            {"remote_path": "/remote/seedbox", "local_path": str(downloads_dir)}
+        ]})
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id=f"client-{tag}",
+            name="Seedbox",
+            driver_type=DownloadDriverType.SABNZBD,
+            host_url="http://sabnzbd:8080",
+            api_key="secret",
+            extra_settings_json=extra,
+        )
+    )
+    request_id = None
+    if request:
+        test_db.upsert_user("user-sync", "sync_user", "sync@example.com")
+        test_db.create_request(
+            MusicRequest(
+                id=f"req-{tag}", user_id="user-sync", item_type="album",
+                title="Not Synced Album", artist="Remote Artist", status=RequestStatus.PROCESSING,
+            )
+        )
+        request_id = f"req-{tag}"
+    test_db.create_active_download(
+        ActiveDownload(
+            id=f"dl-{tag}",
+            title="Not Synced Album",
+            artist="Remote Artist",
+            client_id=f"client-{tag}",
+            download_hash=f"hash-{tag}",
+            status=DownloadStatus.COMPLETED.value,
+            source_path=remote_dir,
+            request_id=request_id,
+            size_bytes=size_bytes,
+        )
+    )
+    driver = MagicMock()
+    driver.get_status.return_value = {
+        "status": DownloadStatus.COMPLETED.value,
+        "progress": 100.0,
+        "source_path": remote_dir,
+        "error_message": None,
+    }
+    return driver, local_dir
+
+
+def _poll(worker, test_db, driver, downloads_dir, meta=None):
+    with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver):
+        if meta is None:
+            return worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
+        with patch("trackseerr.acquisition_import.inspect_audio_file", return_value=meta), \
+             patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=meta):
+            return worker.poll_once(db=test_db, staging_dir=str(downloads_dir))
+
+
+def _sync_meta(track):
+    return {
+        "artist": "Remote Artist", "title": "Arrived", "album": "Not Synced Album",
+        "file_path": str(track), "extension": ".mp3", "track_number": 1, "year": 2020,
+        "disc_number": 1, "total_discs": 1,
+    }
+
+
+def _set_music_root(test_db, music_dir):
+    settings = test_db.get_media_management_settings()
+    settings["root_folder_path"] = str(music_dir)
+    test_db.update_media_management_settings(settings)
+
+
+def test_worker_waits_when_source_dir_empty(test_db, workspace_dirs):
+    downloads_dir, _ = workspace_dirs
+    driver, local_dir = _seed_sync_download(test_db, "empty", downloads_dir)
+    local_dir.mkdir()
+    stats = _poll(AcquisitionWorker(), test_db, driver, downloads_dir)
+
+    assert stats["failed"] == 0
+    updated = test_db.get_active_download("dl-empty")
+    assert updated["status"] == DownloadStatus.COMPLETED.value
+    assert updated["error_message"].startswith("Waiting for files to finish syncing")
+    assert test_db.list_blocklist() == []
+
+
+def test_worker_waits_while_sync_temp_files_present(test_db, workspace_dirs):
+    downloads_dir, _ = workspace_dirs
+    driver, local_dir = _seed_sync_download(test_db, "temp", downloads_dir)
+    local_dir.mkdir()
+    (local_dir / ".syncthing.01 - A.flac.tmp").write_bytes(b"partial")
+    write_mp3(local_dir / "02 - B.mp3")
+    stats = _poll(AcquisitionWorker(), test_db, driver, downloads_dir)
+
+    assert stats["failed"] == 0
+    assert stats["imported"] == 0
+    updated = test_db.get_active_download("dl-temp")
+    assert updated["status"] == DownloadStatus.COMPLETED.value
+    assert updated["error_message"].startswith("Waiting for files to finish syncing")
+    assert test_db.list_blocklist() == []
+
+
+def test_worker_imports_after_empty_dir_fills(test_db, workspace_dirs):
+    downloads_dir, music_dir = workspace_dirs
+    driver, local_dir = _seed_sync_download(test_db, "fill", downloads_dir)
+    local_dir.mkdir()
+    worker = AcquisitionWorker()
+    first = _poll(worker, test_db, driver, downloads_dir)
+    assert first["failed"] == 0
+    assert test_db.get_active_download("dl-fill")["error_message"].startswith("Waiting for files to finish syncing")
+
+    track = local_dir / "01 - Arrived.mp3"
+    write_mp3(track)
+    _set_music_root(test_db, music_dir)
+    second = _poll(worker, test_db, driver, downloads_dir, meta=_sync_meta(track))
+
+    assert second["failed"] == 0
+    assert second["imported"] == 1
+    updated = test_db.get_active_download("dl-fill")
+    assert updated["status"] == DownloadStatus.IMPORTED.value
+    msg = updated["error_message"] or ""
+    assert not msg.startswith("Waiting for files")
+
+
+def test_worker_fails_after_sync_wait_timeout(test_db, workspace_dirs):
+    import time
+    from trackseerr.acquisition_import import _SYNC_WAIT_TIMEOUT
+
+    downloads_dir, _ = workspace_dirs
+    driver, local_dir = _seed_sync_download(test_db, "timeout", downloads_dir)
+    local_dir.mkdir()
+    worker = AcquisitionWorker()
+    worker._sync_wait_started["dl-timeout"] = time.time() - _SYNC_WAIT_TIMEOUT.total_seconds() - 1
+    stats = _poll(worker, test_db, driver, downloads_dir)
+
+    assert stats["failed"] == 1
+    updated = test_db.get_active_download("dl-timeout")
+    assert updated["status"] == DownloadStatus.FAILED.value
+    assert "No audio files found" in updated["error_message"]
+    assert len(test_db.list_blocklist()) == 1
+
+
+def test_mapped_source_waits_for_settle(test_db, workspace_dirs):
+    downloads_dir, music_dir = workspace_dirs
+    driver, local_dir = _seed_sync_download(test_db, "settle", downloads_dir, mapped=True)
+    local_dir.mkdir()
+    track = local_dir / "01 - Arrived.mp3"
+    write_mp3(track)
+    _set_music_root(test_db, music_dir)
+    worker = AcquisitionWorker()
+
+    first = _poll(worker, test_db, driver, downloads_dir, meta=_sync_meta(track))
+    assert first["imported"] == 0 and first["failed"] == 0
+    assert test_db.get_active_download("dl-settle")["error_message"].startswith("Waiting for files to finish syncing")
+
+    snapshot, seen = worker._sync_snapshots["dl-settle"]
+    worker._sync_snapshots["dl-settle"] = (snapshot, seen - 61)
+    second = _poll(worker, test_db, driver, downloads_dir, meta=_sync_meta(track))
+    assert second["imported"] == 1
+    assert test_db.get_active_download("dl-settle")["status"] == DownloadStatus.IMPORTED.value
+
+
+def test_mapped_source_waits_for_client_size(test_db, workspace_dirs):
+    downloads_dir, music_dir = workspace_dirs
+    driver, local_dir = _seed_sync_download(
+        test_db, "size", downloads_dir, mapped=True, size_bytes=500_000_000
+    )
+    local_dir.mkdir()
+    track = local_dir / "01 - Arrived.mp3"
+    write_mp3(track)
+    _set_music_root(test_db, music_dir)
+    worker = AcquisitionWorker()
+
+    _poll(worker, test_db, driver, downloads_dir, meta=_sync_meta(track))
+    snapshot, seen = worker._sync_snapshots["dl-size"]
+    worker._sync_snapshots["dl-size"] = (snapshot, seen - 61)
+    stats = _poll(worker, test_db, driver, downloads_dir, meta=_sync_meta(track))
+
+    assert stats["imported"] == 0 and stats["failed"] == 0
+    updated = test_db.get_active_download("dl-size")
+    assert updated["status"] == DownloadStatus.COMPLETED.value
+    assert updated["error_message"].startswith("Waiting for files to finish syncing")
+
+
+def test_request_gets_wait_and_failure_messages(test_db, workspace_dirs):
+    import time
+    from trackseerr.acquisition_import import _SYNC_WAIT_TIMEOUT
+
+    downloads_dir, _ = workspace_dirs
+    driver, local_dir = _seed_sync_download(test_db, "req", downloads_dir, request=True)
+    local_dir.mkdir()
+    worker = AcquisitionWorker()
+    _poll(worker, test_db, driver, downloads_dir)
+
+    req = test_db.get_request("req-req")
+    assert req["status_reason"] == "awaiting_sync"
+    assert req["status_message"]
+
+    worker._sync_wait_started["dl-req"] = time.time() - _SYNC_WAIT_TIMEOUT.total_seconds() - 1
+    _poll(worker, test_db, driver, downloads_dir)
+    req = test_db.get_request("req-req")
+    assert req["status_reason"] == "download_failed"
+    assert req["status_message"].startswith("Download failed:")
+
+
 def test_worker_rejects_target_escaping_root_folder(test_db, workspace_dirs):
     downloads_dir, music_dir = workspace_dirs
 
