@@ -144,6 +144,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- One-song albums created by playlist imports (like "Something - Remastered 2009") are folded into the real album you already have ("Abbey Road") by MusicBrainz Release Match and Library Self-Heal. The song keeps its file, history and requests; only the extra album disappears. Run Rename Files afterwards to move the files into the album's folder.
 - The Requests page updates on its own while requests are in progress, so a finished request moves to Fulfilled without a refresh.
 - On phones, the Library search results now span the whole toolbar instead of only the search box, so long names are no longer cut off.
 - Rename Files no longer flags a file as "Audio is a different track" when AcoustID found the same song under another edition (a remaster, album or single version). These now show as "Same song, other edition" and can be renamed.
