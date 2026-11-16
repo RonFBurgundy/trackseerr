@@ -403,6 +403,50 @@ def test_enricher_get_release_group_releases_paging_and_caching():
     assert enricher._request.call_count == 2
 
 
+def _rg_page(count_total, n, start=0):
+    resp = MagicMock()
+    resp.status_code = 200
+    body = {"releases": [
+        {"id": f"rel-{i}", "title": f"R{i}", "status": "Official", "date": "2020-01-01",
+         "country": "US", "track-count": 1,
+         "media": [{"position": 1, "tracks": [
+             {"position": 1, "number": "1", "title": f"T{i}", "recording": {"id": f"rec-{i}"}}]}]}
+        for i in range(start, start + n)
+    ]}
+    if count_total is not None:
+        body["release-count"] = count_total
+    resp.json.return_value = body
+    return resp
+
+
+def test_enricher_rg_releases_keeps_paging_after_short_page():
+    enricher = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+    enricher._request = MagicMock(side_effect=[
+        _rg_page(75, 28, 0), _rg_page(75, 28, 28), _rg_page(75, 19, 56),
+    ])
+    releases = enricher.get_release_group_releases("rg-short-pages")
+    assert len(releases) == 75
+    assert enricher._request.call_count == 3
+    offsets = [c[1]["params"]["offset"] for c in enricher._request.call_args_list]
+    assert offsets == [0, 28, 56]
+
+
+def test_enricher_rg_releases_stops_on_empty_page():
+    enricher = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+    enricher._request = MagicMock(side_effect=[_rg_page(50, 20, 0), _rg_page(50, 0)])
+    releases = enricher.get_release_group_releases("rg-empty-page")
+    assert len(releases) == 20
+    assert enricher._request.call_count == 2
+
+
+def test_enricher_rg_releases_short_page_without_count_stops():
+    enricher = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+    enricher._request = MagicMock(side_effect=[_rg_page(None, 10, 0)])
+    releases = enricher.get_release_group_releases("rg-no-count")
+    assert len(releases) == 10
+    assert enricher._request.call_count == 1
+
+
 # =============================================================================
 # API dispatch test
 # =============================================================================
