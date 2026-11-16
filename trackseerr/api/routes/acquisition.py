@@ -18,6 +18,7 @@ from trackseerr.acquisition_coordinator import (
     resolve_duration,
     SearchContext,
     acquisition_coordinator,
+    supports_partial_download,
 )
 from trackseerr import delay_gate
 from trackseerr.api.dependencies import get_db, require_admin, require_core_tier
@@ -485,11 +486,10 @@ def _dispatch_manual_grab(
 ) -> tuple[dict[str, Any], Any, str]:
     """Validates and dispatches manual grab to client driver."""
     if search_result.extra and search_result.extra.get("file_indices") and client is not None:
-        c_driver = (client.get("driver_type") or client.get("service_type") or "").lower()
-        if c_driver != "qbittorrent":
+        if not supports_partial_download(client):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only qBittorrent can download part of a torrent",
+                detail="Only qBittorrent or rTorrent can download part of a torrent",
             )
     try:
         if client is not None:
