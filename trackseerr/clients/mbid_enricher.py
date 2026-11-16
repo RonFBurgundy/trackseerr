@@ -70,6 +70,16 @@ def _sanitize_lucene_query(text: str) -> str:
     return re.sub(r'["\\/]', " ", text).strip()
 
 
+def _strip_article(text: str) -> str:
+    """Drops one leading "the " or trailing ", the" ('Beatles, The'); never leaves an empty name ('The The' -> 'the')."""
+    stripped = text.strip()
+    for pattern in (r",\s*the$", r"^the\s+"):
+        candidate = re.sub(pattern, "", stripped, count=1).strip()
+        if candidate:
+            stripped = candidate
+    return stripped
+
+
 def artist_name_key(name: str) -> str:
     """Comparison key for artist names: case, diacritics, dash style, '&'/'and' and spacing all fold away.
 
@@ -79,6 +89,7 @@ def artist_name_key(name: str) -> str:
     text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
     text = re.sub("[\u2010\u2011\u2013\u2014\u2212]", "-", text)
     text = text.replace(" & ", " and ").replace(" + ", " and ").replace("\u2019", "'")
+    text = _strip_article(text)
     return clean_library_name(text).replace(" ", "").replace("-", "")
 
 

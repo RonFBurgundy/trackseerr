@@ -248,6 +248,12 @@ class TestMbidEnricher:
         assert artist_name_key("Crosby, Stills, Nash & Young") == artist_name_key("Crosby, Stills, Nash And Young")
         assert artist_name_key("Basement") != artist_name_key("Basement Jaxx")
 
+    def test_artist_name_key_ignores_leading_the(self):
+        assert artist_name_key("Beatles") == artist_name_key("The Beatles") == artist_name_key("Beatles, The") == "beatles"
+        assert artist_name_key("The The") != ""
+        assert artist_name_key("The") == "the"
+        assert artist_name_key("Theory of a Deadman") == "theoryofadeadman"
+
     @staticmethod
     def _artist_search(client: MbidEnricherClient, name: str, hits: list[dict[str, Any]]) -> str | None:
         resp = MagicMock(status_code=200)

@@ -464,3 +464,15 @@ def test_ampersand_split_skipped_when_lookup_unavailable(db: Database):
 
     assert counts["credits_refiled"] == 0 and counts["lookups_unavailable"] == 1
     assert db.conn.execute("SELECT artist_id FROM library_albums WHERE id = 'a'").fetchone()[0] == "af2"
+
+
+def test_leading_the_does_not_make_an_id_look_wrong(db: Database):
+    _artist(db, "bt", "Beatles", "beatles-id")
+    _album(db, "wanted", "bt", "Abbey Road", rg="rg-abbey")
+    enricher = FakeEnricher({"beatles-id": "The Beatles"}, {})
+
+    counts = run_artist_repair(db, enricher)
+
+    assert not _changes(counts) and enricher.lookup_calls == []
+    assert db.conn.execute("SELECT mbid FROM library_artists WHERE id = 'bt'").fetchone()[0] == "beatles-id"
+    assert _count(db, "SELECT COUNT(*) FROM library_albums WHERE id = 'wanted'") == 1
