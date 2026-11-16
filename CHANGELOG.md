@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- **Library Self-Heal** task (Tasks page, weekly by default): runs the MusicBrainz release match and then applies the renames Rename Files marks as safe. It never rewrites tags. Pause it to stop automatic renames.
+- MusicBrainz Release Match fills in missing MusicBrainz recording IDs from AcoustID when you have an AcoustID API key, so more albums get linked and matched to an edition.
 - **Search the whole library** from the Library search box: as you type, a list shows matching artists, albums and tracks from every tab, and suggests the right spelling when you're close ("Zac Brian" → Zach Bryan). The box still filters the page you're on.
 - In the Tracks list, click a track's artist or album to open it. Albums and tracks now have an "Open on MusicBrainz" link, like artists already did.
 - **Default permissions for new users** in Settings → Requests → Users → Account defaults: choose which permissions people get the first time they sign in with Plex or are added from your media server (the default is still Request music and Report issues). Existing users don't change, and admin can't be a default.
@@ -139,6 +141,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Rename Files no longer flags a file as "Audio is a different track" when AcoustID found the same song under another edition (a remaster, album or single version). These now show as "Same song, other edition" and can be renamed.
 - Re-applying a rename no longer moves a file from "Song (1)" to "Song (2)" (and so on) when its proper name is taken by another file; it now stays where it is. Shorten name works the same way.
 - MusicBrainz Release Match now finds the right edition for albums with many editions (Abbey Road, Rubber Soul and the like). It used to read only the first part of the edition list and give up. Run it again after updating.
 - Many fewer albums show as "Not on MusicBrainz": single tracks from playlists are now matched through the song itself, and names like "Hotel California - 2013 Remaster" match the original album.

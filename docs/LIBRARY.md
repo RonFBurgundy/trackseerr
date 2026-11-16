@@ -37,7 +37,11 @@ The search box does two things. It filters the tab you are on, and it shows a li
 
 **Not on MusicBrainz…** in the Library tools menu (and on an artist page) lists albums TrackSeerr could not link to a MusicBrainz release. Open one to link it by hand or to submit it to MusicBrainz with the details filled in. Closing the album takes you back to the same place in the list.
 
-TrackSeerr links albums in two ways: by the artist's discography, and through the songs themselves when your files carry MusicBrainz recording IDs. The **MusicBrainz release match** task on the Tasks page runs both. It also tidies your artists first: it backs up the database, joins artists listed twice under different spellings ("Jay Z" and "JAY-Z"), fixes artists matched to the wrong MusicBrainz artist, and files combined names such as "2Pac; Dr. Dre" under the main artist. It never moves files. Run **Rename Files** afterwards if you want folders to follow.
+TrackSeerr links albums in two ways: by the artist's discography, and through the songs themselves when your files carry MusicBrainz recording IDs. The **MusicBrainz release match** task on the Tasks page runs both. It also tidies your artists first: it backs up the database, joins artists listed twice under different spellings ("Jay Z" and "JAY-Z"), fixes artists matched to the wrong MusicBrainz artist, and files combined names such as "2Pac; Dr. Dre" under the main artist. If you set an AcoustID API key, it also fingerprints songs that have no MusicBrainz recording ID and fills one in when the match is good: a recording on one of the album's editions, or a strong match with the same song title. It never moves files. Run **Rename Files** afterwards if you want folders to follow.
+
+### Library Self-Heal
+
+The **Library Self-Heal** task on the Tasks page does this for you once a week. It runs the MusicBrainz release match (including the artist tidy-up and the AcoustID step), then applies the renames that **Rename Files** marks as safe. It never rewrites tags, and it skips renames it would not pre-select for you: audio that AcoustID says is a different song, and names already taken by another file. Change how often it runs on the Tasks page, start it by hand, or pause it to stop automatic renames. After a restart it waits until the next run is due.
 
 ## Scanning
 
@@ -178,6 +182,8 @@ Presets:
 | Audiophile / Detailed | Adds codec, bit depth, and sample rate to every file name. |
 
 New imports use the current format. To rename files already in the library, click **Rename files** on the **Library** page, an artist page, or an album. TrackSeerr shows each current path next to its new path. Pick the files to rename and apply.
+
+Renames that only tidy a name are ticked for you, such as removing a copy number like " (1)" or stray spaces. If AcoustID has checked a file, the result shows next to it. **Audio is a different track** means the file is linked to the wrong song: fix the link before renaming it. **Same song, other edition** means AcoustID found the same song under another edition, such as a remaster or single version; the link is fine.
 
 ## Retagging files
 
