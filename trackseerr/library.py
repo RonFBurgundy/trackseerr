@@ -134,18 +134,20 @@ def resolve_album_artist(
 ) -> str:
     """Artist an album/track is filed under.
 
-    Precedence: album artist tag; first credit of the multi-valued ARTISTS tag; the track-artist string split by
-    ``primary_artist`` (a single MusicBrainz artist ID marks it as one entity, so a bare '/' is kept).
+    Precedence: album artist tag, split by ``primary_artist`` like a track credit ('2Pac; Dr. Dre' -> '2Pac');
+    first credit of the multi-valued ARTISTS tag; the track-artist string split by ``primary_artist``
+    (a single MusicBrainz artist ID marks it as one entity, so a bare '/' is kept).
     """
+    mbid_text = f"{metadata.get('musicbrainz_artistid') or ''} {metadata.get('musicbrainz_albumartistid') or ''}"
+    mbids = {m.lower() for m in _MBID_RE.findall(mbid_text)}
+    single_entity = len(mbids) == 1
     album_artist = str(metadata.get("album_artist") or "").strip()
     if album_artist:
-        return album_artist
+        return primary_artist(album_artist, known_artist, single_entity=single_entity) or album_artist
     credits = _clean_credits(metadata.get("artists"))
     if credits:
         return credits[0]
-    mbid_text = f"{metadata.get('musicbrainz_artistid') or ''} {metadata.get('musicbrainz_albumartistid') or ''}"
-    mbids = {m.lower() for m in _MBID_RE.findall(mbid_text)}
-    return primary_artist(str(metadata.get("artist") or ""), known_artist, single_entity=len(mbids) == 1) or fallback
+    return primary_artist(str(metadata.get("artist") or ""), known_artist, single_entity=single_entity) or fallback
 
 
 def parse_filename_track(stem: str) -> tuple[str, int | None]:

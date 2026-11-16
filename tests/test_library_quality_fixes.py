@@ -107,6 +107,13 @@ def test_album_artist_wins_over_track_artist_and_falls_back_to_primary_artist():
     assert resolve_album_artist({}, fallback="Unknown Artist") == "Unknown Artist"
 
 
+def test_joined_album_artist_tag_is_split_to_primary():
+    assert resolve_album_artist({"album_artist": "2Pac; Dr. Dre; Roger Troutman"}) == "2Pac"
+    assert resolve_album_artist({"album_artist": "JAY\u2010Z feat. Foxy Brown"}) == "JAY\u2010Z"
+    assert resolve_album_artist({"album_artist": "Simon & Garfunkel"}) == "Simon & Garfunkel"
+    assert resolve_album_artist({"album_artist": "AC/DC"}) == "AC/DC"
+
+
 def test_bare_slash_splits_only_when_the_left_part_is_a_known_artist():
     lowered = lambda n: n.casefold() in {"daft punk"}  # noqa: E731
     assert primary_artist("Daft Punk/Romanthony", lowered) == "Daft Punk"
