@@ -444,7 +444,8 @@ def _mb_http(rgs: Optional[list[dict[str, Any]]] = None, down: bool = False) -> 
         if down:
             raise requests.ConnectionError("mb down")
         if url.endswith("/ws/2/artist"):
-            return _Resp({"artists": [{"id": "mb-artist-1"}]})
+            queried = (params or {}).get("query", "").removeprefix("artist:").strip('"')
+            return _Resp({"artists": [{"id": "mb-artist-1", "name": queried}]})
         if url.endswith("/ws/2/release-group"):
             return _Resp({"release-groups": rgs if rgs is not None else MB_RGS})
         return _Resp({}, 404)

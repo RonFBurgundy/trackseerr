@@ -239,7 +239,7 @@ def test_404_negative_persisted_with_short_ttl(test_db: Database) -> None:
         assert client.lookup_artist_mbid("Ghost Band") is None
 
     row = test_db.conn.execute(
-        "SELECT * FROM mb_metadata_cache WHERE cache_key = 'artist:ghost band'"
+        "SELECT * FROM mb_metadata_cache WHERE cache_key = 'artist:v2:ghost band'"
     ).fetchone()
     assert row is not None
     assert row["payload_json"] == "null"
