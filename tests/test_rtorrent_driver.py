@@ -17,7 +17,10 @@ from trackseerr.clients.acquisition import (
     get_acquisition_driver,
     is_torrent_driver_type,
 )
-from trackseerr.clients.acquisition.base import AcquisitionRetryableError
+from trackseerr.clients.acquisition.base import (
+    AcquisitionRetryableError,
+    AcquisitionUnavailableError,
+)
 from trackseerr.clients.acquisition.rtorrent import RtorrentDriver
 from trackseerr.config import Config
 from trackseerr.models import (
@@ -146,6 +149,119 @@ def test_rtorrent_download_torrent_bytes():
     assert "load.raw_start" in body
     assert "d.custom1.set=trackseerr" in body
     assert "d.directory.set=/data/music" in body
+
+
+def test_rtorrent_partial_download_sets_priorities():
+    driver = RtorrentDriver(HOST, download_dir="/data/music")
+    item = AcquisitionSearchResult(
+        download_id="x",
+        title="Album",
+        artist="Artist",
+        download_url="https://indexer.example.com/a.torrent",
+        extra={"file_indices": [1], "file_paths": ["Album/02 - Track.flac"]},
+    )
+    thash = info_hash(TORRENT).upper()
+    file_rows = [["01 - Intro.flac"], ["02 - Track.flac"], ["03 - Outro.flac"]]
+    replies = [
+        _fault(),  # d.hash
+        _ok(0),  # load.raw
+        _ok(file_rows),  # f.multicall
+        _ok(0),  # f.priority.set f0
+        _ok(0),  # f.priority.set f1
+        _ok(0),  # f.priority.set f2
+        _ok(0),  # d.update_priorities
+        _ok(0),  # d.start
+    ]
+    with (
+        patch("trackseerr.clients.acquisition.torznab.fetch_torrent_file", return_value=TORRENT),
+        patch("httpx.Client.post", side_effect=replies) as mock_post,
+    ):
+        result = driver.download(item)
+
+    assert result == info_hash(TORRENT)
+    calls = [xmlrpc.client.loads(c.kwargs["content"]) for c in mock_post.call_args_list]
+    methods = [m for _p, m in calls]
+    assert methods == [
+        "d.hash",
+        "load.raw",
+        "f.multicall",
+        "f.priority.set",
+        "f.priority.set",
+        "f.priority.set",
+        "d.update_priorities",
+        "d.start",
+    ]
+    assert "load.raw_start" not in methods
+    prio_params = [p for p, m in calls if m == "f.priority.set"]
+    assert prio_params == [
+        (f"{thash}:f0", 0),
+        (f"{thash}:f1", 1),
+        (f"{thash}:f2", 0),
+    ]
+    assert calls[6] == ((thash,), "d.update_priorities")
+    assert calls[7] == ((thash,), "d.start")
+
+
+def test_rtorrent_partial_download_magnet_is_unavailable():
+    driver = RtorrentDriver(HOST)
+    magnet = f"magnet:?xt=urn:btih:{HASH.upper()}&dn=Album"
+    item = AcquisitionSearchResult(
+        download_id="x",
+        title="Album",
+        artist="Artist",
+        magnet_url=magnet,
+        extra={"file_indices": [0], "file_paths": ["01 - Track.flac"]},
+    )
+    with pytest.raises(AcquisitionUnavailableError, match="needs the .torrent file") as exc_info:
+        driver.download(item)
+    assert exc_info.value.reason == "release_unavailable"
+
+
+def test_rtorrent_partial_download_path_mismatch_erases():
+    driver = RtorrentDriver(HOST)
+    item = AcquisitionSearchResult(
+        download_id="x",
+        title="Album",
+        artist="Artist",
+        download_url="https://indexer.example.com/a.torrent",
+        extra={"file_indices": [1], "file_paths": ["Album/99 - Wrong.flac"]},
+    )
+    thash = info_hash(TORRENT).upper()
+    file_rows = [["01 - Intro.flac"], ["02 - Track.flac"], ["03 - Outro.flac"]]
+    replies = [
+        _fault(),  # d.hash
+        _ok(0),  # load.raw
+        _ok(file_rows),  # f.multicall
+        _ok(0),  # d.erase
+    ]
+    with (
+        patch("trackseerr.clients.acquisition.torznab.fetch_torrent_file", return_value=TORRENT),
+        patch("httpx.Client.post", side_effect=replies) as mock_post,
+        pytest.raises(AcquisitionUnavailableError) as exc_info,
+    ):
+        driver.download(item)
+    assert exc_info.value.reason == "release_unavailable"
+    calls = [xmlrpc.client.loads(c.kwargs["content"]) for c in mock_post.call_args_list]
+    assert calls[-1] == ((thash,), "d.erase")
+
+
+def test_rtorrent_full_download_unchanged():
+    driver = RtorrentDriver(HOST, download_dir="/data/music")
+    item = AcquisitionSearchResult(
+        download_id="x",
+        title="Album",
+        artist="Artist",
+        download_url="https://indexer.example.com/a.torrent",
+        extra={},
+    )
+    with (
+        patch("trackseerr.clients.acquisition.torznab.fetch_torrent_file", return_value=TORRENT),
+        patch("httpx.Client.post", side_effect=[_fault(), _ok(0)]) as mock_post,
+    ):
+        result = driver.download(item)
+    assert result == info_hash(TORRENT)
+    body = _body(mock_post)
+    assert "load.raw_start" in body
 
 
 def test_rtorrent_download_magnet():
