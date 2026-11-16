@@ -524,6 +524,11 @@ def _start_local_workers(db: Database, config: Config) -> None:
     logger.info("Starting RecycleBinWorker (daily recycle bin cleanup)")
     recycle_bin_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "recycle_bin_cleanup"))
 
+    from .library_self_heal import library_self_heal_worker
+
+    logger.info("Starting LibrarySelfHealWorker (weekly library repair and safe renames)")
+    library_self_heal_worker.start(db=db, config=config, interval_fn=interval_fn(db, config, "library_self_heal"))
+
     from .backup import backup_worker
 
     logger.info("Starting BackupWorker (database backup & retention pruning)")
@@ -908,6 +913,7 @@ def _serve(
                 ("SeedCleanupWorker", "seed_cleanup", "seed_cleanup_worker"),
                 ("PackIndexWorker", "pack_scanner", "pack_index_worker"),
                 ("RecycleBinWorker", "recycle_bin", "recycle_bin_worker"),
+                ("LibrarySelfHealWorker", "library_self_heal", "library_self_heal_worker"),
             ):
                 try:
                     module = __import__(f"trackseerr.{module_name}", fromlist=[attr])

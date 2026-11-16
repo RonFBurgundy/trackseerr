@@ -313,6 +313,15 @@ TASKS: dict[str, TaskSpec] = {
             group=GROUP_LIBRARY,
         ),
         TaskSpec(
+            "library_self_heal",
+            "Library Self-Heal",
+            "Repairs artists, fills MusicBrainz IDs from AcoustID, links albums and picks editions, then applies the renames Rename Files marks as safe. Never rewrites tags. Pause it to stop automatic renames.",
+            KIND_INTERVAL,
+            7 * _DAY,
+            _presets(_DAY),
+            group=GROUP_LIBRARY,
+        ),
+        TaskSpec(
             "library_retag",
             "Library Retag",
             "Rewrites tags (titles, numbers, dates and MusicBrainz IDs) on every library file whose tags differ from the catalog. Resumable and cancellable.",
@@ -418,6 +427,8 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualAcoustidContributeTask": "acoustid_contribute",
     "ManualMbReleaseMatchTask": "mb_release_match",
     "StartupArtistRepairTask": "mb_release_match",
+    "LibrarySelfHealWorkerThread": "library_self_heal",
+    "ManualLibrarySelfHealTask": "library_self_heal",
     "ManualLibraryRetagTask": "library_retag",
     "LidarrMigrationThread": "lidarr_migration",
 }
@@ -718,6 +729,7 @@ PAUSABLE_TASKS: frozenset[str] = frozenset({
     "backup",
     "update_check",
     "health_check",
+    "library_self_heal",
 })
 
 for _pausable_id in PAUSABLE_TASKS:

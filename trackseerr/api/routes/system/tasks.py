@@ -60,6 +60,7 @@ from trackseerr.job_tracker import job_tracker, summarize_result, track_job
 from trackseerr import library_manager, task_manager
 from trackseerr.library_manager import MODE_LIDARR, MODE_NATIVE, build_lidarr_client, get_library_mode
 from trackseerr.library_scanner import library_scanner
+from trackseerr.library_self_heal import library_self_heal_worker, run_self_heal
 from trackseerr.lidarr_migration import lidarr_migration_job
 from trackseerr.lidarr_queue import lidarr_worker
 from trackseerr.mix_worker import mix_worker
@@ -147,6 +148,7 @@ _MANUAL_RUNNABLE = {
     "track_credits_backfill",
     "acoustid_contribute",
     "mb_release_match",
+    "library_self_heal",
     "library_retag",
 }
 
@@ -304,6 +306,22 @@ def get_all_scheduled_tasks(
         "track_credits_backfill": ("running" if "track_credits_backfill" in _running_tasks else "idle", None, False),
         "acoustid_contribute": ("running" if "acoustid_contribute" in _running_tasks else "idle", None, False),
         "mb_release_match": ("running" if "mb_release_match" in _running_tasks else "idle", None, False),
+        "library_self_heal": (
+            "running"
+            if (
+                "library_self_heal" in _running_tasks
+                or (
+                    library_self_heal_worker.is_running()
+                    and (
+                        library_self_heal_worker.has_active_run()
+                        or (latest.get("library_self_heal") or {}).get("status") == "running"
+                    )
+                )
+            )
+            else "idle",
+            None,
+            False,
+        ),
         "library_retag": ("running" if "library_retag" in _running_tasks else "idle", None, False),
         "seed_cleanup": (
             "running" if (sc_stat.get("running") or "seed_cleanup" in _running_tasks) else "idle",
@@ -913,6 +931,15 @@ def run_scheduled_task(  # noqa: C901, PLR0915
             run_repair_and_match(db, run)
 
         _run_manual(db, task_id, "ManualMbReleaseMatchTask", _match, cancellable=True)
+
+    elif task_id == "library_self_heal":
+        _run_manual(
+            db,
+            task_id,
+            "ManualLibrarySelfHealTask",
+            lambda run: run_self_heal(db, config, run),
+            cancellable=True,
+        )
 
     return {"success": True, "message": f"Task '{task_id}' dispatched successfully"}
 
