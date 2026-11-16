@@ -14,7 +14,7 @@ from trackseerr.api.routes.library.tagging import safe_rename_file_ids
 from trackseerr.config import Config
 from trackseerr.library_self_heal import LibrarySelfHealWorker, run_self_heal
 from trackseerr.storage import Database
-from trackseerr.task_manager import RunHandle
+from trackseerr.task_manager import RunHandle, set_paused
 
 
 @pytest.fixture
@@ -179,3 +179,49 @@ def test_never_calls_retag(db: Database, tmp_path: Path, monkeypatch: pytest.Mon
     run_self_heal(db, _cfg(), run)
     assert run.message is not None
     assert "renames: renamed=1 blocked=0 errors=0" in run.message
+
+
+def test_run_if_due_skips_when_paused(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    set_paused(db, "library_self_heal", True)
+    monkeypatch.setattr(
+        lsh,
+        "run_self_heal",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("run_self_heal must not be called when paused")),
+    )
+    worker = LibrarySelfHealWorker()
+    assert worker.run_if_due(db, _cfg(), 7 * 86400) is False
+
+
+def test_run_if_due_skips_when_recent_run(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    one_hour_ago = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    run_id = db.start_task_run("library_self_heal", "scheduled", one_hour_ago)
+    db.finish_task_run(run_id, "success", one_hour_ago, "ok", 100)
+
+    monkeypatch.setattr(
+        lsh,
+        "run_self_heal",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("run_self_heal must not be called when recent")),
+    )
+    worker = LibrarySelfHealWorker()
+    assert worker.run_if_due(db, _cfg(), 7 * 86400) is False
+
+
+def test_run_if_due_runs_when_never_run(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    called: list[bool] = []
+    monkeypatch.setattr(lsh, "run_self_heal", lambda d, cfg, run: called.append(True))
+    worker = LibrarySelfHealWorker()
+    assert worker.run_if_due(db, _cfg(), 7 * 86400) is True
+    assert called == [True]
+
+
+def test_run_if_due_runs_when_last_run_older_than_interval(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    eight_days_ago = (datetime.now(timezone.utc) - timedelta(days=8)).isoformat()
+    run_id = db.start_task_run("library_self_heal", "scheduled", eight_days_ago)
+    db.finish_task_run(run_id, "success", eight_days_ago, "ok", 100)
+
+    called: list[bool] = []
+    monkeypatch.setattr(lsh, "run_self_heal", lambda d, cfg, run: called.append(True))
+    worker = LibrarySelfHealWorker()
+    assert worker.run_if_due(db, _cfg(), 7 * 86400) is True
+    assert called == [True]
+

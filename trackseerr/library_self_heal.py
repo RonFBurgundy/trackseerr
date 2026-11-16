@@ -3,6 +3,7 @@
 import logging
 import sqlite3
 import threading
+from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from trackseerr.api.routes.library.tagging import apply_renames, safe_rename_file_ids
@@ -12,6 +13,7 @@ from trackseerr.redaction import redact_text, safe_exc
 from trackseerr.task_manager import (
     TRIGGER_SCHEDULED,
     is_cancellable,
+    is_paused,
     record_task_run,
     wait_for_next_cycle,
 )
@@ -20,8 +22,7 @@ logger = logging.getLogger(__name__)
 
 WORKER_INTERVAL_SECONDS = 7 * 86400
 WORKER_INITIAL_DELAY_SECONDS = 30 * 60
-
-_orig_get_media_server = get_media_server
+WORKER_WAKE_SECONDS = 3600.0
 
 
 def run_self_heal(db: Any, config: Any, run: Any) -> None:
@@ -37,11 +38,7 @@ def run_self_heal(db: Any, config: Any, run: Any) -> None:
         return
 
     ids = safe_rename_file_ids(db)
-    media_server = (
-        None
-        if (config is None and get_media_server is _orig_get_media_server)
-        else get_media_server(config)
-    )
+    media_server = get_media_server(config) if config is not None else None
     res = apply_renames(db, ids, media_server)
     renamed = int(res.get("renamed_count", 0))
     blocked = int(res.get("blocked_count", 0))
@@ -111,8 +108,10 @@ class LibrarySelfHealWorker:
         def _loop() -> None:
             if not self._stop_event.wait(initial_delay):
                 while not self._stop_event.is_set():
-                    self.run_once(db, config)
-                    if wait_for_next_cycle(self._stop_event, cycle_interval):
+                    self.run_if_due(db, config, cycle_interval())
+                    if wait_for_next_cycle(
+                        self._stop_event, lambda: min(WORKER_WAKE_SECONDS, float(cycle_interval()))
+                    ):
                         break
             with self._lock:
                 self._is_running = False
@@ -120,6 +119,37 @@ class LibrarySelfHealWorker:
         self._thread = threading.Thread(target=_loop, daemon=True, name="LibrarySelfHealWorkerThread")
         self._thread.start()
         return True
+
+    def run_if_due(
+        self, db: Any, config: Any = None, interval_seconds: float = WORKER_INTERVAL_SECONDS
+    ) -> bool:
+        if is_paused(db, "library_self_heal"):
+            logger.debug("LibrarySelfHealWorker: skipping run while library_self_heal is paused")
+            return False
+        latest_fn = getattr(db, "latest_task_runs", None)
+        if callable(latest_fn):
+            try:
+                row = latest_fn().get("library_self_heal")
+            except sqlite3.Error as exc:
+                logger.warning("Could not read latest library_self_heal run: %s", safe_exc(exc))
+                row = None
+            finished_raw = row.get("finished_at") if isinstance(row, dict) else None
+            if isinstance(finished_raw, str) and finished_raw:
+                try:
+                    finished = datetime.fromisoformat(finished_raw)
+                    if finished.tzinfo is None:
+                        finished = finished.replace(tzinfo=timezone.utc)
+                    elapsed = (datetime.now(timezone.utc) - finished).total_seconds()
+                    if elapsed < interval_seconds:
+                        logger.debug(
+                            "LibrarySelfHealWorker: skipping run (last finished %.0fs ago, interval %.0fs)",
+                            elapsed,
+                            interval_seconds,
+                        )
+                        return False
+                except ValueError:
+                    pass
+        return self.run_once(db, config)
 
     def run_once(self, db: Any, config: Any = None) -> bool:
         if _mb_release_match_running(db):
