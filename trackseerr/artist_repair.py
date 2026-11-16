@@ -453,7 +453,7 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
     """
     from trackseerr.backup import create_backup
     from trackseerr.mb_metadata_store import get_shared_enricher
-    from trackseerr.release_matching import match_album_releases
+    from trackseerr.release_matching import link_albums_by_recording, match_album_releases
 
     def stop() -> bool:
         return bool(run.should_stop() or (extra_stop is not None and extra_stop()))
@@ -465,6 +465,10 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
     enricher = get_shared_enricher(db)
     repair = run_artist_repair(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"repair: {_format_counts(repair)}"
+    if stop():
+        return
+    linked = link_albums_by_recording(db, enricher, should_stop=stop, on_progress=run.set_progress)
+    run.message = f"{run.message}; link: {_format_counts(linked)}"
     if stop():
         return
     counts = match_album_releases(db, enricher, should_stop=stop, on_progress=run.set_progress)

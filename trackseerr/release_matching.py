@@ -164,6 +164,90 @@ def _match_one_album(
     counts["recordings_filled"] += _fill_missing_recordings(db, chosen, owned)
 
 
+def _pick_release_group(groups: list[dict[str, Any]], album_title: str) -> Optional[dict[str, Any]]:
+    """Title-matching release group: plain Album first, then the earliest first release date."""
+    from trackseerr.lidarr_release import titles_match
+
+    candidates = [g for g in groups if titles_match(g.get("title"), album_title)]
+    if not candidates:
+        return None
+    return min(
+        candidates,
+        key=lambda g: (
+            0 if str(g.get("primary_type") or "").casefold() == "album" and not g.get("secondary_types") else 1,
+            str(g.get("first_release_date") or "9999-99-99"),
+            str(g.get("id") or ""),
+        ),
+    )
+
+
+def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
+    tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
+    rec_ids = sorted(
+        {
+            str(t.get("mb_recording_id") or "").strip()
+            for t in tracks
+            if t.get("has_file") and str(t.get("mb_recording_id") or "").strip()
+        }
+    )
+    if not rec_ids:
+        counts["no_recordings"] += 1
+        return
+
+    groups: dict[str, dict[str, Any]] = {}
+    for rec_id in rec_ids:
+        for group in enricher.get_recording_release_groups(rec_id):
+            groups.setdefault(str(group.get("id")), group)
+
+    chosen = _pick_release_group(list(groups.values()), album["title"])
+    if chosen is None:
+        counts["no_title_match"] += 1
+        return
+
+    rg_id = str(chosen["id"])
+    if db.artist_has_release_group(album["artist_id"], rg_id, album["id"]):
+        counts["rg_taken"] += 1
+        logger.info("Album %s not linked: release group %s is already held by the same artist", album["id"], rg_id)
+        return
+
+    db.set_album_mb_release_group_id(album["id"], rg_id)
+    counts["linked"] += 1
+
+
+def link_albums_by_recording(
+    db: Any,
+    enricher: Any,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+) -> dict[str, int]:
+    """Links albums with no release group to MusicBrainz through the release groups of their tracks' recordings."""
+    counts = {"albums": 0, "linked": 0, "no_recordings": 0, "no_title_match": 0, "rg_taken": 0, "errors": 0}
+
+    total: Optional[int] = None
+    if on_progress is not None:
+        total = db.count_albums_without_release_group()
+        on_progress(0, total)
+
+    processed = 0
+    for album in db.iter_albums_without_release_group(batch=200):
+        if should_stop is not None and should_stop():
+            logger.info("Recording release-group link stopped early: %s", counts)
+            return counts
+        try:
+            _link_one_album_by_recording(db, enricher, album, counts)
+            counts["albums"] += 1
+        except sqlite3.Error as exc:
+            counts["errors"] += 1
+            logger.warning("Recording release-group link failed for album %s: %s", album.get("id"), exc)
+        finally:
+            processed += 1
+            if on_progress is not None:
+                on_progress(processed, total)
+
+    logger.info("Recording release-group link finished: %s", counts)
+    return counts
+
+
 def match_album_releases(
     db: Any,
     enricher: Any,

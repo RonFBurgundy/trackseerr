@@ -26,6 +26,8 @@ _TRAILING_FEAT = re.compile(r"\s+(?:feat|ft|featuring)\b\.?\s+.*$")
 _NOISE = re.compile(
     r"^(?:"
     r"(?:\d{4}\s+)?(?:digital\s+)?remaster(?:ed)?(?:\s+\d{4})?(?:\s+version)?"
+    r"|(?:\d+\s+bit\s+)?(?:\d{4}\s+)?(?:digital\s+)?remaster(?:ed)?(?:\s+\d{4})?(?:\s+version)?"
+    r"|hi\s+res(?:\s+(?:version|audio))?"
     r"|radio\s+edit"
     r"|single\s+version"
     r"|album\s+version"

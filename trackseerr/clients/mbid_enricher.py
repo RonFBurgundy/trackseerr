@@ -1172,6 +1172,58 @@ class MbidEnricherClient:
             self._set_cached(cache_key, None)
             return None
 
+    def get_recording_release_groups(self, recording_id: str) -> list[dict[str, Any]]:
+        """Returns the unique release groups of the releases a recording appears on (empty when unknown)."""
+        if not recording_id or not str(recording_id).strip():
+            return []
+
+        clean_id = str(recording_id).strip()
+        cache_key = f"rec_rgs:v1:{clean_id.lower()}"
+        hit, cached_data = self._lookup(cache_key)
+        if hit:
+            return cached_data or []
+
+        try:
+            url = f"{self.base_url}/ws/2/release"
+            params = {"recording": clean_id, "inc": "release-groups", "fmt": "json", "limit": 100}
+            resp = self._request(url, params=params)
+            if resp is None or resp.status_code != 200:
+                if resp is not None and resp.status_code == 404:
+                    self._remember(cache_key, "rec_rgs", [])
+                else:
+                    logger.info(
+                        "Recording %s release lookup returned status %s",
+                        clean_id,
+                        resp.status_code if resp else "None",
+                    )
+                    self._set_cached(cache_key, None)
+                return []
+
+            data = resp.json()
+            releases = data.get("releases") if isinstance(data, dict) else None
+            groups: dict[str, dict[str, Any]] = {}
+            for release in releases or []:
+                rg = release.get("release-group") if isinstance(release, dict) else None
+                if not isinstance(rg, dict) or not rg.get("id"):
+                    continue
+                rg_id = str(rg["id"]).strip()
+                if rg_id in groups:
+                    continue
+                groups[rg_id] = {
+                    "id": rg_id,
+                    "title": rg.get("title"),
+                    "primary_type": rg.get("primary-type"),
+                    "secondary_types": list(rg.get("secondary-types") or []),
+                    "first_release_date": rg.get("first-release-date"),
+                }
+            result = list(groups.values())
+            self._remember(cache_key, "rec_rgs", result)
+            return result
+        except (requests.RequestException, ValueError, AttributeError, TypeError) as exc:
+            logger.info("MbidEnricherClient: get_recording_release_groups failed for '%s': %s", clean_id, exc)
+            self._set_cached(cache_key, None)
+            return []
+
     def resolve_release_group(self, rg_id: str) -> Optional[str]:
         """Resolves canonical release group MBID, recording redirects if updated."""
         if not rg_id or not str(rg_id).strip():
