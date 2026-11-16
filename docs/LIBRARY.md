@@ -31,6 +31,14 @@ Open an artist to see their whole discography, including releases you do not hav
 
 Select several artists to change their monitoring, profiles, or tags at once.
 
+The search box does two things. It filters the tab you are on, and it shows a list of matching artists, albums and tracks from the whole library, so you can jump to a track while you are on Artists. If nothing matches, it suggests the closest name, for example Zach Bryan when you type "Zac Brian". In the Tracks list, click an artist or album name to open it.
+
+### Albums not on MusicBrainz
+
+**Not on MusicBrainz…** in the Library tools menu (and on an artist page) lists albums TrackSeerr could not link to a MusicBrainz release. Open one to link it by hand or to submit it to MusicBrainz with the details filled in. Closing the album takes you back to the same place in the list.
+
+TrackSeerr links albums in two ways: by the artist's discography, and through the songs themselves when your files carry MusicBrainz recording IDs. The **MusicBrainz release match** task on the Tasks page runs both. It also tidies your artists first: it backs up the database, joins artists listed twice under different spellings ("Jay Z" and "JAY-Z"), fixes artists matched to the wrong MusicBrainz artist, and files combined names such as "2Pac; Dr. Dre" under the main artist. It never moves files. Run **Rename Files** afterwards if you want folders to follow.
+
 ## Scanning
 
 A scan reads every audio file in the music folder and adds it to the library. Run the first scan after you set the music folder. Click **Scan library** on the **Library** page.

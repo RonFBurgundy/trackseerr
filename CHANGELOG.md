@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- **Search the whole library** from the Library search box: as you type, a list shows matching artists, albums and tracks from every tab, and suggests the right spelling when you're close ("Zac Brian" → Zach Bryan). The box still filters the page you're on.
+- In the Tracks list, click a track's artist or album to open it. Albums and tracks now have an "Open on MusicBrainz" link, like artists already did.
 - **Default permissions for new users** in Settings → Requests → Users → Account defaults: choose which permissions people get the first time they sign in with Plex or are added from your media server (the default is still Request music and Report issues). Existing users don't change, and admin can't be a default.
 - Creating a user now shows every permission switch, not just a preset. The presets are still there as a starting point.
 - **Approve all** on Requests → Pending approves every pending request in one go (only the selected source, if you picked one). Their searches run one after another in the background.
@@ -87,6 +89,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- After this update, TrackSeerr tidies your artists once in the background (it backs up the database first, and you can see it on the Tasks page): artists listed twice under different spellings ("Jay Z" and "JAY-Z") become one, artists that were matched to the wrong MusicBrainz artist are fixed, and combined names like "2Pac; Dr. Dre" are filed under the main artist. Files are not moved; run Rename Files afterwards if you want the folders to follow. The MusicBrainz release match task runs the same tidy-up.
 - Backups no longer pile up. Every backup older than 28 days is deleted automatically, including manual and pre-restore backups, and the newest scheduled backup is always kept so you always have one to restore. Change the number of days in Settings → System → Backups → Settings ("Keep Backups For"). Cleanup runs after each backup and as soon as you save a new value. This replaces the old "keep the last 7 scheduled backups" setting.
 - The web app loads much faster, especially on phones. Pages load only the code they need (the first download is about a quarter of its old size), responses are compressed, and the app's files are cached by the browser between visits.
 - Artist pages open instantly. The nightly artist refresh now prepares each library artist's page (Deezer link, discography and top songs), and an artist page that isn't ready yet fetches its details and top songs at the same time instead of one after the other.
@@ -135,6 +138,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Many fewer albums show as "Not on MusicBrainz": single tracks from playlists are now matched through the song itself, and names like "Hotel California - 2013 Remaster" match the original album.
+- Artists are only matched to a MusicBrainz artist with the same name (so "FELIX" is no longer matched to Felix Mendelssohn).
+- Opening an album from "Not on MusicBrainz" no longer closes the list, so you keep your place. The list is also in the artist page's tools menu.
 - Downloads synced from a remote seedbox are no longer failed and blocklisted when the folder appears before the music does; TrackSeerr waits until the files finish syncing, and the request shows why it is waiting or why a download failed.
 - Downloads that your client moves after finishing (for example ruTorrent's AutoMove into a seeding folder) now import, as long as a remote path mapping covers the folder they move to. Before, they were refused as "outside every download folder".
 - Approving a request is now instant: the row leaves the Pending list straight away with an "Approved" message, and the search for it runs in the background instead of holding up the page. Approving many requests no longer starts many searches at once.
