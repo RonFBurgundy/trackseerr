@@ -273,6 +273,37 @@ class TracksPage(_PageBase):
     records: list[LibraryTrackRecord]
 
 
+class LibrarySearchArtist(ApiModel):
+    id: str
+    name: str
+    album_count: int
+
+
+class LibrarySearchAlbum(ApiModel):
+    id: str
+    title: str
+    artist_id: str
+    artist_name: str
+    year: Optional[int] = None
+
+
+class LibrarySearchTrack(ApiModel):
+    id: str
+    title: str
+    artist_id: str
+    artist_name: str
+    album_id: str
+    album_title: str
+
+
+class LibrarySearchResponse(ApiModel):
+    query: str
+    artists: list[LibrarySearchArtist]
+    albums: list[LibrarySearchAlbum]
+    tracks: list[LibrarySearchTrack]
+    suggestion: Optional[str] = None
+
+
 # ------------------------------------------------------------------------------------------------------- stats
 
 
