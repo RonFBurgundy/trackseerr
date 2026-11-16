@@ -13,6 +13,8 @@ export interface LibrarySearchResultsProps {
   listId: string;
   /** The element the panel hangs under; the panel matches its left edge and width. */
   anchor: HTMLElement | null;
+  /** The element whose left edge and width the panel spans (defaults to `anchor`). */
+  widthAnchor?: HTMLElement | null;
   onHover: (index: number) => void;
   onPickArtist: (id: string) => void;
   onPickAlbum: (id: string) => void;
@@ -54,6 +56,7 @@ export const LibrarySearchResults: React.FC<LibrarySearchResultsProps> = ({
   activeIndex,
   listId,
   anchor,
+  widthAnchor,
   onHover,
   onPickArtist,
   onPickAlbum,
@@ -65,17 +68,26 @@ export const LibrarySearchResults: React.FC<LibrarySearchResultsProps> = ({
   useLayoutEffect(() => {
     if (!anchor) return undefined;
     const measure = (): void => {
-      const r = anchor.getBoundingClientRect();
-      setRect({ top: r.bottom + 4, left: r.left, width: r.width });
+      const top = anchor.getBoundingClientRect().bottom + 4;
+      const r = (widthAnchor ?? anchor).getBoundingClientRect();
+      const left = Math.max(8, r.left);
+      const width = Math.min(r.width, window.innerWidth - left - 8);
+      setRect({ top, left, width });
     };
     measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(anchor);
+    if (widthAnchor && widthAnchor !== anchor) {
+      ro.observe(widthAnchor);
+    }
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
     return () => {
+      ro.disconnect();
       window.removeEventListener('resize', measure);
       window.removeEventListener('scroll', measure, true);
     };
-  }, [anchor]);
+  }, [anchor, widthAnchor]);
 
   if (!anchor || !rect) return null;
 

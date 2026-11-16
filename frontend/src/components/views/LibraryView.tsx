@@ -253,6 +253,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   // Library-wide search dropdown under the filter box (native mode only; the tab filter is unaffected).
   const searchListId = useId();
   const [searchAnchor, setSearchAnchor] = useState<HTMLDivElement | null>(null);
+  const [searchRow, setSearchRow] = useState<HTMLDivElement | null>(null);
   const searchPanelOpenRef = useRef<boolean>(false);
   const pickSearchItem = (item: LibrarySearchItem): void => {
     librarySearch.setOpen(false);
@@ -540,7 +541,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       </TabStrip>
       }
       actions={
-        <div className="flex min-w-0 items-stretch gap-1.5">
+        <div ref={setSearchRow} className="flex min-w-0 items-stretch gap-1.5">
           <SearchBar
             id="library-search"
             name="library-filter"
@@ -574,6 +575,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               activeIndex={librarySearch.activeIndex}
               listId={searchListId}
               anchor={searchAnchor}
+              widthAnchor={searchRow}
               onHover={librarySearch.setActiveIndex}
               onPickArtist={(id) => pickSearchItem({ kind: 'artist', id, name: '', albumCount: 0 })}
               onPickAlbum={(id) => pickSearchItem({ kind: 'album', id, title: '', artistName: '', year: null })}
