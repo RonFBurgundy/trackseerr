@@ -18,7 +18,7 @@ from trackseerr.import_files import _is_safe_cover_url
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db
 from trackseerr.auth import create_session_token, get_or_create_secret_key
-from trackseerr.clients.mbid_enricher import MbidEnricherClient, probe_mirror
+from trackseerr.clients.mbid_enricher import MbidEnricherClient, artist_name_key, probe_mirror
 from trackseerr.config import Config
 from trackseerr.library import (
     fingerprint_audio_file,
@@ -240,6 +240,38 @@ class TestMbidEnricher:
         with patch.object(client._session, "get", return_value=alb_resp):
             alb_mbids = client.lookup_album_mbids("Radiohead", "OK Computer")
             assert alb_mbids == {"mb_release_group_id": "rg-found", "mb_artist_id": "art-found"}
+
+    def test_artist_name_key_folds_case_diacritics_and_dashes(self):
+        keys = {artist_name_key(n) for n in ("Jay Z", "JAY-Z", "JA\u0178-Z", "JAY\u2010Z")}
+        assert keys == {"jayz"}
+        assert artist_name_key("M\u00f6tley Cr\u00fce") == artist_name_key("Motley Crue")
+        assert artist_name_key("Crosby, Stills, Nash & Young") == artist_name_key("Crosby, Stills, Nash And Young")
+        assert artist_name_key("Basement") != artist_name_key("Basement Jaxx")
+
+    @staticmethod
+    def _artist_search(client: MbidEnricherClient, name: str, hits: list[dict[str, Any]]) -> str | None:
+        resp = MagicMock(status_code=200)
+        resp.json.return_value = {"artists": hits}
+        with patch.object(client._session, "get", return_value=resp):
+            return client.lookup_artist_mbid(name)
+
+    def test_lookup_artist_mbid_skips_non_matching_top_hit(self):
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+        hits = [{"id": "jaxx", "name": "Basement Jaxx"}, {"id": "basement", "name": "Basement"}]
+        assert self._artist_search(client, "Basement", hits) == "basement"
+
+    def test_lookup_artist_mbid_returns_none_without_exact_match(self):
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+        hits = [{"id": "mendelssohn", "name": "Felix Mendelssohn", "sort-name": "Mendelssohn, Felix"}]
+        assert self._artist_search(client, "FELIX", hits) is None
+
+    def test_lookup_artist_mbid_accepts_alias_and_sort_name(self):
+        client = MbidEnricherClient(base_url="https://api.brainzmash.cc")
+        assert self._artist_search(client, "Jay Z", [{"id": "jay", "name": "JAY-Z"}]) == "jay"
+        dekker = [{"id": "dekker", "name": "Desmond Dekker & The Aces", "sort-name": "Dekker, Desmond"}]
+        assert self._artist_search(client, "Desmond Dekker", dekker) == "dekker"
+        aliased = [{"id": "al", "name": "Other", "aliases": [{"name": "Alias Name"}]}]
+        assert self._artist_search(client, "Alias Name", aliased) == "al"
 
     def test_get_cover_art_url(self):
         client = MbidEnricherClient()

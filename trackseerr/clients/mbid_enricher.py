@@ -8,11 +8,13 @@ import os
 import re
 import threading
 import time
+import unicodedata
 from typing import TYPE_CHECKING, Any, Optional
 import urllib.parse
 
 import requests
 
+from trackseerr.storage_common import clean_library_name
 from trackseerr.system_paths import is_system_folder_name
 
 if TYPE_CHECKING:
@@ -66,6 +68,39 @@ def _sanitize_lucene_query(text: str) -> str:
         return ""
     # Strip double quotes, backslashes, and control characters
     return re.sub(r'["\\/]', " ", text).strip()
+
+
+def artist_name_key(name: str) -> str:
+    """Comparison key for artist names: case, diacritics, dash style, '&'/'and' and spacing all fold away.
+
+    'Jay Z', 'JAY-Z' and 'JA\u0178-Z' all give 'jayz'; 'Guns N\u2019 Roses' never equals 'guns'.
+    """
+    text = unicodedata.normalize("NFKD", str(name or ""))
+    text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
+    text = re.sub("[\u2010\u2011\u2013\u2014\u2212]", "-", text)
+    text = text.replace(" & ", " and ").replace(" + ", " and ").replace("\u2019", "'")
+    return clean_library_name(text).replace(" ", "").replace("-", "")
+
+
+def _artist_hit_matches(hit: dict[str, Any], wanted_key: str) -> bool:
+    """True when the hit's name, sort name or an alias folds to ``wanted_key``."""
+    candidates: list[str] = [str(hit.get("name") or ""), str(hit.get("sort-name") or "")]
+    for alias in hit.get("aliases") or []:
+        if isinstance(alias, dict):
+            candidates.extend((str(alias.get("name") or ""), str(alias.get("sort-name") or "")))
+    for cand in list(candidates):
+        if cand.count(",") == 1:
+            last, first = (part.strip() for part in cand.split(","))
+            candidates.append(f"{first} {last}")
+    return any(c and artist_name_key(c) == wanted_key for c in candidates)
+
+
+def _first_matching_artist_id(artists: list[Any], wanted_key: str) -> Optional[str]:
+    """ID of the first search hit whose name matches ``wanted_key`` exactly (after folding), else None."""
+    for hit in artists:
+        if isinstance(hit, dict) and _artist_hit_matches(hit, wanted_key):
+            return hit.get("id")
+    return None
 
 
 def _year_of(value: Any) -> Optional[int]:
@@ -804,7 +839,7 @@ class MbidEnricherClient:
         if not clean_name:
             return None
 
-        cache_key = f"artist:{clean_name.lower()}"
+        cache_key = f"artist:v2:{clean_name.lower()}"
         hit, cached_data = self._lookup(cache_key)
         if hit:
             return cached_data
@@ -840,7 +875,10 @@ class MbidEnricherClient:
                 self._remember(cache_key, "artist_lookup", None)
                 return None
 
-            mbid = artists[0].get("id") if isinstance(artists[0], dict) else None
+            mbid = _first_matching_artist_id(artists, artist_name_key(artist_name))
+            if mbid is None:
+                top = artists[0].get("name") if isinstance(artists[0], dict) else None
+                logger.info("no exact MusicBrainz artist match for %r (top hit %r)", artist_name, top)
             self._remember(cache_key, "artist_lookup", mbid)
             return mbid
 
