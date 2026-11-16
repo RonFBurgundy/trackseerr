@@ -90,6 +90,12 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
     onGoToArtist(album.artist_id);
   };
 
+  const mbAlbumUrl = album?.mb_release_id
+    ? `https://musicbrainz.org/release/${album.mb_release_id}`
+    : album?.mb_release_group_id
+      ? `https://musicbrainz.org/release-group/${album.mb_release_group_id}`
+      : null;
+
   const genres = album ? genreNames(album.genres).join(', ') || null : null;
 
   return (
@@ -163,6 +169,18 @@ export const AlbumDetailModal: React.FC<AlbumDetailModalProps> = ({
               >
                 Retag files&hellip;
               </TapeDeckButton>
+            )}
+            {mbAlbumUrl && (
+              <a
+                href={mbAlbumUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="relative inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[3px] bg-[#ba478f]/20 text-[#e599cf] border border-[#ba478f]/40 hover:bg-[#ba478f]/30 transition-colors after:absolute after:-inset-1 after:content-['']"
+                title="Open on MusicBrainz"
+                aria-label="Open on MusicBrainz"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </a>
             )}
             {isAdmin && !lidarrMode && album && !album.mb_release_id && (
               <TapeDeckButton

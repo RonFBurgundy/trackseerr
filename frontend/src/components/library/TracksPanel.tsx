@@ -34,6 +34,31 @@ const SORT_OPTIONS: ReadonlyArray<LibrarySortOption> = [
 ];
 
 const fetchTracks = pagedFetcher<TrackItem>(getTracksPaged);
+/** A table cell that opens an artist or album; plain text when the track carries no id. */
+function linkCell(
+  text: string | null | undefined,
+  id: string | null | undefined,
+  kind: 'artist' | 'album',
+  onOpen: (id: string) => void
+): React.ReactNode {
+  const label = orDash(text);
+  if (!id || !text) return label;
+  return (
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onOpen(id);
+      }}
+      className="min-w-0 max-w-full truncate text-left hover:text-white hover:underline"
+      title={`Open ${kind}: ${text}`}
+      aria-label={`Open ${kind} ${text}`}
+    >
+      {label}
+    </button>
+  );
+}
+
 const getKey = (t: TrackItem): string | number => t.id;
 
 export interface TracksPanelProps {
@@ -49,6 +74,8 @@ export interface TracksPanelProps {
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
   onSelectActionChange: (action: LibrarySelectAction | null) => void;
   facets?: Readonly<Record<string, string | readonly string[]>>;
+  onOpenArtist: (artistId: string) => void;
+  onOpenAlbum: (albumId: string) => void;
 }
 
 /** Every track as a virtualized table with a scrubber (native library only). */
@@ -63,6 +90,8 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
   onToast,
   onSelectActionChange,
   facets,
+  onOpenArtist,
+  onOpenAlbum,
 }) => {
   const { ownedOnly, setOwnedOnly } = useTracksOwnedOnly();
   const catalogFilters = useMemo<Readonly<Record<string, string | readonly string[]>>>(
@@ -153,9 +182,9 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
 
   const columns = useMemo<FlatListColumn<TrackItem>[]>(
     () => [
-      { key: 'title', label: 'Title', sortable: true, width: 'minmax(0,1.4fr)', mobile: 'title', render: (t) => orDash(t.title) },
-      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1fr)', mobile: 'sub', render: (t) => orDash(t.artist_name) },
-      { key: 'album', label: 'Album', sortable: true, width: 'minmax(0,1fr)', mobile: 'sub', render: (t) => orDash(t.album_title) },
+      { key: 'title', label: 'Title', sortable: true, width: 'minmax(0,1.4fr)', mobile: 'title', render: (t) => linkCell(t.title, t.album_id, 'album', onOpenAlbum) },
+      { key: 'artist', label: 'Artist', sortable: true, width: 'minmax(0,1fr)', mobile: 'sub', render: (t) => linkCell(t.artist_name, t.artist_id, 'artist', onOpenArtist) },
+      { key: 'album', label: 'Album', sortable: true, width: 'minmax(0,1fr)', mobile: 'sub', render: (t) => linkCell(t.album_title, t.album_id, 'album', onOpenAlbum) },
       {
         key: 'quality',
         label: 'Quality',
@@ -188,7 +217,7 @@ export const TracksPanel: React.FC<TracksPanelProps> = ({
         render: (t) => formatDateTime(t.created_at),
       },
     ],
-    []
+    [onOpenArtist, onOpenAlbum]
   );
 
   const rowActions = useCallback(

@@ -245,9 +245,21 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
 
   const toastNode = toast ? <ToastBanner message={toast.message} tone={toast.tone} /> : null;
 
+  const openAlbumById = (albumId: string): void =>
+    onNavigate({ tab: 'library', sub: route.sub, detail: { ...route.detail, albumId } });
+
   // Modals are portaled and mounted once, whichever page is showing, so their triggers always find them.
   const overlays = (
     <>
+      {/* Before the album modal: both sit at z-50, so the album opens on top of the list and closing it keeps the list. */}
+      {isAdmin && (
+        <MbUnlinkedModal
+          isOpen={isMbUnlinkedOpen}
+          onClose={() => setIsMbUnlinkedOpen(false)}
+          onOpenAlbum={openAlbumById}
+          onToast={showToast}
+        />
+      )}
       <AlbumDetailModal
         album={drill.album}
         isAdmin={isAdmin}
@@ -323,17 +335,6 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           onAdded={handleArtistAdded}
         />
       )}
-      {isAdmin && (
-        <MbUnlinkedModal
-          isOpen={isMbUnlinkedOpen}
-          onClose={() => setIsMbUnlinkedOpen(false)}
-          onOpenAlbum={(albumId) => {
-            setIsMbUnlinkedOpen(false);
-            onNavigate({ tab: 'library', sub: 'albums', detail: { albumId } });
-          }}
-          onToast={showToast}
-        />
-      )}
     </>
   );
 
@@ -353,6 +354,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             onImportAlbum={openAlbumImport}
             onRenameFiles={() => setRenameScope({ artistId: String(selectedArtistId) })}
             onRetagFiles={() => setRetagScope({ artistId: String(selectedArtistId) })}
+            onOpenMbUnlinked={() => setIsMbUnlinkedOpen(true)}
             onChanged={() => void refresh()}
             onToggleArtistMonitored={toggleArtistMonitored}
             onToggleAlbumMonitored={toggleAlbumMonitored}
@@ -630,6 +632,8 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             footer={statsFooter}
             onToast={showToast}
             onSelectActionChange={setSelectAction}
+            onOpenArtist={drill.openArtist}
+            onOpenAlbum={openAlbumById}
           />
         ))}
 
