@@ -225,7 +225,12 @@ def _merge_into_holder(db: Any, source_album_id: str, holder_album_id: str, coun
     from trackseerr.artist_repair import merge_single_album_into
 
     outcome = merge_single_album_into(db, source_album_id, holder_album_id)
-    counts["merged" if outcome == "merged" else "merge_conflict"] += 1
+    if outcome == "merged":
+        db.clear_merge_conflicts_for_album(source_album_id)
+        counts["merged"] += 1
+    else:
+        db.record_merge_conflict(source_album_id, holder_album_id, "duplicate_files")
+        counts["merge_conflict"] += 1
 
 
 def _first_holder_for_groups(
@@ -354,6 +359,8 @@ def _fold_title_duplicate(db: Any, album: dict[str, Any], counts: dict[str, int]
         return
     if len(holders) > 1:
         counts["ambiguous"] += 1
+        for holder in holders:
+            db.record_merge_conflict(album["id"], holder["id"], "ambiguous")
         logger.info("Album %s matches several albums that hold a release group; left alone", album["id"])
         return
     _merge_into_holder(db, album["id"], holders[0]["id"], counts)

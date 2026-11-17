@@ -2623,6 +2623,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/duplicates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Duplicates
+         * @description Lists albums whose merge is blocked, with the file pairs the admin has to choose between.
+         */
+        get: operations["list_duplicates_api_library_duplicates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/duplicates/{conflict_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Duplicate
+         * @description Applies one choice: keep the existing copy, the incoming copy, the better quality, or both.
+         */
+        post: operations["resolve_duplicate_api_library_duplicates__conflict_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/facets": {
         parameters: {
             query?: never;
@@ -8099,6 +8139,98 @@ export interface components {
             name: string;
             /** Roots */
             roots: string[];
+        };
+        /**
+         * DuplicateChoice
+         * @description One recorded album merge that needs the admin to pick the copy to keep.
+         */
+        DuplicateChoice: {
+            /** Detected At */
+            detected_at: string;
+            /** Dismissed */
+            dismissed: boolean;
+            /** Holder Album Id */
+            holder_album_id: string;
+            /** Holder Artist */
+            holder_artist: string;
+            /** Holder Title */
+            holder_title: string;
+            /** Id */
+            id: number;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "duplicate_files" | "ambiguous";
+            /** Pairs */
+            pairs: components["schemas"]["DuplicatePair"][];
+            /** Source Album Id */
+            source_album_id: string;
+            /** Source Artist */
+            source_artist: string;
+            /** Source Title */
+            source_title: string;
+        };
+        /** DuplicateChoicesResponse */
+        DuplicateChoicesResponse: {
+            /** Items */
+            items: components["schemas"]["DuplicateChoice"][];
+            /** Total */
+            total: number;
+        };
+        /** DuplicateFileRef */
+        DuplicateFileRef: {
+            /** Bitrate */
+            bitrate?: number | null;
+            /** Bits Per Sample */
+            bits_per_sample?: number | null;
+            /** Codec */
+            codec?: string | null;
+            /** File Path */
+            file_path: string;
+            /** Id */
+            id: string;
+            /** Quality Name */
+            quality_name?: string | null;
+            /** Sample Rate */
+            sample_rate?: number | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+        };
+        /** DuplicatePair */
+        DuplicatePair: {
+            holder_file: components["schemas"]["DuplicateFileRef"];
+            holder_track: components["schemas"]["DuplicateTrackRef"];
+            source_file: components["schemas"]["DuplicateFileRef"];
+            source_track: components["schemas"]["DuplicateTrackRef"];
+        };
+        /** DuplicateResolveRequest */
+        DuplicateResolveRequest: {
+            /**
+             * Choice
+             * @enum {string}
+             */
+            choice: "keep_existing" | "keep_incoming" | "prefer_quality" | "keep_both";
+        };
+        /** DuplicateResolveResponse */
+        DuplicateResolveResponse: {
+            /** Kept File Ids */
+            kept_file_ids: string[];
+            /** Merged */
+            merged: boolean;
+            /** Recycled File Ids */
+            recycled_file_ids: string[];
+        };
+        /** DuplicateTrackRef */
+        DuplicateTrackRef: {
+            /** Disc Number */
+            disc_number?: number | null;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Track Number */
+            track_number?: number | null;
         };
         /** EmptyRecycleBinRequest */
         EmptyRecycleBinRequest: {
@@ -19762,6 +19894,61 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CollectionAlbumResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_duplicates_api_library_duplicates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicateChoicesResponse"];
+                };
+            };
+        };
+    };
+    resolve_duplicate_api_library_duplicates__conflict_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conflict_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DuplicateResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DuplicateResolveResponse"];
                 };
             };
             /** @description Validation Error */

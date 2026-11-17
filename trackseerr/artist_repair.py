@@ -189,7 +189,7 @@ def _plan_track_merges(
     for st in source_tracks:
         ht = _find_holder_track(st, holder_tracks, used_holder_ids)
         if ht is not None:
-            if _track_has_file(cur, ht):
+            if _track_has_file(cur, ht) and _track_has_file(cur, st):
                 return None
             used_holder_ids.add(str(ht["id"]))
         plan.append((st, ht))
@@ -227,6 +227,51 @@ def _repoint_and_delete_source_album(cur: sqlite3.Cursor, source_id: str, holder
     for table, column in _ALBUM_REF_COLUMNS:
         cur.execute(f"UPDATE {table} SET {column} = ? WHERE {column} = ?", (holder_id, source_id))
     cur.execute("DELETE FROM library_albums WHERE id = ?", (source_id,))
+
+
+_FILE_PAIR_FIELDS = (
+    "id", "file_path", "codec", "bitrate", "sample_rate", "bits_per_sample", "size_bytes", "quality_name"
+)
+
+
+def _pair_track(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": str(row["id"]),
+        "title": str(row["title"] or ""),
+        "track_number": row["track_number"],
+        "disc_number": row["disc_number"],
+    }
+
+
+def _pair_file(f: dict[str, Any]) -> dict[str, Any]:
+    return {k: f.get(k) for k in _FILE_PAIR_FIELDS}
+
+
+def merge_conflict_pairs(db: Any, source_album_id: str, holder_album_id: str) -> list[dict[str, Any]]:
+    """Read-only: the matched source/holder track pairs that both own a file (what blocks the merge)."""
+    with db._lock:
+        cur = db.conn.cursor()
+        order = "ORDER BY disc_number, track_number, id"
+        source_tracks = cur.execute(f"SELECT * FROM library_tracks WHERE album_id = ? {order}", (str(source_album_id),)).fetchall()
+        holder_tracks = cur.execute(f"SELECT * FROM library_tracks WHERE album_id = ? {order}", (str(holder_album_id),)).fetchall()
+    used: set[str] = set()
+    pairs: list[dict[str, Any]] = []
+    for st in source_tracks:
+        ht = _find_holder_track(st, holder_tracks, used)
+        if ht is None:
+            continue
+        used.add(str(ht["id"]))
+        source_files = db.list_library_files_for_track(str(st["id"]))
+        holder_files = db.list_library_files_for_track(str(ht["id"]))
+        if not source_files or not holder_files:
+            continue
+        pairs.append({
+            "source_track": _pair_track(st),
+            "holder_track": _pair_track(ht),
+            "source_file": _pair_file(source_files[0]),
+            "holder_file": _pair_file(holder_files[0]),
+        })
+    return pairs
 
 
 def merge_single_album_into(db: Any, source_album_id: str, holder_album_id: str) -> str:

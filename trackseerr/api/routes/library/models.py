@@ -173,3 +173,59 @@ class AddAlbumToCollectionRequest(BaseModel):
     album_id: str
     order_index: int = 0
 
+
+
+class DuplicateTrackRef(ApiModel):
+    id: str
+    title: str
+    track_number: Optional[int] = None
+    disc_number: Optional[int] = None
+
+
+class DuplicateFileRef(ApiModel):
+    id: str
+    file_path: str
+    codec: Optional[str] = None
+    bitrate: Optional[int] = None
+    sample_rate: Optional[int] = None
+    bits_per_sample: Optional[int] = None
+    size_bytes: Optional[int] = None
+    quality_name: Optional[str] = None
+
+
+class DuplicatePair(ApiModel):
+    source_track: DuplicateTrackRef
+    holder_track: DuplicateTrackRef
+    source_file: DuplicateFileRef
+    holder_file: DuplicateFileRef
+
+
+class DuplicateChoice(ApiModel):
+    """One recorded album merge that needs the admin to pick the copy to keep."""
+
+    id: int
+    kind: Literal["duplicate_files", "ambiguous"]
+    source_album_id: str
+    holder_album_id: str
+    source_title: str
+    source_artist: str
+    holder_title: str
+    holder_artist: str
+    dismissed: bool
+    detected_at: str
+    pairs: list[DuplicatePair]
+
+
+class DuplicateChoicesResponse(ApiModel):
+    items: list[DuplicateChoice]
+    total: int
+
+
+class DuplicateResolveRequest(BaseModel):
+    choice: Literal["keep_existing", "keep_incoming", "prefer_quality", "keep_both"]
+
+
+class DuplicateResolveResponse(ApiModel):
+    merged: bool
+    recycled_file_ids: list[str]
+    kept_file_ids: list[str]
