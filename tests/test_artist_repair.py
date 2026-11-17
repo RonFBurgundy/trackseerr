@@ -358,6 +358,7 @@ def test_repair_and_match_backs_up_repairs_then_matches(db: Database, monkeypatc
     artist_repair.run_repair_and_match(db, run)
 
     assert order == ["pre_repair", "repair", "match"]
+    assert "; auto:" in run.message
     assert "artists_merged=0" in run.message and "matched=2" in run.message
 
 

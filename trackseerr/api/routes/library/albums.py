@@ -26,6 +26,9 @@ from trackseerr.api.schemas.library import (
     MatchApplyRequest,
     MatchApplyResponse,
     MatchSuggestionsResponse,
+    StoredMatchApplyRequest,
+    StoredMatchApplyResponse,
+    StoredMatchSuggestionsPage,
     MbLinkRequest,
     MbReleaseSeed,
     MbUnlinkedPage,
@@ -363,6 +366,37 @@ def list_musicbrainz_unlinked(
     """Lists albums without a MusicBrainz release link."""
     items, total = db.list_albums_without_mb_release(page=page, page_size=page_size, kind=kind)
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get(
+    "/musicbrainz/suggestions",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=StoredMatchSuggestionsPage,
+)
+def list_stored_match_suggestions(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+    db: Database = Depends(get_db),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Lists the unsure matches Self-Heal stored for bulk review, most confident first."""
+    items, total = db.list_match_suggestions(page=page, page_size=page_size)
+    return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.post(
+    "/musicbrainz/suggestions/apply",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=StoredMatchApplyResponse,
+)
+def apply_stored_match_suggestions(
+    body: StoredMatchApplyRequest,
+    db: Database = Depends(get_db),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Applies the stored suggestion of each chosen album; files on disk are not touched."""
+    return {"results": match_suggestions.apply_stored_suggestions(db, enricher, body.album_ids)}
 
 
 @router.get(

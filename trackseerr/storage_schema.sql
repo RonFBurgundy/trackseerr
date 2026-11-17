@@ -988,3 +988,11 @@ CREATE TABLE library_merge_conflicts (
                 UNIQUE(source_album_id, holder_album_id)
             );
 CREATE INDEX idx_merge_conflicts_source ON library_merge_conflicts(source_album_id);
+CREATE TABLE library_match_suggestions (
+                album_id TEXT PRIMARY KEY REFERENCES library_albums(id) ON DELETE CASCADE,
+                candidate_json TEXT NOT NULL,
+                confidence INTEGER NOT NULL,
+                files_found INTEGER NOT NULL,
+                file_count INTEGER NOT NULL,
+                computed_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            );

@@ -7,7 +7,9 @@ Suggestions only read (library and MusicBrainz). Applying changes catalog rows o
 from __future__ import annotations
 
 import logging
+import sqlite3
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Any, Optional
 
 import requests
@@ -286,3 +288,103 @@ def apply_match(
         logger.warning("Applying match for album %s failed: %s", album_id, safe_exc(exc))
         raise
     return {"album_id": final_id, "merged": counts["merged"] > 0, "conflict": counts["merge_conflict"] > 0}
+
+
+SURE_CONFIDENCE = 90
+SURE_MARGIN = 10
+MAX_CONSECUTIVE_UNAVAILABLE = 3
+_AUTO_KEYS = ("albums", "applied", "suggested", "no_candidates", "unavailable", "conflicts", "errors")
+
+
+def _album_file_count(db: Any, album_id: str) -> int:
+    tracks = db.list_library_tracks(album_id=album_id, limit=1000)
+    return len([t for t in tracks if t.get("has_file")] or tracks)
+
+
+def _is_sure(candidates: list[dict[str, Any]], file_count: int) -> bool:
+    """The best candidate is certain: high confidence, every file mapped, and no close runner-up."""
+    best = candidates[0]
+    if file_count <= 0 or int(best["confidence"]) < SURE_CONFIDENCE or int(best["mapped"]) != file_count:
+        return False
+    runner_up = next((c for c in candidates[1:] if c["id"] != best["id"]), None)
+    return runner_up is None or int(best["confidence"]) - int(runner_up["confidence"]) >= SURE_MARGIN
+
+
+def _recordings_from(candidate: dict[str, Any]) -> dict[str, str]:
+    return {
+        str(row["track_id"]): str(row["recording_id"])
+        for row in candidate.get("track_map") or []
+        if row.get("recording_id")
+    }
+
+
+def _auto_one(db: Any, enricher: Any, album_id: str, counts: dict[str, int]) -> bool:
+    """Handles one album; returns True when MusicBrainz was unavailable for it."""
+    result = suggest_matches(db, enricher, album_id, limit=3)
+    if result.get("unavailable"):
+        counts["unavailable"] += 1
+        return True
+    candidates = result["candidates"]
+    if not candidates:
+        db.delete_match_suggestion(album_id)
+        counts["no_candidates"] += 1
+        return False
+    file_count = _album_file_count(db, album_id)
+    best = candidates[0]
+    if not _is_sure(candidates, file_count):
+        db.save_match_suggestion(album_id, best, int(best["mapped"]), file_count)
+        counts["suggested"] += 1
+        return False
+    outcome = apply_match(db, enricher, album_id, best, _recordings_from(best))
+    db.delete_match_suggestion(album_id)
+    counts["conflicts" if outcome["conflict"] else "applied"] += 1
+    return False
+
+
+def auto_match_unlinked(
+    db: Any,
+    enricher: Any,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+) -> dict[str, int]:
+    """Links unlinked albums whose best MusicBrainz match is certain and stores the rest for bulk review."""
+    counts: dict[str, int] = dict.fromkeys(_AUTO_KEYS, 0)
+    album_ids = [str(a["id"]) for a in db.iter_albums_without_release_group(batch=200)]
+    consecutive_down = 0
+    for index, album_id in enumerate(album_ids):
+        if should_stop is not None and should_stop():
+            break
+        counts["albums"] += 1
+        try:
+            down = _auto_one(db, enricher, album_id, counts)
+        except (sqlite3.Error, requests.RequestException, ValueError) as exc:
+            logger.warning("Automatic match for album %s failed: %s", album_id, safe_exc(exc))
+            counts["errors"] += 1
+            down = False
+        consecutive_down = consecutive_down + 1 if down else 0
+        if on_progress is not None:
+            on_progress(index + 1, len(album_ids))
+        if consecutive_down >= MAX_CONSECUTIVE_UNAVAILABLE:
+            logger.warning("MusicBrainz unavailable %d times in a row; stopping automatic matching", consecutive_down)
+            break
+    return counts
+
+
+def _apply_stored_one(db: Any, enricher: Any, album_id: str) -> dict[str, Any]:
+    stored = db.get_match_suggestion(album_id)
+    if stored is None:
+        return {"album_id": album_id, "final_album_id": album_id, "status": "missing", "message": "No stored suggestion"}
+    candidate = stored["candidate"]
+    try:
+        outcome = apply_match(db, enricher, album_id, candidate, _recordings_from(candidate))
+    except (ValueError, requests.RequestException, sqlite3.Error) as exc:
+        logger.warning("Applying stored match for album %s failed: %s", album_id, safe_exc(exc))
+        return {"album_id": album_id, "final_album_id": album_id, "status": "error", "message": safe_exc(exc)}
+    db.delete_match_suggestion(album_id)
+    status = "conflict" if outcome["conflict"] else "applied"
+    return {"album_id": album_id, "final_album_id": outcome["album_id"], "status": status}
+
+
+def apply_stored_suggestions(db: Any, enricher: Any, album_ids: list[str]) -> list[dict[str, Any]]:
+    """Applies the stored candidate of each album; a successful apply (conflict included) clears the suggestion."""
+    return [_apply_stored_one(db, enricher, str(album_id)) for album_id in album_ids]

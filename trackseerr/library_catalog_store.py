@@ -1137,6 +1137,67 @@ class LibraryCatalogStoreMixin:
             self.conn.execute("DELETE FROM library_merge_conflicts WHERE source_album_id = ?", (str(album_id),))
             self.conn.commit()
 
+    def save_match_suggestion(self, album_id: str, candidate: dict[str, Any], files_found: int, file_count: int) -> None:
+        """Stores (or replaces) the best unsure match for an unlinked album."""
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO library_match_suggestions (album_id, candidate_json, confidence, files_found, file_count) "
+                "VALUES (?, ?, ?, ?, ?) ON CONFLICT(album_id) DO UPDATE SET candidate_json = excluded.candidate_json, "
+                "confidence = excluded.confidence, files_found = excluded.files_found, "
+                "file_count = excluded.file_count, computed_at = CURRENT_TIMESTAMP",
+                (
+                    str(album_id),
+                    json.dumps(candidate),
+                    int(candidate.get("confidence") or 0),
+                    int(files_found),
+                    int(file_count),
+                ),
+            )
+            self.conn.commit()
+
+    def delete_match_suggestion(self, album_id: str) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM library_match_suggestions WHERE album_id = ?", (str(album_id),))
+            self.conn.commit()
+
+    _MATCH_SUGGESTION_SELECT = (
+        "SELECT s.album_id, s.candidate_json, s.confidence, s.files_found, s.file_count, s.computed_at, "
+        "a.title AS album_title, ar.name AS artist_name, "
+        "(SELECT COUNT(*) FROM library_tracks t WHERE t.album_id = a.id) AS track_count "
+        "FROM library_match_suggestions s JOIN library_albums a ON a.id = s.album_id "
+        "LEFT JOIN library_artists ar ON ar.id = a.artist_id "
+    )
+
+    @staticmethod
+    def _map_match_suggestion(row: Any) -> dict[str, Any]:
+        return {
+            "album_id": str(row["album_id"]),
+            "album_title": str(row["album_title"] or ""),
+            "artist_name": str(row["artist_name"] or ""),
+            "track_count": int(row["track_count"] or 0),
+            "confidence": int(row["confidence"]),
+            "files_found": int(row["files_found"]),
+            "file_count": int(row["file_count"]),
+            "candidate": json.loads(row["candidate_json"]),
+            "computed_at": str(row["computed_at"] or ""),
+        }
+
+    def list_match_suggestions(self, page: int = 1, page_size: int = 50) -> tuple[list[dict[str, Any]], int]:
+        """Stored suggestions, highest confidence first, with album title, artist and track count."""
+        offset = (max(1, int(page)) - 1) * int(page_size)
+        with self.reader() as conn:
+            total = int(conn.execute("SELECT COUNT(*) FROM library_match_suggestions").fetchone()[0])
+            rows = conn.execute(
+                self._MATCH_SUGGESTION_SELECT + "ORDER BY s.confidence DESC, a.title ASC, s.album_id ASC LIMIT ? OFFSET ?",
+                (int(page_size), offset),
+            ).fetchall()
+        return [self._map_match_suggestion(r) for r in rows], total
+
+    def get_match_suggestion(self, album_id: str) -> Optional[dict[str, Any]]:
+        with self.reader() as conn:
+            row = conn.execute(self._MATCH_SUGGESTION_SELECT + "WHERE s.album_id = ?", (str(album_id),)).fetchone()
+        return self._map_match_suggestion(row) if row is not None else None
+
     def list_artist_albums_with_release_group(self, artist_id: str) -> list[dict[str, Any]]:
         """Albums of the artist that hold a release group, oldest first, as ``{id, title}`` dicts."""
         with self._lock:

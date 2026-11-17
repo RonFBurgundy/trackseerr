@@ -698,6 +698,7 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
     """
     from trackseerr.backup import create_backup
     from trackseerr.compilation_filing import refile_various_albums
+    from trackseerr.match_suggestions import auto_match_unlinked
     from trackseerr.mb_metadata_store import get_shared_enricher
     from trackseerr.recording_search import fill_recordings_from_search
     from trackseerr.release_matching import (
@@ -747,6 +748,14 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
         return
     counts = match_album_releases(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; match: {_format_counts(counts)}"
+    if stop():
+        return
+    auto = auto_match_unlinked(db, enricher, should_stop=stop, on_progress=run.set_progress)
+    run.message = f"{run.message}; auto: {_format_counts(auto)}"
+    if stop() or not auto["applied"]:
+        return
+    rematch = match_album_releases(db, enricher, should_stop=stop, on_progress=run.set_progress)
+    run.message = f"{run.message}; rematch: {_format_counts(rematch)}"
 
 
 def run_startup_artist_repair(db: Any, stopping: StopFn = None) -> bool:

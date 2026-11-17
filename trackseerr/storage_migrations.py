@@ -87,6 +87,7 @@ class MigrationsMixin:
                 (97, self._migration_v97),
                 (98, self._migration_v98),
                 (99, self._migration_v99),
+                (100, self._migration_v100),
             ]
 
             applied = 0
@@ -306,6 +307,21 @@ class MigrationsMixin:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_exclusions_scope_mbid ON exclusions(scope, mbid)"
+        )
+
+    def _migration_v100(self, cur: sqlite3.Cursor) -> None:
+        """v100: library_match_suggestions keeps the best unsure MusicBrainz match per unlinked album."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_match_suggestions (
+                album_id TEXT PRIMARY KEY REFERENCES library_albums(id) ON DELETE CASCADE,
+                candidate_json TEXT NOT NULL,
+                confidence INTEGER NOT NULL,
+                files_found INTEGER NOT NULL,
+                file_count INTEGER NOT NULL,
+                computed_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            )
+            """
         )
 
     def _migration_v99(self, cur: sqlite3.Cursor) -> None:
