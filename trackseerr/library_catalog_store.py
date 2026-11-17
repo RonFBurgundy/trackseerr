@@ -1041,6 +1041,17 @@ class LibraryCatalogStoreMixin:
             ).fetchone()
         return str(row["id"]) if row is not None else None
 
+    def list_artist_albums_with_release_group(self, artist_id: str) -> list[dict[str, Any]]:
+        """Albums of the artist that hold a release group, oldest first, as ``{id, title}`` dicts."""
+        with self._lock:
+            rows = self.conn.execute(
+                "SELECT id, title FROM library_albums WHERE artist_id = ? "
+                "AND mb_release_group_id IS NOT NULL AND mb_release_group_id != '' "
+                "ORDER BY created_at ASC, rowid ASC",
+                (str(artist_id),),
+            ).fetchall()
+        return [{"id": str(r["id"]), "title": str(r["title"] or "")} for r in rows]
+
     def list_albums_without_mb_release(
         self, *, page: int, page_size: int, kind: str | None = None
     ) -> tuple[list[dict[str, Any]], int]:

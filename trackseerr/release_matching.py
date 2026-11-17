@@ -13,6 +13,7 @@ from typing import Any, Optional
 import requests
 
 from trackseerr import mb_metadata_store
+from trackseerr.album_titles import album_titles_match
 from trackseerr.storage_common import clean_library_name
 
 logger = logging.getLogger(__name__)
@@ -239,6 +240,14 @@ def _first_holder_for_groups(
     return None
 
 
+def _holder_may_absorb(db: Any, album: dict[str, Any], holder_id: str, track_count: int) -> bool:
+    """Small albums fold into any holder; larger ones only into a holder whose title says it is the same album."""
+    if track_count <= _SINGLE_ALBUM_MAX_TRACKS:
+        return True
+    holder = db.get_library_album(holder_id)
+    return holder is not None and album_titles_match(album["title"], holder.get("title"))
+
+
 def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
     tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
     owned_rec_ids = [
@@ -262,7 +271,6 @@ def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], 
                 rec_set.add(gid)
         per_rec_groups[rec_id] = rec_set
 
-    can_merge = len(tracks) <= _SINGLE_ALBUM_MAX_TRACKS
     chosen = _pick_release_group(list(groups.values()), album["title"])
     linked_key = "linked"
     if chosen is None and len(owned_rec_ids) >= 2:
@@ -271,10 +279,8 @@ def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], 
             chosen = groups[next(iter(common))]
             linked_key = "linked_by_agreement"
     if chosen is None:
-        holder = (
-            _first_holder_for_groups(db, album["artist_id"], list(groups.keys()), album["id"]) if can_merge else None
-        )
-        if holder is not None:
+        holder = _first_holder_for_groups(db, album["artist_id"], list(groups.keys()), album["id"])
+        if holder is not None and _holder_may_absorb(db, album, holder, len(tracks)):
             _merge_into_holder(db, album["id"], holder, counts)
             return
         counts["no_title_match"] += 1
@@ -283,7 +289,7 @@ def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], 
     rg_id = str(chosen["id"])
     holder = db.album_holding_release_group(album["artist_id"], rg_id, album["id"])
     if holder is not None:
-        if can_merge:
+        if _holder_may_absorb(db, album, holder, len(tracks)):
             _merge_into_holder(db, album["id"], holder, counts)
             return
         counts["rg_taken"] += 1
@@ -335,6 +341,53 @@ def link_albums_by_recording(
                 on_progress(processed, total)
 
     logger.info("Recording release-group link finished: %s", counts)
+    return counts
+
+
+def _fold_title_duplicate(db: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
+    holders = [
+        h
+        for h in db.list_artist_albums_with_release_group(album["artist_id"])
+        if h["id"] != album["id"] and album_titles_match(album["title"], h.get("title"))
+    ]
+    if not holders:
+        return
+    if len(holders) > 1:
+        counts["ambiguous"] += 1
+        logger.info("Album %s matches several albums that hold a release group; left alone", album["id"])
+        return
+    _merge_into_holder(db, album["id"], holders[0]["id"], counts)
+
+
+def merge_title_duplicates(
+    db: Any,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+) -> dict[str, int]:
+    """Folds albums with files and no release group into the same-titled album of the artist that holds one."""
+    counts = {"albums": 0, "merged": 0, "merge_conflict": 0, "ambiguous": 0, "errors": 0}
+    total: Optional[int] = None
+    if on_progress is not None:
+        total = db.count_albums_without_release_group()
+        on_progress(0, total)
+
+    processed = 0
+    for album in db.iter_albums_without_release_group(batch=200):
+        if should_stop is not None and should_stop():
+            logger.info("Title duplicate merge stopped early: %s", counts)
+            return counts
+        try:
+            _fold_title_duplicate(db, album, counts)
+            counts["albums"] += 1
+        except sqlite3.Error as exc:
+            counts["errors"] += 1
+            logger.warning("Title duplicate merge failed for album %s: %s", album.get("id"), exc)
+        finally:
+            processed += 1
+            if on_progress is not None:
+                on_progress(processed, total)
+
+    logger.info("Title duplicate merge finished: %s", counts)
     return counts
 
 
