@@ -90,17 +90,37 @@ def test_no_link_without_title_match(db: Database, tmp_path: Path) -> None:
     assert _rg_of(db, "a1") is None
 
 
-def test_skips_rg_already_held_by_same_artist(db: Database, tmp_path: Path) -> None:
+def _held_and_four_track_album(db: Database, tmp_path: Path, title: str) -> None:
     _album(db, tmp_path, "held", "Hotel California", "recA", rg="rg-hc")
-    _album(db, tmp_path, "a2", "Hotel California (Hi-Res Version)", "recB")
+    _album(db, tmp_path, "a2", title, "recB")
     for n in range(2, 5):
         db.upsert_library_track(
             LibraryTrack(id=f"a2-t{n}", album_id="a2", artist_id="ar1", title=f"Song {n}", track_number=n)
         )
+
+
+def test_large_album_with_matching_title_folds_into_holder(db: Database, tmp_path: Path) -> None:
+    _held_and_four_track_album(db, tmp_path, "Hotel California (Hi-Res Version)")
     counts = link_albums_by_recording(db, FakeEnricher({"recB": [_rg("rg-hc", "Hotel California")]}))
+    assert counts["rg_taken"] == 0
+    assert counts["linked"] == 0
+    # Both albums have a file for track 1, so the fold reports a conflict and leaves both albums untouched.
+    assert counts["merged"] == 0
+    assert counts["merge_conflict"] == 1
+    assert _rg_of(db, "a2") is None
+    assert _rg_of(db, "held") == "rg-hc"
+    assert db.get_library_album("a2") is not None
+
+
+def test_skips_rg_already_held_by_same_artist_with_other_title(db: Database, tmp_path: Path) -> None:
+    _held_and_four_track_album(db, tmp_path, "Hotel California Sessions")
+    counts = link_albums_by_recording(db, FakeEnricher({"recB": [_rg("rg-hc", "Hotel California Sessions")]}))
     assert counts["rg_taken"] == 1
     assert counts["linked"] == 0
+    assert counts["merged"] == 0
+    assert counts["merge_conflict"] == 0
     assert _rg_of(db, "a2") is None
+    assert db.get_library_album("a2") is not None
 
 
 def test_album_without_recording_ids_is_counted_not_linked(db: Database, tmp_path: Path) -> None:
