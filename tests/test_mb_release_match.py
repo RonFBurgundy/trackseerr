@@ -16,6 +16,7 @@ from trackseerr.release_matching import (
     fill_recordings_from_fingerprints,
     link_albums_by_recording,
     match_album_releases,
+    merge_title_duplicates,
 )
 from trackseerr.storage import Database
 
@@ -1064,7 +1065,7 @@ def test_link_does_not_merge_large_album(db: Database, tmp_path: Path):
         db,
         tmp_path,
         album_id="alb-large",
-        title="Abbey Road (2009 Remaster)",
+        title="Abbey Road Sessions",
         rg_id=None,
         tracks=[
             {"num": 1, "title": "Come Together", "rec_id": "rec-ct", "file": True},
@@ -1201,3 +1202,122 @@ def test_no_agreement_when_groups_differ(db: Database, tmp_path: Path):
 
 
 
+
+
+# =============================================================================
+# Title duplicate merging
+# =============================================================================
+
+
+def _rg_enricher(rg_id: str, title: str) -> MagicMock:
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_recording_release_groups.return_value = [
+        {
+            "id": rg_id,
+            "title": title,
+            "primary_type": "Album",
+            "secondary_types": [],
+            "first_release_date": "1971-12-17",
+        }
+    ]
+    return enricher
+
+
+def _numbered(count: int, *, file: bool, rec: bool = True) -> list[dict]:
+    return [
+        {"num": n, "title": f"Song {n}", "rec_id": f"rec-{n}" if rec else None, "file": file}
+        for n in range(1, count + 1)
+    ]
+
+
+def test_title_duplicate_merges_large_album(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-holder", "Hunky Dory", "rg-x", _numbered(11, file=False)
+    )
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-src", "Hunky Dory  (2015 Remaster)", None, _numbered(9, file=True)
+    )
+
+    counts = merge_title_duplicates(db)
+
+    assert counts["merged"] == 1
+    assert db.get_library_album("alb-src") is None
+    holder_track = db.get_library_track("alb-holder-3")
+    assert holder_track is not None and holder_track["has_file"] is True
+
+
+def test_title_duplicate_merges_single_without_recording(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-holder", "Violator", "rg-y", _numbered(9, file=False, rec=False)
+    )
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        "alb-src",
+        "Violator (2006 Remaster)",
+        None,
+        [{"num": 1, "title": "Song 1", "rec_id": None, "file": True}],
+    )
+
+    counts = merge_title_duplicates(db)
+
+    assert counts["merged"] == 1
+    assert db.get_library_album("alb-src") is None
+
+
+def test_title_duplicate_ambiguous_skips(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(db, tmp_path, "alb-h1", "Greatest Hits", "rg-1", _numbered(3, file=False))
+    _seed_named_album_with_tracks(db, tmp_path, "alb-h2", "Greatest Hits", "rg-2", _numbered(3, file=False))
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-src", "Greatest Hits (Remastered)", None, _numbered(3, file=True)
+    )
+
+    counts = merge_title_duplicates(db)
+
+    assert counts["ambiguous"] == 1
+    assert counts["merged"] == 0
+    assert db.get_library_album("alb-src") is not None
+
+
+def test_title_duplicate_conflict_skips(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(db, tmp_path, "alb-holder", "Violator", "rg-y", _numbered(2, file=True))
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-src", "Violator (2006 Remaster)", None, _numbered(2, file=True)
+    )
+
+    counts = merge_title_duplicates(db)
+
+    assert counts["merge_conflict"] == 1
+    assert counts["merged"] == 0
+    assert db.get_library_album("alb-src") is not None
+    assert db.get_library_track("alb-src-1") is not None
+
+
+def test_link_rg_taken_merges_large_album_with_matching_title(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-holder", "Hunky Dory", "rg-x", _numbered(6, file=False)
+    )
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-src", "Hunky Dory (2015 Remaster)", None, _numbered(5, file=True)
+    )
+
+    counts = link_albums_by_recording(db, _rg_enricher("rg-x", "Some Other Title"))
+
+    assert counts["merged"] == 1
+    assert counts["rg_taken"] == 0
+    assert db.get_library_album("alb-src") is None
+
+
+def test_link_rg_taken_keeps_large_album_with_other_title(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-holder", "Hunky Dory", "rg-x", _numbered(6, file=False)
+    )
+    _seed_named_album_with_tracks(
+        db, tmp_path, "alb-src", "Live in Paris", None, _numbered(5, file=True)
+    )
+
+    counts = link_albums_by_recording(db, _rg_enricher("rg-x", "Hunky Dory"))
+
+    assert counts["merged"] == 0
+    assert counts["rg_taken"] == 1
+    assert db.get_library_album("alb-src") is not None

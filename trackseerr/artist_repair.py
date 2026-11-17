@@ -621,6 +621,7 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
         fill_recordings_from_fingerprints,
         link_albums_by_recording,
         match_album_releases,
+        merge_title_duplicates,
     )
 
     def stop() -> bool:
@@ -647,6 +648,10 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
         run.message = f"{run.message}; fill: skipped (no AcoustID key)"
     linked = link_albums_by_recording(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; link: {_format_counts(linked)}"
+    if stop():
+        return
+    dupes = merge_title_duplicates(db, should_stop=stop, on_progress=run.set_progress)
+    run.message = f"{run.message}; dupes: {_format_counts(dupes)}"
     if stop():
         return
     counts = match_album_releases(db, enricher, should_stop=stop, on_progress=run.set_progress)
