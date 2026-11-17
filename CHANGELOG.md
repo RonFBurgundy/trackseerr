@@ -144,6 +144,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- More albums link to MusicBrainz: album titles now match even with a year, "- Single"/"- EP", a disc number or a remaster note at the end ("The E•N•D (2009)", "In the Dark [2013 Remaster]"), and an album whose songs all belong to the same MusicBrainz album links even when the titles differ. New albums no longer get the year or "- Single" added to their title.
+- AcoustID matches are accepted for the same song with a small title difference ("Tonite"/"Tonight", "Sister Morphine (2009 Mix)"), when the artist matches. Different versions (remixes, dub edits, live, instrumental) are still kept apart.
 - New downloads and scans no longer create the duplicates the weekly repair has to clean up: "JAY‐Z" files under "JAY-Z", "Simon and Garfunkel" under "Simon & Garfunkel", "2Pac; Dr. Dre" under 2Pac (when 2Pac is matched on MusicBrainz), "Hunky Dory (2015 Remaster)" under "Hunky Dory", and a playlist song tagged with its single's title goes onto the album you already have that contains it.
 - One-song albums created by playlist imports (like "Something - Remastered 2009") are folded into the real album you already have ("Abbey Road") by MusicBrainz Release Match and Library Self-Heal. The song keeps its file, history and requests; only the extra album disappears. Run Rename Files afterwards to move the files into the album's folder.
 - The Requests page updates on its own while requests are in progress, so a finished request moves to Fulfilled without a refresh.
