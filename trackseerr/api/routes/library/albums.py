@@ -23,6 +23,9 @@ from trackseerr.api.schemas.library import (
     AlbumsUpdatedResponse,
     CommandResponse,
     LibraryAlbumRecord,
+    MatchApplyRequest,
+    MatchApplyResponse,
+    MatchSuggestionsResponse,
     MbLinkRequest,
     MbReleaseSeed,
     MbUnlinkedPage,
@@ -41,6 +44,7 @@ from trackseerr.clients.lidarr import (
 from trackseerr.exclusions import annotate_exclusions, find_exclusion
 from trackseerr.album_track_hydration import hydrate_album_tracks
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr import match_suggestions
 from trackseerr.mb_seed import build_release_seed, link_album_release
 from trackseerr.storage import Database
 
@@ -359,6 +363,49 @@ def list_musicbrainz_unlinked(
     """Lists albums without a MusicBrainz release link."""
     items, total = db.list_albums_without_mb_release(page=page, page_size=page_size, kind=kind)
     return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+
+@router.get(
+    "/musicbrainz/unlinked/{album_id}/suggestions",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=MatchSuggestionsResponse,
+)
+def get_unlinked_album_suggestions(
+    album_id: str,
+    db: Database = Depends(get_db),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Suggests MusicBrainz release groups an unlinked album could be (read only)."""
+    if db.get_library_album(album_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    return match_suggestions.suggest_matches(db, enricher, album_id)
+
+
+@router.post(
+    "/musicbrainz/unlinked/{album_id}/apply",
+    dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)],
+    response_model=MatchApplyResponse,
+)
+def apply_unlinked_album_match(
+    album_id: str,
+    body: MatchApplyRequest,
+    db: Database = Depends(get_db),
+    enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    _admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Links an unlinked album to the release group the admin picked; files on disk are not touched."""
+    album = db.get_library_album(album_id)
+    if album is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
+    if str(album.get("mb_release_group_id") or "").strip():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Album already has a MusicBrainz release group")
+    try:
+        return match_suggestions.apply_match(
+            db, enricher, album_id, body.release_group.model_dump(), body.track_recordings
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
 
 
 @router.get(

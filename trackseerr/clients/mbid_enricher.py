@@ -143,6 +143,31 @@ def _parse_search_recording(rec: dict[str, Any]) -> Optional[dict[str, Any]]:
     }
 
 
+def _parse_search_release_group(item: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """One ``/ws/2/release-group`` search hit in the shape ``search_release_groups`` returns (None without an id)."""
+    rg_id = str(item.get("id") or "").strip()
+    if not rg_id:
+        return None
+    credit = item.get("artist-credit")
+    credit_text, _names = _credit_text(credit)
+    artist_ids = _credit_artist_ids(credit)
+    try:
+        score = int(item.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0
+    return {
+        "id": rg_id,
+        "title": str(item.get("title") or ""),
+        "score": score,
+        "primary_type": item.get("primary-type"),
+        "secondary_types": list(item.get("secondary-types") or []),
+        "first_release_date": item.get("first-release-date") or None,
+        "artist_credit": credit_text,
+        "artist_ids": artist_ids,
+        "is_various": VARIOUS_ARTISTS_MBID in artist_ids,
+    }
+
+
 def _strip_article(text: str) -> str:
     """Drops one leading "the " or trailing ", the" ('Beatles, The'); never leaves an empty name ('The The' -> 'the')."""
     stripped = text.strip()
@@ -900,6 +925,53 @@ class MbidEnricherClient:
             return result
         except (requests.RequestException, ValueError, AttributeError, TypeError) as exc:
             logger.info("MbidEnricherClient: search_recordings failed for '%s - %s': %s", artist, title, exc)
+            self._set_cached(cache_key, None)
+            return None
+
+    def search_release_groups(
+        self, artist: Optional[str], title: str, limit: int = 10
+    ) -> Optional[list[dict[str, Any]]]:
+        """Text-searches MusicBrainz release groups by title (and artist when given), best match first.
+
+        None on a transient failure (never cached); an empty list when MusicBrainz has no hit.
+        """
+        clean_title = _sanitize_lucene_query(title)
+        clean_artist = _sanitize_lucene_query(artist or "")
+        if not clean_title:
+            return []
+        query = f'releasegroup:"{clean_title}"'
+        if clean_artist:
+            query += f' AND artist:"{clean_artist}"'
+        cache_key = f"rg_search:v1:{(artist or '').lower()}:{title.lower()}"
+        hit, cached_data = self._lookup(cache_key)
+        if hit:
+            return cached_data
+
+        try:
+            resp = self._request(
+                f"{self.base_url}/ws/2/release-group", params={"query": query, "fmt": "json", "limit": limit}
+            )
+            if resp is None or (resp.status_code != 200 and resp.status_code != 404):
+                logger.info(
+                    "Release group search for '%s - %s' returned status %s",
+                    artist,
+                    title,
+                    resp.status_code if resp is not None else "None",
+                )
+                self._set_cached(cache_key, None)
+                return None
+            result: list[dict[str, Any]] = []
+            if resp.status_code == 200:
+                data = resp.json()
+                groups = data.get("release-groups") if isinstance(data, dict) else None
+                for item in groups if isinstance(groups, list) else []:
+                    parsed = _parse_search_release_group(item) if isinstance(item, dict) else None
+                    if parsed is not None:
+                        result.append(parsed)
+            self._remember(cache_key, "rg_search", result)
+            return result
+        except (requests.RequestException, ValueError, AttributeError, TypeError) as exc:
+            logger.info("MbidEnricherClient: search_release_groups failed for '%s - %s': %s", artist, title, exc)
             self._set_cached(cache_key, None)
             return None
 
