@@ -14,6 +14,7 @@ heading becomes the version and date.
 ### Added
 
 - **Find match** in Library tools → Not on MusicBrainz: suggests the MusicBrainz release for an album, with how sure it is and which of your files it found. Choosing one links the album, then shows the new file names and tags to approve.
+- Library Self-Heal links albums to MusicBrainz on its own when the match is certain (every file found, no close second). The rest appear under **Suggested** in Not on MusicBrainz, where you can tick them and apply many at once.
 - **Duplicates** in Library tools: when two copies of the same album or song stop a merge, choose to keep the existing copy, the incoming one, the better quality, or both. The copy you don't keep goes to the recycle bin.
 - Library Self-Heal now looks up songs on MusicBrainz by artist and title when AcoustID can't identify them, so files with no fingerprint match still get linked.
 - Songs from compilations (Now That's What I Call Music, Ministry of Sound and the like) are filed under Various Artists in that compilation's album, still credited to their own artist. Songs saved under "Unknown Album" or a chart name are filed under the release they really came from. This applies to Self-Heal and to new downloads and scans.
