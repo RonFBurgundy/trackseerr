@@ -595,7 +595,13 @@ class LibraryScanner:
             run, artist_id, album_title, mb_rg_id
         )
         if not album_row:
-            album_row = album_for_recording(run.db, artist_id, metadata.get("musicbrainz_trackid"))
+            album_row = album_for_recording(
+                run.db,
+                artist_id,
+                metadata.get("musicbrainz_trackid"),
+                album_title=album_title,
+                track_title=str(metadata.get("title") or file_path.stem),
+            )
             if album_row:
                 logger.info(
                     "Filed %s under existing album %s",

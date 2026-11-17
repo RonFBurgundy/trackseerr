@@ -23,6 +23,7 @@ from trackseerr.models import (
     LibraryTrack,
 )
 from trackseerr.redaction import safe_exc
+from trackseerr.compilation_filing import ensure_primary_credit
 from trackseerr.release_matching import album_for_recording
 from trackseerr.quality import evaluate_release, parse_release_title
 from trackseerr.storage import Database
@@ -141,6 +142,8 @@ class ImportCatalogMixin:
                         ),
                     )
                 )
+                if str(album_row.get("artist_id")) != str(artist_id):
+                    ensure_primary_credit(db, str(track_row["id"]), str(artist_row.get("name") or ""), artist_row.get("mbid"))
         return artist_row, album_row, track_row
 
     @staticmethod
@@ -174,7 +177,9 @@ class ImportCatalogMixin:
         if not album_row:
             album_row = db.get_library_album_by_title(artist_id, album_title)
         if not album_row:
-            album_row = album_for_recording(db, artist_id, f_meta.get("musicbrainz_trackid"))
+            album_row = album_for_recording(
+                db, artist_id, f_meta.get("musicbrainz_trackid"), album_title=album_title, track_title=track_title
+            )
             if album_row:
                 logger.info("Filed %s under existing album %s", track_title, album_row.get("title"))
         if not album_row:

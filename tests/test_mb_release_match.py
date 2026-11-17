@@ -1169,6 +1169,8 @@ def test_no_agreement_when_groups_differ(db: Database, tmp_path: Path):
         tracks=[
             {"num": 1, "title": "Song A", "rec_id": "rec-a", "file": True},
             {"num": 2, "title": "Song B", "rec_id": "rec-b", "file": True},
+            {"num": 3, "title": "Song C", "rec_id": "rec-c", "file": True},
+            {"num": 4, "title": "Song D", "rec_id": "rec-d", "file": True},
         ],
     )
 

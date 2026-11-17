@@ -319,6 +319,42 @@ def merge_single_album_into(db: Any, source_album_id: str, holder_album_id: str)
     return "merged"
 
 
+def move_track_into_album(db: Any, track_id: str, holder_album_id: str) -> str:
+    """Moves one track (and its files) into another album of the same artist in one transaction.
+
+    The track folds into a matching holder track (same recording, or the only same-titled one) and otherwise
+    moves as a new track. Returns ``"merged"`` or ``"conflict"`` (the matching holder track already owns a file).
+    The source album is deleted only when the move leaves it with no tracks.
+    """
+    holder_id = str(holder_album_id)
+    with db._lock:
+        try:
+            cur = db.conn.cursor()
+            track = cur.execute("SELECT * FROM library_tracks WHERE id = ?", (str(track_id),)).fetchone()
+            holder_album = cur.execute("SELECT * FROM library_albums WHERE id = ?", (holder_id,)).fetchone()
+            if track is None or holder_album is None or str(track["album_id"]) == holder_id:
+                db.conn.rollback()
+                return "conflict"
+            source_id = str(track["album_id"])
+            holder_tracks = cur.execute(
+                "SELECT * FROM library_tracks WHERE album_id = ? ORDER BY disc_number, track_number, id", (holder_id,)
+            ).fetchall()
+            plan = _plan_track_merges(cur, [track], holder_tracks)
+            if plan is None:
+                db.conn.rollback()
+                return "conflict"
+            _apply_track_merges(cur, plan, holder_id, str(holder_album["artist_id"]))
+            left = cur.execute("SELECT 1 FROM library_tracks WHERE album_id = ? LIMIT 1", (source_id,)).fetchone()
+            if left is None:
+                _repoint_and_delete_source_album(cur, source_id, holder_id)
+            db.conn.commit()
+        except sqlite3.Error as exc:
+            db.conn.rollback()
+            logger.warning("Moving track %s into album %s failed: %s", track_id, holder_id, safe_exc(exc))
+            raise
+    return "merged"
+
+
 def _move_albums(cur: sqlite3.Cursor, keep_id: str, dupe_id: str) -> tuple[int, list[str]]:
     """Moves the dupe's albums under the keeper, folding same-title ones. Returns (folded count, albums to dedupe)."""
     keeper_by_title: dict[str, str] = {}
@@ -661,6 +697,7 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
     ``run`` is the task's ``RunHandle``. ``extra_stop`` lets the start-up caller also stop on process shutdown.
     """
     from trackseerr.backup import create_backup
+    from trackseerr.compilation_filing import refile_various_albums
     from trackseerr.mb_metadata_store import get_shared_enricher
     from trackseerr.recording_search import fill_recordings_from_search
     from trackseerr.release_matching import (
@@ -702,6 +739,10 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
         return
     dupes = merge_title_duplicates(db, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; dupes: {_format_counts(dupes)}"
+    if stop():
+        return
+    various = refile_various_albums(db, enricher, should_stop=stop, on_progress=run.set_progress)
+    run.message = f"{run.message}; various: {_format_counts(various)}"
     if stop():
         return
     counts = match_album_releases(db, enricher, should_stop=stop, on_progress=run.set_progress)
