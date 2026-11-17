@@ -50,25 +50,25 @@ def run_self_heal(db: Any, config: Any, run: Any) -> None:
         logger.warning("LibrarySelfHeal rename error: %s", redact_text(str(err)))
 
 
-def _mb_release_match_running(db: Any) -> bool:
-    """True when a manual or startup mb_release_match run is currently active."""
-    if is_cancellable("mb_release_match"):
+def _task_running(db: Any, task_id: str) -> bool:
+    """True when a manual, startup or scheduled run of ``task_id`` is currently active."""
+    if is_cancellable(task_id):
         return True
     try:
         from trackseerr.api.routes.system.tasks import _running_tasks
 
-        if "mb_release_match" in _running_tasks:
+        if task_id in _running_tasks:
             return True
     except ImportError as exc:
         logger.debug("Could not import _running_tasks: %s", safe_exc(exc))
     latest_fn = getattr(db, "latest_task_runs", None)
     if callable(latest_fn):
         try:
-            row = latest_fn().get("mb_release_match")
+            row = latest_fn().get(task_id)
             if isinstance(row, dict) and not row.get("finished_at"):
                 return True
         except sqlite3.Error as exc:
-            logger.warning("Could not check running status of mb_release_match: %s", safe_exc(exc))
+            logger.warning("Could not check running status of %s: %s", task_id, safe_exc(exc))
     return False
 
 
@@ -145,6 +145,11 @@ class LibrarySelfHealWorker:
         except sqlite3.Error as exc:
             logger.warning("Could not read latest library_self_heal run: %s", safe_exc(exc))
             row = None
+        # An unfinished row is a run in flight; rows orphaned by a restart are closed at startup
+        # (task_manager.startup_housekeeping), so an unfinished row never blocks forever.
+        if isinstance(row, dict) and not row.get("finished_at"):
+            logger.debug("LibrarySelfHealWorker: skipping run while a library_self_heal run is unfinished")
+            return False
         finished_raw = row.get("finished_at") if isinstance(row, dict) else ""
         elapsed = _seconds_since(finished_raw if isinstance(finished_raw, str) else "")
         if elapsed is not None and elapsed < interval_seconds:
@@ -157,10 +162,14 @@ class LibrarySelfHealWorker:
         return self.run_once(db, config)
 
     def run_once(self, db: Any, config: Any = None) -> bool:
-        if _mb_release_match_running(db):
-            logger.info("LibrarySelfHealWorker: skipping run while mb_release_match is active")
-            return False
+        for other in ("library_self_heal", "mb_release_match"):
+            if _task_running(db, other):
+                logger.info("LibrarySelfHealWorker: skipping run while %s is active", other)
+                return False
         with self._lock:
+            if self._active_run:
+                logger.info("LibrarySelfHealWorker: skipping run while another run is active")
+                return False
             self._active_run = True
         try:
             with record_task_run(db, "library_self_heal", TRIGGER_SCHEDULED) as run:

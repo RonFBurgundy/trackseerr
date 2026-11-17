@@ -933,6 +933,9 @@ def run_scheduled_task(  # noqa: C901, PLR0915
         _run_manual(db, task_id, "ManualMbReleaseMatchTask", _match, cancellable=True)
 
     elif task_id == "library_self_heal":
+        with _tasks_lock:
+            if "library_self_heal" in _running_tasks or task_manager.is_cancellable("library_self_heal") or library_self_heal_worker.has_active_run():
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Task 'library_self_heal' is already running")
         _run_manual(
             db,
             task_id,
