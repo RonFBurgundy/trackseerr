@@ -174,34 +174,51 @@ class LibraryCatalogStoreMixin:
             row = cur.fetchone()
             return self._map_library_album(row) if row else None
 
+    @staticmethod
+    def _pick_album_for_release_group(
+        rows: list[sqlite3.Row], release_group_id: str | None, require_unique: bool = False
+    ) -> sqlite3.Row | None:
+        if not rows:
+            return None
+        if release_group_id is None:
+            if require_unique and len(rows) > 1:
+                return None
+            return rows[0]
+        rg = str(release_group_id)
+        same_rg = [row for row in rows if row["mb_release_group_id"] and str(row["mb_release_group_id"]) == rg]
+        if same_rg:
+            return None if (require_unique and len(same_rg) > 1) else same_rg[0]
+        unlinked = [row for row in rows if not row["mb_release_group_id"]]
+        if not unlinked or (require_unique and len(unlinked) > 1):
+            return None
+        return unlinked[0]
+
     def get_library_album_by_title(
-        self, artist_id: str, title: str, release_group_id: Optional[str] = None
-    ) -> Optional[dict[str, Any]]:
-        """Retrieves a library album by artist ID and title using clean_library_name.
+        self, artist_id: str, title: str, release_group_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Retrieves a library album by artist ID and title using clean_library_name, then titles_match.
 
         When ``release_group_id`` is given, a row already linked to a different release group is never returned
         (an album and a single can share a normalised title); an exact RG match is preferred over an unlinked row.
         """
+        from trackseerr.lidarr_release import titles_match
+
         clean = clean_library_name(title)
         with self.reader() as conn:
-            cur = conn.execute(
+            rows = conn.execute(
                 "SELECT * FROM library_albums WHERE artist_id = ? AND clean_title = ?",
                 (str(artist_id), clean),
-            )
-            rows = cur.fetchall()
-            if not rows:
-                return None
-            if release_group_id is None:
-                return self._map_library_album(rows[0])
-            rg = str(release_group_id)
-            unlinked = None
-            for row in rows:
-                linked = row["mb_release_group_id"]
-                if linked and str(linked) == rg:
-                    return self._map_library_album(row)
-                if not linked and unlinked is None:
-                    unlinked = row
-            return self._map_library_album(unlinked) if unlinked is not None else None
+            ).fetchall()
+            picked = self._pick_album_for_release_group(rows, release_group_id, require_unique=False)
+            if picked is not None:
+                return self._map_library_album(picked)
+            all_rows = conn.execute(
+                "SELECT * FROM library_albums WHERE artist_id = ?",
+                (str(artist_id),),
+            ).fetchall()
+        matched = [row for row in all_rows if titles_match(row["title"], title)]
+        picked = self._pick_album_for_release_group(matched, release_group_id, require_unique=True)
+        return self._map_library_album(picked) if picked is not None else None
 
     def get_library_album_by_foreign_id(
         self, foreign_id: str
