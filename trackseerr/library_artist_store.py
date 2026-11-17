@@ -371,7 +371,9 @@ class LibraryArtistStoreMixin:
             return hit
         primary = primary_credit(name)
         if primary:
-            return self._lookup_artist_by_key(artist_name_key(primary))
+            hit = self._lookup_artist_by_key(artist_name_key(primary))
+            if hit is not None and str(hit.get("mbid") or "").strip():
+                return hit
         return None
 
     def get_library_artist_by_foreign_id(

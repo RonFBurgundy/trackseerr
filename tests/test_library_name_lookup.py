@@ -54,8 +54,12 @@ def test_artist_lookup_prefers_mbid_then_oldest(db: Database):
 
 
 def test_artist_lookup_joined_credit_returns_primary(db: Database):
-    tupac = db.upsert_library_artist(LibraryArtist(id="a-2pac", name="2Pac"))
-    ab = db.upsert_library_artist(LibraryArtist(id="a-ab", name="Above & Beyond"))
+    tupac = db.upsert_library_artist(
+        LibraryArtist(id="a-2pac", name="2Pac", mbid="382f1005-e9ab-4684-afd4-0bdae4ee37f2")
+    )
+    ab = db.upsert_library_artist(
+        LibraryArtist(id="a-ab", name="Above & Beyond", mbid="175f4a83-1071-41e4-8b50-989f1b93fa9d")
+    )
 
     assert db.get_library_artist_by_name("2Pac; Dr. Dre")["id"] == tupac["id"]
     assert db.get_library_artist_by_name("2Pac feat. Dr. Dre")["id"] == tupac["id"]
@@ -66,6 +70,12 @@ def test_artist_lookup_joined_credit_returns_primary(db: Database):
     assert primary_credit("2Pac feat. Dr. Dre") == "2Pac"
     assert primary_credit("Above & Beyond x Zo\u00eb") == "Above & Beyond"
     assert primary_credit("2Pac") is None
+
+
+def test_joined_credit_ignores_primary_without_mbid(db: Database):
+    db.upsert_library_artist(LibraryArtist(id="a-simon", name="Simon"))
+
+    assert db.get_library_artist_by_name("Simon & Garfunkel") is None
 
 
 def test_artist_lookup_real_duo_without_primary_is_none(db: Database):
