@@ -14,7 +14,7 @@ heading becomes the version and date.
 ### Added
 
 - A song request no longer downloads a whole album when the song is only on an album torrent: TrackSeerr picks the song's file and qBittorrent or rTorrent downloads just that file. When it can't tell which file is the song, the request now says the whole release is downloading.
-- rTorrent can download part of a torrent, so songs inside indexed packs work with rTorrent too, not just qBittorrent.
+- Every supported torrent client (qBittorrent, rTorrent, Transmission and Deluge) can download part of a torrent, so a song request takes just that song, and songs inside indexed packs work with all of them.
 - Admins can open **Manual search** from a request on the Requests page to see every release and choose which one to grab.
 - **Library Self-Heal** task (Tasks page, weekly by default): runs the MusicBrainz release match and then applies the renames Rename Files marks as safe. It never rewrites tags. Pause it to stop automatic renames.
 - MusicBrainz Release Match fills in missing MusicBrainz recording IDs from AcoustID when you have an AcoustID API key, so more albums get linked and matched to an edition.
@@ -144,6 +144,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- With rTorrent, a download of selected files now shows as complete when those files are done, instead of staying at a low percentage because the rest of the torrent was skipped.
 - Library Self-Heal folds an album that isn't linked to MusicBrainz into your same-titled album that is ("Hunky Dory  (2015 Remaster)" into "Hunky Dory", "Violator (2006 Remaster)" into "Violator"), whatever its size, as long as only one album matches and the songs don't already have files there.
 - More albums link to MusicBrainz: album titles now match even with a year, "- Single"/"- EP", a disc number or a remaster note at the end ("The E•N•D (2009)", "In the Dark [2013 Remaster]"), and an album whose songs all belong to the same MusicBrainz album links even when the titles differ. New albums no longer get the year or "- Single" added to their title.
 - AcoustID matches are accepted for the same song with a small title difference ("Tonite"/"Tonight", "Sister Morphine (2009 Mix)"), when the artist matches. Different versions (remixes, dub edits, live, instrumental) are still kept apart.
