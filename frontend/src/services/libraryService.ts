@@ -1,4 +1,12 @@
 import type { Schema } from '@/types/apiSchema';
+import type {
+  DuplicateChoicesResponse,
+  DuplicateResolveChoice,
+  DuplicateResolveResponse,
+  MatchApplyRequest,
+  MatchApplyResponse,
+  MatchSuggestionsResponse,
+} from '@/types/models';
 import { apiRequest } from './apiClient';
 import { buildIndexUrl, buildListUrl } from './listUrl';
 import type { GroupIndexResponse, IndexQuery, ListQuery, PagedResponse } from '@/types/activity';
@@ -362,6 +370,28 @@ export async function getMbUnlinked(options: GetMbUnlinkedOptions = {}): Promise
   if (options.kind) params.set('kind', options.kind);
   const qs = params.toString();
   return apiRequest<MbUnlinkedPage>(`/api/library/musicbrainz/unlinked${qs ? `?${qs}` : ''}`, { signal: options.signal });
+}
+
+export async function getMatchSuggestions(albumId: string | number, signal?: AbortSignal): Promise<MatchSuggestionsResponse> {
+  return apiRequest<MatchSuggestionsResponse>(`/api/library/musicbrainz/unlinked/${encodeURIComponent(String(albumId))}/suggestions`, { signal });
+}
+
+export async function applyMatch(albumId: string | number, body: MatchApplyRequest): Promise<MatchApplyResponse> {
+  return apiRequest<MatchApplyResponse>(`/api/library/musicbrainz/unlinked/${encodeURIComponent(String(albumId))}/apply`, {
+    method: 'POST',
+    body,
+  });
+}
+
+export async function getDuplicateChoices(signal?: AbortSignal): Promise<DuplicateChoicesResponse> {
+  return apiRequest<DuplicateChoicesResponse>('/api/library/duplicates', { signal });
+}
+
+export async function resolveDuplicateChoice(id: number, choice: DuplicateResolveChoice): Promise<DuplicateResolveResponse> {
+  return apiRequest<DuplicateResolveResponse>(`/api/library/duplicates/${id}/resolve`, {
+    method: 'POST',
+    body: { choice },
+  });
 }
 
 export async function getMbReleaseSeed(albumId: string | number, redirectUri?: string, signal?: AbortSignal): Promise<MbReleaseSeed> {

@@ -41,3 +41,5 @@ export * from './AddArtistDialog';
 export * from './MbUnlinkedModal';
 export * from './ExcludeConfirm';
 export * from './LibrarySearchResults';
+export * from './MatchSuggestionsPanel';
+export * from './DuplicatesModal';

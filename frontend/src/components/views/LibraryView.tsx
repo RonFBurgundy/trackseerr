@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { CheckSquare, Disc, Eye, FileText, FolderInput, Layers, Loader2, Music, RefreshCw, SlidersHorizontal, Tag, User, UserPlus, X } from 'lucide-react';
+import { CheckSquare, Disc, Eye, FileText, Copy, FolderInput, Layers, Loader2, Music, RefreshCw, SlidersHorizontal, Tag, User, UserPlus, X } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
@@ -14,7 +14,7 @@ import { useSmartCollections } from '@/hooks/useSmartCollections';
 import { useTags } from '@/hooks/useTags';
 import { useToast } from '@/hooks/useToast';
 import type { ManualImportScope } from '@/types/manualImport';
-import { deleteCollection } from '@/services/libraryService';
+import { deleteCollection, getDuplicateChoices } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
 import { PageFrame } from '@/components/layout';
 import { SearchBar, TapeDeckButton, TabStrip, ToastBanner, CassetteLoader, OverflowMenu, type OverflowMenuItem } from '@/components/ui';
@@ -33,6 +33,7 @@ import {
   LibraryStatsBar,
   type LibrarySelectAction,
   LidarrMigrationBanner,
+  DuplicatesModal,
   MbUnlinkedModal,
   RenameModal,
   type RenameScope,
@@ -139,6 +140,10 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [importScope, setImportScope] = useState<ManualImportScope | null>(null);
   const [renameScope, setRenameScope] = useState<RenameScope | null>(null);
   const [retagScope, setRetagScope] = useState<RetagScope | null>(null);
+  const [isDuplicatesOpen, setIsDuplicatesOpen] = useState<boolean>(false);
+  const [duplicateCount, setDuplicateCount] = useState<number>(0);
+  // After a suggested match is applied: show the proposed file names, then the proposed tags for the same album.
+  const [retagAfterRename, setRetagAfterRename] = useState<RetagScope | null>(null);
   const [isAddArtistOpen, setIsAddArtistOpen] = useState<boolean>(false);
   const [addArtistInitialQuery, setAddArtistInitialQuery] = useState<string | undefined>(undefined);
   const [isMbUnlinkedOpen, setIsMbUnlinkedOpen] = useState<boolean>(false);
@@ -146,6 +151,16 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [listMode, setListMode] = useState<string | null>(null);
 
   const lidarrMode = (manager.state?.mode ?? listMode) === 'lidarr';
+  useEffect(() => {
+    if (!isAdmin || lidarrMode) return;
+    const controller = new AbortController();
+    getDuplicateChoices(controller.signal)
+      .then((res) => setDuplicateCount(res.items.length))
+      .catch(() => {
+        // The count is a convenience for the menu label; the modal itself reports load failures.
+      });
+    return () => controller.abort();
+  }, [isAdmin, lidarrMode]);
   // Collections reference native album rows, so adding albums to them is a native-mode action.
   const canCollect = !lidarrMode;
 
@@ -287,6 +302,20 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           isOpen={isMbUnlinkedOpen}
           onClose={() => setIsMbUnlinkedOpen(false)}
           onOpenAlbum={openAlbumById}
+          onReviewFiles={(albumId, albumTitle) => {
+            const scope = { albumId, albumTitle };
+            setRetagAfterRename(scope);
+            setRenameScope(scope);
+          }}
+          onToast={showToast}
+        />
+      )}
+      {isAdmin && (
+        <DuplicatesModal
+          isOpen={isDuplicatesOpen}
+          onClose={() => setIsDuplicatesOpen(false)}
+          onCountChange={setDuplicateCount}
+          onResolved={() => void reloadCatalog()}
           onToast={showToast}
         />
       )}
@@ -317,7 +346,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       />
       <RenameModal
         scope={renameScope}
-        onClose={() => setRenameScope(null)}
+        onClose={() => {
+          setRenameScope(null);
+          if (retagAfterRename) {
+            setRetagScope(retagAfterRename);
+            setRetagAfterRename(null);
+          }
+        }}
         onRenamed={() => {
           showToast('Files renamed');
           void reloadCatalog();
@@ -464,6 +499,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       icon: <Disc className="h-3.5 w-3.5" />,
       disabled: lidarrMode,
       onSelect: () => setIsMbUnlinkedOpen(true),
+    });
+    toolItems.push({
+      key: 'duplicates',
+      label: duplicateCount > 0 ? `Duplicates (${duplicateCount})…` : 'Duplicates…',
+      icon: <Copy className="h-3.5 w-3.5" />,
+      disabled: lidarrMode,
+      onSelect: () => setIsDuplicatesOpen(true),
     });
   }
   if (pagedTab && isAdmin && !lidarrMode) {
