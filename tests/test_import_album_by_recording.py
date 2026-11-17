@@ -49,7 +49,6 @@ class _FakeEnricher:
 
 def _patch_enricher(monkeypatch: pytest.MonkeyPatch, enricher: _FakeEnricher) -> None:
     monkeypatch.setattr("trackseerr.mb_metadata_store.get_shared_enricher", lambda _db: enricher)
-    monkeypatch.setattr("trackseerr.release_matching.get_shared_enricher", lambda _db: enricher)
 
 
 def test_album_for_recording_prefers_studio_album_over_compilation(
@@ -154,7 +153,7 @@ def test_album_for_recording_none_on_lookup_error(
     enricher = _FakeEnricher(error=requests.RequestException("MB mirror timeout"))
     _patch_enricher(monkeypatch, enricher)
 
-    with caplog.at_level(logging.DEBUG, logger="trackseerr.release_matching"):
+    with caplog.at_level(logging.WARNING, logger="trackseerr.release_matching"):
         result = album_for_recording(db, artist["id"], "rec-something")
 
     assert result is None

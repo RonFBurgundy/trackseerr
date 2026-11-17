@@ -15,9 +15,6 @@ from trackseerr.storage_common import clean_library_name
 
 logger = logging.getLogger(__name__)
 
-_default_get_shared_enricher = mb_metadata_store.get_shared_enricher
-get_shared_enricher = _default_get_shared_enricher
-
 
 def _extract_owned_rec_ids(owned: list[dict[str, Any]]) -> set[str]:
     rec_ids: set[str] = set()
@@ -184,13 +181,8 @@ def album_for_recording(
     if not clean_artist or not clean_rec:
         return None
 
-    enricher_fn = (
-        get_shared_enricher
-        if get_shared_enricher is not _default_get_shared_enricher
-        else mb_metadata_store.get_shared_enricher
-    )
     try:
-        enricher = enricher_fn(db)
+        enricher = mb_metadata_store.get_shared_enricher(db)
         groups = enricher.get_recording_release_groups(clean_rec) or []
         for group in sorted(groups, key=lambda g: not _is_plain_album(g)):
             rg_id = str(group.get("id") or "").strip()
@@ -201,17 +193,8 @@ def album_for_recording(
                 album = db.get_library_album(holder_id)
                 if album is not None:
                     return album
-    except (
-        requests.RequestException,
-        OSError,
-        ValueError,
-        TypeError,
-        AttributeError,
-        LookupError,
-        RuntimeError,
-        sqlite3.Error,
-    ) as exc:
-        logger.debug("Recording release-group lookup failed for %s: %s", clean_rec, exc)
+    except (requests.RequestException, sqlite3.Error) as exc:
+        logger.warning("Recording release-group lookup failed for %s: %s", clean_rec, exc)
     return None
 
 
