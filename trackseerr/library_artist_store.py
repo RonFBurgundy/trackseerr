@@ -195,6 +195,7 @@ class LibraryArtistStoreMixin:
                 ),
             )
             self.conn.commit()
+            self._clear_artist_key_cache()
             if is_new:
                 self._safe_item_event(
                     "added_to_library", artist_id=artist_id, artist_name=name, message=f"Added artist '{name}'"
@@ -310,8 +311,45 @@ class LibraryArtistStoreMixin:
             )
             return [dict(r) for r in cur.fetchall()]
 
-    def get_library_artist_by_name(self, name: str) -> Optional[dict[str, Any]]:
-        """Retrieves an artist by exact name or cleaned normalized name."""
+    _artist_key_cache: dict[str, str] | None = None
+
+    def _clear_artist_key_cache(self) -> None:
+        self._artist_key_cache = None
+
+    def _get_artist_key_cache(self) -> dict[str, str]:
+        cache = self._artist_key_cache
+        if cache is not None:
+            return cache
+        from trackseerr.clients.mbid_enricher import artist_name_key
+
+        built: dict[str, str] = {}
+        with self.reader() as conn:
+            rows = conn.execute(
+                "SELECT id, name, mbid FROM library_artists "
+                "ORDER BY (mbid IS NOT NULL AND TRIM(mbid) != '') DESC, COALESCE(created_at, '') ASC, rowid ASC"
+            ).fetchall()
+        for row in rows:
+            key = artist_name_key(str(row["name"]))
+            if key and key not in built:
+                built[key] = str(row["id"])
+        self._artist_key_cache = built
+        return built
+
+    def _lookup_artist_by_key(self, key: str) -> dict[str, Any] | None:
+        if not key:
+            return None
+        artist_id = self._get_artist_key_cache().get(key)
+        if not artist_id:
+            return None
+        artist = self.get_library_artist(artist_id)
+        if artist is None:
+            self._artist_key_cache = None
+            artist_id = self._get_artist_key_cache().get(key)
+            return self.get_library_artist(artist_id) if artist_id else None
+        return artist
+
+    def get_library_artist_by_name(self, name: str) -> dict[str, Any] | None:
+        """Retrieves an artist by exact name, folded artist_name_key, or primary artist of a joined credit."""
         clean = clean_library_name(name)
         with self.reader() as conn:
             cur = conn.execute(
@@ -319,7 +357,24 @@ class LibraryArtistStoreMixin:
                 (clean, str(name).strip()),
             )
             row = cur.fetchone()
-            return self._map_library_artist(row) if row else None
+            if row:
+                return self._map_library_artist(row)
+
+        from trackseerr.artist_repair import primary_credit
+        from trackseerr.clients.mbid_enricher import artist_name_key
+
+        key = artist_name_key(name)
+        if not key:
+            return None
+        hit = self._lookup_artist_by_key(key)
+        if hit is not None:
+            return hit
+        primary = primary_credit(name)
+        if primary:
+            hit = self._lookup_artist_by_key(artist_name_key(primary))
+            if hit is not None and str(hit.get("mbid") or "").strip():
+                return hit
+        return None
 
     def get_library_artist_by_foreign_id(
         self, foreign_id: str
@@ -389,6 +444,7 @@ class LibraryArtistStoreMixin:
                 (str(artist_id),),
             )
             self.conn.commit()
+            self._clear_artist_key_cache()
             return cur.rowcount > 0
 
     def set_artist_monitored(

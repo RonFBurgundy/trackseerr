@@ -57,6 +57,7 @@ _ARTIST_FILL_COLUMNS = (
 _ALBUM_FILL_COLUMNS = ("mb_release_group_id", "mb_release_id", "cover_url", "art_version")
 
 _JOIN_SEPARATOR_RE = re.compile(r", | & | [xX] ")
+_X_SEPARATOR_RE = re.compile(r" [xX] ")
 
 _HAS_FILE_SQL = (
     "EXISTS (SELECT 1 FROM library_tracks t WHERE t.album_id = a.id "
@@ -332,6 +333,8 @@ def _merge_artist_into(db: Any, keep_id: str, dupe_id: str) -> int:
                 cur.execute("UPDATE library_artists SET monitored = 1 WHERE id = ?", (keep_id,))
             cur.execute("DELETE FROM library_artists WHERE id = ?", (dupe_id,))
             db.conn.commit()
+            if hasattr(db, "_clear_artist_key_cache"):
+                db._clear_artist_key_cache()
         except sqlite3.Error as exc:
             db.conn.rollback()
             logger.warning("Merging artist %s into %s failed: %s", dupe_id, keep_id, safe_exc(exc))
@@ -492,6 +495,25 @@ def _others(index: dict[str, list[tuple[str, bool]]], key: str, source_id: str) 
     return [entry for entry in index.get(key, []) if entry[0] != source_id]
 
 
+def primary_credit(
+    name: str, known_artist: Callable[[str], bool] | None = None
+) -> str | None:
+    """Primary artist of a joined credit (';', ' / ', 'feat.', ', ', ' & ', ' x '); None when not split."""
+    text = (name or "").strip()
+    if not text:
+        return None
+    primary = primary_artist(text, known_artist)
+    if primary and artist_name_key(primary) != artist_name_key(text):
+        return primary
+    for pattern in (_X_SEPARATOR_RE, _JOIN_SEPARATOR_RE):
+        match = pattern.search(text)
+        if match:
+            head = text[: match.start()].strip()
+            if head and artist_name_key(head) != artist_name_key(text):
+                return head
+    return None
+
+
 def _joined_credit_primary(
     name: str, source_id: str, index: dict[str, list[tuple[str, bool]]]
 ) -> tuple[str, bool]:
@@ -507,11 +529,9 @@ def _joined_credit_primary(
     primary = primary_artist(name, known)
     if artist_name_key(primary) != artist_name_key(name):
         return primary, False
-    match = _JOIN_SEPARATOR_RE.search(name)
-    if match:
-        head = name[: match.start()].strip()
-        if head and any(has_id for _, has_id in _others(index, artist_name_key(head), source_id)):
-            return head, True
+    head = primary_credit(name, known)
+    if head and any(has_id for _, has_id in _others(index, artist_name_key(head), source_id)):
+        return head, True
     return name, False
 
 
