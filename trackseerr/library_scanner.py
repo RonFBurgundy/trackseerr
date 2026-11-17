@@ -43,6 +43,7 @@ from trackseerr.media_servers.refresh_scheduler import request_library_refresh
 from trackseerr.item_history import TRIGGER_SCAN, GrabTrigger, emit, provenance
 from trackseerr.recycle_bin import is_excluded_entry, library_excluded_paths, prune_excluded_dirs
 from trackseerr.redaction import redact_text, safe_exc
+from trackseerr.release_matching import album_for_recording
 from trackseerr.storage import Database
 from trackseerr.track_credits import build_track_credits
 
@@ -533,6 +534,44 @@ class LibraryScanner:
             return by_rg
         return run.db.get_library_album_by_title(artist_id, album_title, release_group_id=mb_rg_id)
 
+    @staticmethod
+    def _has_local_cover(file_path: Path, parent: Path) -> bool:
+        if find_folder_art(parent) is not None:
+            return True
+        extracted = extract_embedded_cover_art(file_path, parent)
+        return extracted is not None and extracted.is_file()
+
+    @staticmethod
+    def _backfill_scan_album(
+        run: _ScanRun,
+        album_row: dict[str, Any],
+        mb_rg_id: Optional[str],
+        mb_rel_id: Optional[str],
+        has_local_cover: bool,
+    ) -> dict[str, Any]:
+        album_id = str(album_row["id"])
+        need_album_update = False
+        new_rg = album_row.get("mb_release_group_id")
+        new_rel = album_row.get("mb_release_id")
+        new_cov = album_row.get("cover_url")
+        if not new_rg and mb_rg_id:
+            new_rg = mb_rg_id
+            need_album_update = True
+        if not new_rel and mb_rel_id:
+            new_rel = mb_rel_id
+            need_album_update = True
+        if not new_cov and has_local_cover:
+            new_cov = f"/api/library/albums/{album_id}/cover"
+            need_album_update = True
+        if need_album_update:
+            album_row = run.db.upsert_library_album({
+                **album_row,
+                "mb_release_group_id": new_rg,
+                "mb_release_id": new_rel,
+                "cover_url": new_cov,
+            }, preserve_monitoring=True)
+        return album_row
+
     def _resolve_scan_album(
         self,
         run: _ScanRun,
@@ -548,19 +587,20 @@ class LibraryScanner:
         """Finds or creates the library album record and registers local cover art."""
         mb_rg_id = metadata.get("musicbrainz_releasegroupid")
         mb_rel_id = metadata.get("musicbrainz_albumid")
-        has_local_cover = False
-        if find_folder_art(parent) is not None:
-            has_local_cover = True
-
-        if not has_local_cover:
-            extracted = extract_embedded_cover_art(file_path, parent)
-            if extracted is not None and extracted.is_file():
-                has_local_cover = True
+        has_local_cover = self._has_local_cover(file_path, parent)
 
         album_key = (artist_id, album_title, mb_rg_id)
         album_row = run.album_cache.get(album_key) or self._find_scan_album(
             run, artist_id, album_title, mb_rg_id
         )
+        if not album_row:
+            album_row = album_for_recording(run.db, artist_id, metadata.get("musicbrainz_trackid"))
+            if album_row:
+                logger.info(
+                    "Filed %s under existing album %s",
+                    metadata.get("title") or file_path.stem,
+                    album_row.get("title"),
+                )
         if not album_row:
             album_id = str(uuid.uuid4())
             new_album_type = normalize_album_type(
@@ -596,27 +636,7 @@ class LibraryScanner:
             with self._lock:
                 self._status["albums_created"] += 1
         else:
-            album_id = str(album_row["id"])
-            need_album_update = False
-            new_rg = album_row.get("mb_release_group_id")
-            new_rel = album_row.get("mb_release_id")
-            new_cov = album_row.get("cover_url")
-            if not new_rg and mb_rg_id:
-                new_rg = mb_rg_id
-                need_album_update = True
-            if not new_rel and mb_rel_id:
-                new_rel = mb_rel_id
-                need_album_update = True
-            if not new_cov and has_local_cover:
-                new_cov = f"/api/library/albums/{album_id}/cover"
-                need_album_update = True
-            if need_album_update:
-                album_row = run.db.upsert_library_album({
-                    **album_row,
-                    "mb_release_group_id": new_rg,
-                    "mb_release_id": new_rel,
-                    "cover_url": new_cov,
-                }, preserve_monitoring=True)
+            album_row = self._backfill_scan_album(run, album_row, mb_rg_id, mb_rel_id, has_local_cover)
         run.album_cache[album_key] = album_row
         album_id = str(album_row["id"])
 

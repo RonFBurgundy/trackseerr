@@ -8,9 +8,15 @@ import sqlite3
 from collections.abc import Callable
 from typing import Any, Optional
 
+import requests
+
+from trackseerr import mb_metadata_store
 from trackseerr.storage_common import clean_library_name
 
 logger = logging.getLogger(__name__)
+
+_default_get_shared_enricher = mb_metadata_store.get_shared_enricher
+get_shared_enricher = _default_get_shared_enricher
 
 
 def _extract_owned_rec_ids(owned: list[dict[str, Any]]) -> set[str]:
@@ -165,6 +171,50 @@ def _match_one_album(
     counts["recordings_filled"] += _fill_missing_recordings(db, chosen, owned)
 
 
+def _is_plain_album(group: dict[str, Any]) -> bool:
+    return str(group.get("primary_type") or "").casefold() == "album" and not group.get("secondary_types")
+
+
+def album_for_recording(
+    db: Any, artist_id: Optional[str], recording_id: Optional[str]
+) -> Optional[dict[str, Any]]:
+    """Returns the artist's existing library album that holds one of the recording's release groups, or None."""
+    clean_artist = str(artist_id or "").strip()
+    clean_rec = str(recording_id or "").strip()
+    if not clean_artist or not clean_rec:
+        return None
+
+    enricher_fn = (
+        get_shared_enricher
+        if get_shared_enricher is not _default_get_shared_enricher
+        else mb_metadata_store.get_shared_enricher
+    )
+    try:
+        enricher = enricher_fn(db)
+        groups = enricher.get_recording_release_groups(clean_rec) or []
+        for group in sorted(groups, key=lambda g: not _is_plain_album(g)):
+            rg_id = str(group.get("id") or "").strip()
+            if not rg_id:
+                continue
+            holder_id = db.album_holding_release_group(clean_artist, rg_id, "")
+            if holder_id is not None:
+                album = db.get_library_album(holder_id)
+                if album is not None:
+                    return album
+    except (
+        requests.RequestException,
+        OSError,
+        ValueError,
+        TypeError,
+        AttributeError,
+        LookupError,
+        RuntimeError,
+        sqlite3.Error,
+    ) as exc:
+        logger.debug("Recording release-group lookup failed for %s: %s", clean_rec, exc)
+    return None
+
+
 def _pick_release_group(groups: list[dict[str, Any]], album_title: str) -> Optional[dict[str, Any]]:
     """Title-matching release group: plain Album first, then the earliest first release date."""
     from trackseerr.lidarr_release import titles_match
@@ -175,7 +225,7 @@ def _pick_release_group(groups: list[dict[str, Any]], album_title: str) -> Optio
     return min(
         candidates,
         key=lambda g: (
-            0 if str(g.get("primary_type") or "").casefold() == "album" and not g.get("secondary_types") else 1,
+            0 if _is_plain_album(g) else 1,
             str(g.get("first_release_date") or "9999-99-99"),
             str(g.get("id") or ""),
         ),

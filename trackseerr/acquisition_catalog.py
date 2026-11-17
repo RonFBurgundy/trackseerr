@@ -22,6 +22,7 @@ from trackseerr.models import (
     LibraryTrack,
 )
 from trackseerr.redaction import safe_exc
+from trackseerr.release_matching import album_for_recording
 from trackseerr.quality import evaluate_release, parse_release_title
 from trackseerr.storage import Database
 
@@ -102,36 +103,15 @@ class ImportCatalogMixin:
         artist_id = artist_row["id"]
 
         # 2. Resolve / upsert LibraryAlbum
-        album_title = (
-            f_meta.get("album")
-            or (job.item.get("title") if job.item.get("item_type") == "album" else None)
-            or (job.req.get("album") or job.req.get("title") if job.req else None)
-            or "Unknown Album"
+        track_title = (
+            f_meta.get("title")
+            or job.item.get("title")
+            or (job.req.get("title") if job.req else None)
+            or placed_p.stem
         ).strip()
-        year_val = f_meta.get("year")
-        if year_val is None and job.req and job.req.get("release_date"):
-            rdate = str(job.req["release_date"]).strip()
-            if len(rdate) >= 4 and rdate[:4].isdigit():
-                year_val = int(rdate[:4])
-
-        album_row = None
-        if job.item.get("album_id"):
-            album_row = db.get_library_album(job.item["album_id"])
-        elif job.item.get("track_id") and existing_track:
-            album_row = db.get_library_album(existing_track["album_id"])
-        if not album_row:
-            album_row = db.get_library_album_by_title(artist_id, album_title)
-        if not album_row:
-            album_id = str(uuid.uuid4())
-            album_row = db.upsert_library_album(
-                LibraryAlbum(
-                    id=album_id,
-                    artist_id=artist_id,
-                    title=album_title,
-                    year=year_val,
-                    path=str(placed_p.parent),
-                )
-            )
+        album_row = self._resolve_catalog_album(
+            db, job, existing_track, artist_id, placed_p, f_meta, track_title
+        )
         album_id = album_row["id"]
 
         # 3. Resolve / upsert LibraryTrack
@@ -139,12 +119,6 @@ class ImportCatalogMixin:
         if job.item.get("track_id"):
             track_row = existing_track or db.get_library_track(job.item["track_id"])
         if not track_row:
-            track_title = (
-                f_meta.get("title")
-                or job.item.get("title")
-                or (job.req.get("title") if job.req else None)
-                or placed_p.stem
-            ).strip()
             track_num = int(f_meta.get("track_number") or 1)
             track_row = db.get_library_track_by_title(
                 album_id, track_title, track_number=track_num, disc_number=int(f_meta.get("disc_number") or 1)
@@ -167,6 +141,53 @@ class ImportCatalogMixin:
                     )
                 )
         return artist_row, album_row, track_row
+
+    @staticmethod
+    def _resolve_catalog_album(
+        db: Database,
+        job: _ImportJob,
+        existing_track: dict[str, Any] | None,
+        artist_id: str,
+        placed_p: Path,
+        f_meta: dict[str, Any],
+        track_title: str,
+    ) -> dict[str, Any]:
+        """Resolve an existing library album or create one for an unmatched placed file."""
+        album_title = (
+            f_meta.get("album")
+            or (job.item.get("title") if job.item.get("item_type") == "album" else None)
+            or (job.req.get("album") or job.req.get("title") if job.req else None)
+            or "Unknown Album"
+        ).strip()
+        year_val = f_meta.get("year")
+        if year_val is None and job.req and job.req.get("release_date"):
+            rdate = str(job.req["release_date"]).strip()
+            if len(rdate) >= 4 and rdate[:4].isdigit():
+                year_val = int(rdate[:4])
+
+        album_row = None
+        if job.item.get("album_id"):
+            album_row = db.get_library_album(job.item["album_id"])
+        elif job.item.get("track_id") and existing_track:
+            album_row = db.get_library_album(existing_track["album_id"])
+        if not album_row:
+            album_row = db.get_library_album_by_title(artist_id, album_title)
+        if not album_row:
+            album_row = album_for_recording(db, artist_id, f_meta.get("musicbrainz_trackid"))
+            if album_row:
+                logger.info("Filed %s under existing album %s", track_title, album_row.get("title"))
+        if not album_row:
+            album_id = str(uuid.uuid4())
+            album_row = db.upsert_library_album(
+                LibraryAlbum(
+                    id=album_id,
+                    artist_id=artist_id,
+                    title=album_title,
+                    year=year_val,
+                    path=str(placed_p.parent),
+                )
+            )
+        return album_row
 
     def _upsert_catalog_for_file(
         self,
