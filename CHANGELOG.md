@@ -13,6 +13,10 @@ heading becomes the version and date.
 
 ### Added
 
+- **Find match** in Library tools → Not on MusicBrainz: suggests the MusicBrainz release for an album, with how sure it is and which of your files it found. Choosing one links the album, then shows the new file names and tags to approve.
+- **Duplicates** in Library tools: when two copies of the same album or song stop a merge, choose to keep the existing copy, the incoming one, the better quality, or both. The copy you don't keep goes to the recycle bin.
+- Library Self-Heal now looks up songs on MusicBrainz by artist and title when AcoustID can't identify them, so files with no fingerprint match still get linked.
+- Songs from compilations (Now That's What I Call Music, Ministry of Sound and the like) are filed under Various Artists in that compilation's album, still credited to their own artist. Songs saved under "Unknown Album" or a chart name are filed under the release they really came from. This applies to Self-Heal and to new downloads and scans.
 - A song request no longer downloads a whole album when the song is only on an album torrent: TrackSeerr picks the song's file and qBittorrent or rTorrent downloads just that file. When it can't tell which file is the song, the request now says the whole release is downloading.
 - Every supported torrent client (qBittorrent, rTorrent, Transmission and Deluge) can download part of a torrent, so a song request takes just that song, and songs inside indexed packs work with all of them.
 - Admins can open **Manual search** from a request on the Requests page to see every release and choose which one to grab.
