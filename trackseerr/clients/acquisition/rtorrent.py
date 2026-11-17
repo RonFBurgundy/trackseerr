@@ -40,6 +40,8 @@ _STATUS_FIELDS = (
     "d.is_multi_file",
     "d.ratio",
     "d.timestamp.finished",
+    "d.is_partially_done",
+    "d.left_bytes",
 )
 
 _LIST_FIELDS = (
@@ -53,6 +55,7 @@ _LIST_FIELDS = (
     "d.custom1=",
     "d.state=",
     "d.complete=",
+    "d.is_partially_done=",
 )
 
 
@@ -109,7 +112,7 @@ def _status_from_fields(f: dict[str, Any], progress: float) -> tuple[str, float,
     state = _int(f.get("d.state"))
     if _int(f.get("d.hashing")) != 0:
         return DownloadStatus.QUEUED.value, progress, None
-    if _int(f.get("d.complete")) == 1:
+    if _int(f.get("d.complete")) == 1 or _int(f.get("d.is_partially_done")) == 1:
         return DownloadStatus.COMPLETED.value, 100.0, None
     if state == 1 and _int(f.get("d.is_active")) == 1:
         return DownloadStatus.DOWNLOADING.value, progress, None
@@ -405,20 +408,26 @@ class RtorrentDriver(AcquisitionDriver):
         size = _int(f.get("d.size_bytes"))
         completed = _int(f.get("d.completed_bytes"))
         rate = _int(f.get("d.down.rate"))
-        progress = min(100.0, round(completed / size * 100.0, 1)) if size > 0 else 0.0
+        # A partial download (selected files only) leaves unwanted bytes outstanding, so measure what is wanted.
+        left = _int(f["d.left_bytes"]) if f.get("d.left_bytes") is not None else None
+        if left is not None and completed + left > 0:
+            progress = min(100.0, round(completed / (completed + left) * 100.0, 1))
+        else:
+            progress = min(100.0, round(completed / size * 100.0, 1)) if size > 0 else 0.0
+        remaining = left if left is not None else max(0, size - completed)
         status_str, progress, error_message = _status_from_fields(f, progress)
 
         content_path = _content_path(f)
         directory = str(f.get("d.directory") or "").rstrip("/")
         save_path = directory if _int(f.get("d.is_multi_file")) == 1 else posixpath.dirname(content_path)
-        complete = _int(f.get("d.complete")) == 1
+        complete = _int(f.get("d.complete")) == 1 or _int(f.get("d.is_partially_done")) == 1
 
         return {
             "status": status_str,
             "progress": progress,
             "size_bytes": size,
             "speed_bps": rate,
-            "eta_seconds": max(0, size - completed) // rate if rate > 0 else 0,
+            "eta_seconds": max(0, remaining) // rate if rate > 0 else 0,
             "source_path": content_path or None,
             "content_path": content_path,
             "save_path": save_path,
@@ -511,7 +520,7 @@ class RtorrentDriver(AcquisitionDriver):
 
     @staticmethod
     def _list_row(f: dict[str, Any]) -> dict[str, Any]:
-        complete = _int(f["d.complete="]) == 1
+        complete = _int(f["d.complete="]) == 1 or _int(f["d.is_partially_done="]) == 1
         if complete:
             state = "seeding"
         elif _int(f["d.state="]) == 1:
