@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, MbidEnricherClient
 from trackseerr.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
 from trackseerr.release_matching import link_albums_by_recording
 from trackseerr.storage import Database
@@ -83,7 +83,12 @@ def test_prefers_album_over_compilation_with_same_title(db: Database, tmp_path: 
 
 
 def test_no_link_without_title_match(db: Database, tmp_path: Path) -> None:
+    # Albums of 3 tracks or fewer are filed under the recording's home release instead, so use 4+ tracks.
     _album(db, tmp_path, "a1", "Hotel California", "rec1")
+    for n in range(2, 5):
+        db.upsert_library_track(
+            LibraryTrack(id=f"a1-t{n}", album_id="a1", artist_id="ar1", title=f"Song {n}", track_number=n)
+        )
     counts = link_albums_by_recording(db, FakeEnricher({"rec1": [_rg("rg-x", "Desperado")]}))
     assert counts["no_title_match"] == 1
     assert counts["linked"] == 0
@@ -139,10 +144,12 @@ def test_get_recording_release_groups_parses_and_dedupes() -> None:
     resp.json.return_value = {
         "releases": [
             {"id": "r1", "release-group": {"id": "rg1", "title": "Hotel California", "primary-type": "Album",
-                                           "secondary-types": [], "first-release-date": "1976-12-08"}},
+                                           "secondary-types": [], "first-release-date": "1976-12-08"},
+             "artist-credit": [{"artist": {"id": "ar-eagles"}}]},
             {"id": "r2", "release-group": {"id": "rg1", "title": "Hotel California", "primary-type": "Album"}},
             {"id": "r3", "release-group": {"id": "rg2", "title": "Best Of", "primary-type": "Album",
-                                           "secondary-types": ["Compilation"]}},
+                                           "secondary-types": ["Compilation"]},
+             "artist-credit": [{"artist": {"id": VARIOUS_ARTISTS_MBID}}]},
             {"id": "r4"},
         ]
     }
@@ -155,9 +162,12 @@ def test_get_recording_release_groups_parses_and_dedupes() -> None:
         "primary_type": "Album",
         "secondary_types": [],
         "first_release_date": "1976-12-08",
+        "artist_ids": ["ar-eagles"],
+        "is_various": False,
     }
     assert groups[1]["secondary_types"] == ["Compilation"]
+    assert groups[1]["artist_ids"] == [VARIOUS_ARTISTS_MBID] and groups[1]["is_various"] is True
     params = client._request.call_args.kwargs["params"]
-    assert params["recording"] == "rec-1" and params["inc"] == "release-groups" and params["limit"] == 100
+    assert params["recording"] == "rec-1" and params["inc"] == "release-groups+artist-credits" and params["limit"] == 100
     client.get_recording_release_groups("rec-1")
     assert client._request.call_count == 1
