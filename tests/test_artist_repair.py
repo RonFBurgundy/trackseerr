@@ -390,6 +390,27 @@ def test_run_repair_and_match_skips_fill_without_key(db: Database, monkeypatch: 
     artist_repair.run_repair_and_match(db, run)
 
     assert "fill: skipped" in run.message
+    assert "; search: tracks=0, filled=0" in run.message
+
+
+def test_run_repair_and_match_runs_search_after_fill(db: Database, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.backup
+    import trackseerr.mb_metadata_store
+    import trackseerr.recording_search
+
+    monkeypatch.setattr(trackseerr.backup, "create_backup", lambda *a, **k: None)
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: FakeEnricher({}))
+    monkeypatch.setattr(
+        trackseerr.recording_search,
+        "fill_recordings_from_search",
+        lambda *a, **k: {"tracks": 3, "filled": 2, "no_match": 1, "unavailable": 0, "errors": 0},
+    )
+    run = _Run()
+
+    artist_repair.run_repair_and_match(db, run)
+
+    assert "; search: tracks=3, filled=2" in run.message
+    assert run.message.index("fill:") < run.message.index("search:") < run.message.index("link:")
 
 
 def test_run_repair_and_match_runs_fill_with_key(db: Database, monkeypatch: pytest.MonkeyPatch):
