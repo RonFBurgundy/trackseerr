@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ExternalLink, Link as LinkIcon, Loader2 } from 'lucide-react';
+import { ExternalLink, Link as LinkIcon, Loader2, Search } from 'lucide-react';
 import type { MbUnlinkedAlbum, MbUnlinkedKind } from '@/types/models';
 import { getMbUnlinked } from '@/services/libraryService';
 import { errorMessage } from '@/services/apiClient';
@@ -7,11 +7,14 @@ import { type FetchPage, useVirtualPagedList } from '@/hooks/useVirtualPagedList
 import { useMbSubmit } from '@/hooks/useMbSubmit';
 import { ObsidianModal, TabStrip, TapeDeckButton } from '@/components/ui';
 import { FlatList, type FlatListColumn } from '@/components/lists';
+import { MatchSuggestionsPanel } from './MatchSuggestionsPanel';
 
 export interface MbUnlinkedModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenAlbum: (albumId: string) => void;
+  /** Called after a match is applied so the admin can review the proposed file names and tags. */
+  onReviewFiles: (albumId: string, albumTitle: string) => void;
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
 }
 
@@ -19,6 +22,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
   isOpen,
   onClose,
   onOpenAlbum,
+  onReviewFiles,
   onToast,
 }) => {
   const [kind, setKind] = useState<MbUnlinkedKind>('no_release_group');
@@ -30,6 +34,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
   const [linkingId, setLinkingId] = useState<string | null>(null);
   const [linkInput, setLinkInput] = useState<string>('');
   const [submittingId, setSubmittingId] = useState<string | null>(null);
+  const [matchAlbum, setMatchAlbum] = useState<{ id: string; title: string } | null>(null);
 
   const { submit, link, isLinking } = useMbSubmit();
 
@@ -49,6 +54,10 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
     getKey: (item) => item.id,
     enabled: isOpen,
   });
+
+  useEffect(() => {
+    if (!isOpen) setMatchAlbum(null);
+  }, [isOpen]);
 
   // Track counts on modal open for both tabs
   useEffect(() => {
@@ -111,6 +120,19 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
       }
     },
     [linkInput, link, list, kind, onToast]
+  );
+
+  const handleMatchApplied = useCallback(
+    (albumId: string, albumTitle: string) => {
+      setMatchAlbum(null);
+      list.reload();
+      setTotals((prev) => {
+        const cur = prev[kind];
+        return cur !== null ? { ...prev, [kind]: Math.max(0, cur - 1) } : prev;
+      });
+      onReviewFiles(albumId, albumTitle);
+    },
+    [list, kind, onReviewFiles]
   );
 
   const handleCancelLink = useCallback(() => {
@@ -214,6 +236,15 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
         <div className="flex items-center gap-1.5 flex-wrap">
           <TapeDeckButton
             size="sm"
+            variant="amber"
+            onClick={() => setMatchAlbum({ id: r.id, title: r.title })}
+            icon={<Search className="h-3.5 w-3.5" />}
+            title="Look for this album on MusicBrainz"
+          >
+            Find match
+          </TapeDeckButton>
+          <TapeDeckButton
+            size="sm"
             disabled={isThisSubmitting}
             onClick={() => void handleSubmit(r.id)}
             icon={
@@ -271,6 +302,19 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
       title="Not on MusicBrainz"
       maxWidth="sm:max-w-4xl"
     >
+      {matchAlbum ? (
+        <MatchSuggestionsPanel
+          albumId={matchAlbum.id}
+          albumTitle={matchAlbum.title}
+          onBack={() => setMatchAlbum(null)}
+          onApplied={handleMatchApplied}
+          onSubmitToMusicBrainz={(id) => {
+            setMatchAlbum(null);
+            void handleSubmit(id);
+          }}
+          onToast={onToast}
+        />
+      ) : (
       <div className="flex flex-col gap-3 min-h-0">
         <p className="text-xs text-neutral-400 font-mono shrink-0">
           Opens MusicBrainz with this album prefilled. Log in there, check it, and submit; you&apos;ll come back here and the album gets linked.
@@ -318,7 +362,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
             maxHeight="55dvh"
             rowActions={rowActions}
             actionsLabel="Actions"
-            actionsWidth="340px"
+            actionsWidth="460px"
             emptyMessage={
               kind === 'no_release_group'
                 ? 'No albums missing release groups.'
@@ -327,6 +371,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
           />
         </div>
       </div>
+      )}
     </ObsidianModal>
   );
 };
