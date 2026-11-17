@@ -14,6 +14,7 @@ import requests
 
 from trackseerr import mb_metadata_store
 from trackseerr.album_titles import album_titles_match
+from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
 from trackseerr.storage_common import clean_library_name
 
 logger = logging.getLogger(__name__)
@@ -175,10 +176,61 @@ def _is_plain_album(group: dict[str, Any]) -> bool:
     return str(group.get("primary_type") or "").casefold() == "album" and not group.get("secondary_types")
 
 
-def album_for_recording(
-    db: Any, artist_id: Optional[str], recording_id: Optional[str]
+def _existing_holder_album(db: Any, artist_id: str, groups: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    for group in sorted(groups, key=lambda g: not _is_plain_album(g)):
+        rg_id = str(group.get("id") or "").strip()
+        if not rg_id:
+            continue
+        holder_id = db.album_holding_release_group(artist_id, rg_id, "")
+        if holder_id is not None:
+            album = db.get_library_album(holder_id)
+            if album is not None:
+                return album
+    return None
+
+
+def _filed_album_for_title(
+    db: Any,
+    enricher: Any,
+    artist_id: str,
+    groups: list[dict[str, Any]],
+    album_title: str,
+    track_title: str,
 ) -> Optional[dict[str, Any]]:
-    """Returns the artist's existing library album that holds one of the recording's release groups, or None."""
+    """Album for a new file whose own album tag names a compilation or no release at all of the recording."""
+    from trackseerr.compilation_filing import (
+        ensure_release_group_album,
+        home_release_group,
+        various_artists_id,
+        various_group_for_title,
+    )
+
+    va_group = various_group_for_title(groups, album_title)
+    if va_group is not None:
+        return db.get_library_album(ensure_release_group_album(db, enricher, various_artists_id(db), va_group))
+    if any(album_titles_match(g.get("title"), album_title) for g in groups):
+        return None
+    artist = db.get_library_artist(artist_id) or {}
+    home = home_release_group(groups, artist.get("mbid"), track_title)
+    if home is None:
+        return None
+    return db.get_library_album(ensure_release_group_album(db, enricher, artist_id, home))
+
+
+def album_for_recording(
+    db: Any,
+    artist_id: Optional[str],
+    recording_id: Optional[str],
+    album_title: Optional[str] = None,
+    track_title: str = "",
+) -> Optional[dict[str, Any]]:
+    """Returns the library album a file with this recording belongs in, or None.
+
+    That is the artist's existing album holding one of the recording's release groups. With ``album_title`` (the
+    file's own album tag) a Various Artists compilation of that name, or, when the tag names no release of the
+    recording, the recording's canonical release, is created and returned instead. Callers that get a Various
+    Artists album back must write the track's primary credit (``compilation_filing.ensure_primary_credit``).
+    """
     clean_artist = str(artist_id or "").strip()
     clean_rec = str(recording_id or "").strip()
     if not clean_artist or not clean_rec:
@@ -187,15 +239,11 @@ def album_for_recording(
     try:
         enricher = mb_metadata_store.get_shared_enricher(db)
         groups = enricher.get_recording_release_groups(clean_rec) or []
-        for group in sorted(groups, key=lambda g: not _is_plain_album(g)):
-            rg_id = str(group.get("id") or "").strip()
-            if not rg_id:
-                continue
-            holder_id = db.album_holding_release_group(clean_artist, rg_id, "")
-            if holder_id is not None:
-                album = db.get_library_album(holder_id)
-                if album is not None:
-                    return album
+        holder = _existing_holder_album(db, clean_artist, groups)
+        if holder is not None:
+            return holder
+        if album_title:
+            return _filed_album_for_title(db, enricher, clean_artist, groups, album_title, track_title)
     except (requests.RequestException, sqlite3.Error) as exc:
         logger.warning("Recording release-group lookup failed for %s: %s", clean_rec, exc)
     return None
@@ -253,7 +301,76 @@ def _holder_may_absorb(db: Any, album: dict[str, Any], holder_id: str, track_cou
     return holder is not None and album_titles_match(album["title"], holder.get("title"))
 
 
+def _recording_groups(
+    enricher: Any, rec_ids: list[str]
+) -> tuple[dict[str, dict[str, Any]], dict[str, list[dict[str, Any]]]]:
+    """Release groups of the recordings: ``({group id: group}, {recording id: its groups})``."""
+    groups: dict[str, dict[str, Any]] = {}
+    per_rec: dict[str, list[dict[str, Any]]] = {}
+    for rec_id in rec_ids:
+        per_rec[rec_id] = []
+        for group in enricher.get_recording_release_groups(rec_id):
+            gid = str(group.get("id") or "")
+            if gid:
+                groups.setdefault(gid, group)
+                per_rec[rec_id].append(group)
+    return groups, per_rec
+
+
+def _choose_group(
+    groups: dict[str, dict[str, Any]],
+    per_rec: dict[str, list[dict[str, Any]]],
+    album: dict[str, Any],
+    owned_rec_ids: list[str],
+    allow_various: bool,
+) -> tuple[Optional[dict[str, Any]], str]:
+    """Title-matching group, else the single group every owned recording shares; Various Artists ones are skipped."""
+    candidates = [g for g in groups.values() if allow_various or not g.get("is_various")]
+    chosen = _pick_release_group(candidates, album["title"])
+    if chosen is not None:
+        return chosen, "linked"
+    if len(owned_rec_ids) >= 2:
+        sets = [{str(g["id"]) for g in per_rec[r]} for r in owned_rec_ids]
+        common = {gid for gid in set.intersection(*sets) if gid in {str(g["id"]) for g in candidates}}
+        if len(common) == 1:
+            return groups[next(iter(common))], "linked_by_agreement"
+    return None, "linked"
+
+
+def _album_is_various_artists(db: Any, album: dict[str, Any]) -> bool:
+    artist = db.get_library_artist(str(album["artist_id"])) or {}
+    return str(artist.get("mbid") or "").lower() == VARIOUS_ARTISTS_MBID
+
+
+def _link_unmatched_album(
+    db: Any,
+    enricher: Any,
+    album: dict[str, Any],
+    groups: dict[str, dict[str, Any]],
+    per_rec: dict[str, list[dict[str, Any]]],
+    track_count: int,
+    counts: dict[str, int],
+) -> None:
+    """No title-matching group: fold into an existing holder, else file small albums under the recording's home."""
+    from trackseerr.compilation_filing import file_tracks_under_home
+
+    holder = _first_holder_for_groups(db, album["artist_id"], list(groups.keys()), album["id"])
+    if holder is not None and _holder_may_absorb(db, album, holder, track_count):
+        _merge_into_holder(db, album["id"], holder, counts)
+        return
+    if (
+        holder is None
+        and track_count <= _SINGLE_ALBUM_MAX_TRACKS
+        and not _album_is_various_artists(db, album)
+        and file_tracks_under_home(db, enricher, album, per_rec, counts)
+    ):
+        return
+    counts["no_title_match"] += 1
+
+
 def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
+    from trackseerr.compilation_filing import file_album_under_various, various_group_for_title
+
     tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
     owned_rec_ids = [
         str(t.get("mb_recording_id") or "").strip()
@@ -265,30 +382,16 @@ def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], 
         counts["no_recordings"] += 1
         return
 
-    groups: dict[str, dict[str, Any]] = {}
-    per_rec_groups: dict[str, set[str]] = {}
-    for rec_id in rec_ids:
-        rec_set: set[str] = set()
-        for group in enricher.get_recording_release_groups(rec_id):
-            gid = str(group.get("id") or "")
-            if gid:
-                groups.setdefault(gid, group)
-                rec_set.add(gid)
-        per_rec_groups[rec_id] = rec_set
+    groups, per_rec = _recording_groups(enricher, rec_ids)
+    under_various = _album_is_various_artists(db, album)
+    va_group = None if under_various else various_group_for_title(list(groups.values()), album["title"])
+    if va_group is not None:
+        file_album_under_various(db, enricher, album, va_group, counts)
+        return
 
-    chosen = _pick_release_group(list(groups.values()), album["title"])
-    linked_key = "linked"
-    if chosen is None and len(owned_rec_ids) >= 2:
-        common = set.intersection(*(per_rec_groups[r] for r in owned_rec_ids))
-        if len(common) == 1:
-            chosen = groups[next(iter(common))]
-            linked_key = "linked_by_agreement"
+    chosen, linked_key = _choose_group(groups, per_rec, album, owned_rec_ids, under_various)
     if chosen is None:
-        holder = _first_holder_for_groups(db, album["artist_id"], list(groups.keys()), album["id"])
-        if holder is not None and _holder_may_absorb(db, album, holder, len(tracks)):
-            _merge_into_holder(db, album["id"], holder, counts)
-            return
-        counts["no_title_match"] += 1
+        _link_unmatched_album(db, enricher, album, groups, per_rec, len(tracks), counts)
         return
 
     rg_id = str(chosen["id"])
@@ -318,6 +421,8 @@ def link_albums_by_recording(
         "linked_by_agreement": 0,
         "merged": 0,
         "merge_conflict": 0,
+        "filed_compilation": 0,
+        "filed_home": 0,
         "no_recordings": 0,
         "no_title_match": 0,
         "rg_taken": 0,

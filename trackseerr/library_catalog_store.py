@@ -995,6 +995,36 @@ class LibraryCatalogStoreMixin:
             )
             self.conn.commit()
 
+    def move_album_to_artist(self, album_id: str, artist_id: str) -> None:
+        """Re-files an album and all its tracks under another artist in one transaction (files are not touched)."""
+        with self._lock:
+            try:
+                self.conn.execute(
+                    "UPDATE library_albums SET artist_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (str(artist_id), str(album_id)),
+                )
+                self.conn.execute(
+                    "UPDATE library_tracks SET artist_id = ?, updated_at = CURRENT_TIMESTAMP WHERE album_id = ?",
+                    (str(artist_id), str(album_id)),
+                )
+                self.conn.commit()
+            except sqlite3.Error:
+                self.conn.rollback()
+                raise
+
+    def list_albums_with_files_outside_artist(self, artist_id: str) -> list[dict[str, Any]]:
+        """Albums with a release group and at least one filed track that do not sit under the given artist."""
+        with self.reader() as conn:
+            rows = conn.execute(
+                "SELECT a.* FROM library_albums a "
+                "WHERE a.artist_id != ? AND a.mb_release_group_id IS NOT NULL AND a.mb_release_group_id != '' "
+                "AND EXISTS (SELECT 1 FROM library_tracks t WHERE t.album_id = a.id "
+                "AND (t.has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = t.id))) "
+                "ORDER BY a.id",
+                (str(artist_id),),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def iter_albums_without_release_group(self, batch: int = 200) -> Iterator[dict[str, Any]]:
         """Yields albums with at least one filed track and no release group ID, keyset-paginated by id."""
         after_id: Optional[str] = None

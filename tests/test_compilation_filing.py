@@ -1,0 +1,341 @@
+"""Tests for filing compilation tracks under Various Artists and junk-titled singles under their real release."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from trackseerr.album_track_hydration import clear_negative_cache
+from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, MbidEnricherClient
+from trackseerr.compilation_filing import (
+    home_release_group,
+    refile_various_albums,
+    various_artists_id,
+    various_group_for_title,
+)
+from trackseerr.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
+from trackseerr.release_matching import album_for_recording, link_albums_by_recording
+from trackseerr.storage import Database
+
+BOB_MBID = "11111111-1111-1111-1111-111111111111"
+
+
+@pytest.fixture
+def db(tmp_path: Path):
+    database = Database(str(tmp_path / "test_compilation_filing.db"))
+    clear_negative_cache()
+    yield database
+    database.close()
+
+
+def _group(
+    gid: str,
+    title: str,
+    primary: str = "Album",
+    secondary: list[str] | None = None,
+    date: str = "2000-01-01",
+    artist_ids: list[str] | None = None,
+    various: bool = False,
+) -> dict[str, Any]:
+    return {
+        "id": gid,
+        "title": title,
+        "primary_type": primary,
+        "secondary_types": secondary or [],
+        "first_release_date": date,
+        "artist_ids": artist_ids if artist_ids is not None else ([VARIOUS_ARTISTS_MBID] if various else [BOB_MBID]),
+        "is_various": various,
+    }
+
+
+NOW_44 = _group("rg-now44", "Now That's What I Call Music! 44", secondary=["Compilation"], date="1999-11-01", various=True)
+
+
+def _enricher(groups_by_rec: dict[str, list[dict[str, Any]]], rg_tracks: dict[str, list[dict[str, Any]]] | None = None):
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_recording_release_groups.side_effect = lambda rec: groups_by_rec.get(rec, [])
+    enricher.get_release_group_tracks.side_effect = lambda rg, force=False: (rg_tracks or {}).get(rg, [])
+    return enricher
+
+
+def _seed_album(
+    db: Database,
+    tmp_path: Path,
+    album_id: str,
+    title: str,
+    tracks: list[dict[str, Any]],
+    rg_id: str | None = None,
+    artist_id: str = "artist-bob",
+    artist_name: str = "Bob Marley vs. Funkstar De Luxe",
+    artist_mbid: str | None = BOB_MBID,
+) -> None:
+    if db.get_library_artist(artist_id) is None:
+        db.upsert_library_artist(LibraryArtist(id=artist_id, name=artist_name, mbid=artist_mbid, monitored=False))
+    db.upsert_library_album(
+        LibraryAlbum(
+            id=album_id, artist_id=artist_id, title=title, mb_release_group_id=rg_id, monitored=False,
+            total_tracks=len(tracks),
+        )
+    )
+    for t in tracks:
+        tid = f"{album_id}-{t['num']}"
+        db.upsert_library_track(
+            LibraryTrack(
+                id=tid, album_id=album_id, artist_id=artist_id, title=t["title"], track_number=t["num"],
+                mb_recording_id=t.get("rec_id"), monitored=False,
+            )
+        )
+        if t.get("file", True):
+            path = tmp_path / f"{tid}.flac"
+            path.write_bytes(b"dummy audio")
+            db.upsert_library_file(
+                LibraryFile(id=f"file-{tid}", track_id=tid, file_path=str(path), relative_path=path.name, codec="FLAC")
+            )
+
+
+NOW_TRACKS = {
+    "rg-now44": [
+        {"title": "Could I Be In Love", "track_number": 1, "disc_number": 1, "mb_recording_id": "rec-bob"},
+        {"title": "Other Song", "track_number": 2, "disc_number": 1, "mb_recording_id": "rec-other"},
+        {"title": "Third Song", "track_number": 3, "disc_number": 1, "mb_recording_id": "rec-third"},
+    ]
+}
+
+
+def _va_album(db: Database) -> dict[str, Any]:
+    va = db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID)
+    assert va is not None
+    holder = db.album_holding_release_group(str(va["id"]), "rg-now44", "")
+    assert holder is not None
+    album = db.get_library_album(holder)
+    assert album is not None
+    return album
+
+
+# --- pure helpers ----------------------------------------------------------------------------------------------
+
+
+def test_home_release_group_prefers_album_then_single_earliest():
+    single = _group("rg-single", "Song", primary="Single", date="1990-01-01")
+    late_album = _group("rg-late", "Best Of", date="2010-01-01")
+    early_album = _group("rg-early", "First", date="2001-01-01")
+    assert home_release_group([single, late_album, early_album], BOB_MBID, "Song")["id"] == "rg-early"
+    assert home_release_group([single], BOB_MBID, "Song")["id"] == "rg-single"
+    assert home_release_group([], BOB_MBID, "Song") is None
+
+
+def test_home_release_group_skips_various_and_live():
+    live = _group("rg-live", "Live at X", secondary=["Live"], date="1980-01-01")
+    various = _group("rg-va", "Hits", various=True, date="1970-01-01")
+    other_artist = _group("rg-other", "Other", artist_ids=["22222222-2222-2222-2222-222222222222"])
+    studio = _group("rg-studio", "Studio", date="2005-01-01")
+    assert home_release_group([live, various, other_artist, studio], BOB_MBID, "Song")["id"] == "rg-studio"
+    assert home_release_group([live, various, other_artist], BOB_MBID, "Song") is None
+
+
+def test_home_release_group_keeps_live_for_live_track():
+    live = _group("rg-live", "Live at X", secondary=["Live"], date="1980-01-01")
+    studio = _group("rg-studio", "Studio", date="2005-01-01")
+    assert home_release_group([live, studio], BOB_MBID, "Song (Live)")["id"] == "rg-live"
+
+
+def test_various_group_for_title_matches_now_44():
+    other = _group("rg-x", "Ministry Of Sound", various=True)
+    assert various_group_for_title([other, NOW_44], "Now That's What I Call Music! 44")["id"] == "rg-now44"
+    assert various_group_for_title([other], "Now That's What I Call Music! 44") is None
+    assert various_group_for_title([_group("rg-plain", "Now That's What I Call Music! 44")], "Now That's What I Call Music! 44") is None
+
+
+def test_various_artists_created_when_missing(db: Database):
+    assert db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID) is None
+    va_id = various_artists_id(db)
+    va = db.get_library_artist(va_id)
+    assert va is not None and va["name"] == "Various Artists"
+    assert va["mbid"] == VARIOUS_ARTISTS_MBID
+    assert not va["monitored"]
+    assert various_artists_id(db) == va_id
+
+
+# --- link_albums_by_recording ----------------------------------------------------------------------------------
+
+
+def test_link_files_compilation_under_various_artists(db: Database, tmp_path: Path):
+    _seed_album(db, tmp_path, "alb-now", "Now That's What I Call Music! 44",
+                [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    enricher = _enricher({"rec-bob": [NOW_44]}, NOW_TRACKS)
+
+    counts = link_albums_by_recording(db, enricher)
+
+    assert counts["filed_compilation"] == 1
+    assert counts["merged"] == 1
+    assert db.get_library_album("alb-now") is None
+    va_album = _va_album(db)
+    assert va_album["title"] == "Now That's What I Call Music! 44"
+    tracks = {t["mb_recording_id"]: t for t in db.list_library_tracks(album_id=va_album["id"], limit=50)}
+    assert set(tracks) == {"rec-bob", "rec-other", "rec-third"}
+    assert tracks["rec-bob"]["has_file"]
+    credits = db.list_track_artists(str(tracks["rec-bob"]["id"]))
+    assert [c["artist_name"] for c in credits] == ["Bob Marley vs. Funkstar De Luxe"]
+    assert credits[0]["role"] == "primary"
+    for rec in ("rec-other", "rec-third"):
+        assert not tracks[rec]["monitored"]
+    assert not va_album["monitored"]
+
+
+def test_link_reuses_existing_various_album(db: Database, tmp_path: Path):
+    _seed_album(db, tmp_path, "alb-a", "Now That's What I Call Music! 44",
+                [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    _seed_album(db, tmp_path, "alb-b", "Now That's What I Call Music! 44",
+                [{"num": 1, "title": "Other Song", "rec_id": "rec-other"}],
+                artist_id="artist-other", artist_name="Other Artist", artist_mbid=None)
+    enricher = _enricher({"rec-bob": [NOW_44], "rec-other": [NOW_44]}, NOW_TRACKS)
+
+    counts = link_albums_by_recording(db, enricher)
+
+    assert counts["filed_compilation"] == 2
+    va = db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID)
+    assert va is not None
+    va_albums = [a for a in db.list_library_albums(artist_id=str(va["id"]), limit=50)]
+    assert len(va_albums) == 1
+    with_files = [t for t in db.list_library_tracks(album_id=va_albums[0]["id"], limit=50) if t["has_file"]]
+    assert {t["mb_recording_id"] for t in with_files} == {"rec-bob", "rec-other"}
+    other_credit = db.list_track_artists(str(next(t for t in with_files if t["mb_recording_id"] == "rec-other")["id"]))
+    assert other_credit[0]["artist_name"] == "Other Artist"
+
+
+def test_link_files_junk_title_under_home_release(db: Database, tmp_path: Path):
+    _seed_album(db, tmp_path, "alb-junk", "Unknown Album",
+                [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    home = _group("rg-home", "Exodus", date="1977-06-03")
+    single = _group("rg-single", "Could I Be In Love", primary="Single", date="1977-01-01")
+    chart = _group("rg-chart", "Hits", various=True, date="1970-01-01")
+    home_tracks = {"rg-home": [
+        {"title": "Could I Be In Love", "track_number": 5, "disc_number": 1, "mb_recording_id": "rec-bob"},
+        {"title": "Jamming", "track_number": 6, "disc_number": 1, "mb_recording_id": "rec-jam"},
+    ]}
+    enricher = _enricher({"rec-bob": [chart, single, home]}, home_tracks)
+
+    counts = link_albums_by_recording(db, enricher)
+
+    assert counts["filed_home"] == 1
+    assert counts["no_title_match"] == 0
+    assert db.get_library_album("alb-junk") is None
+    holder_id = db.album_holding_release_group("artist-bob", "rg-home", "")
+    assert holder_id is not None
+    tracks = {t["mb_recording_id"]: t for t in db.list_library_tracks(album_id=holder_id, limit=50)}
+    assert tracks["rec-bob"]["has_file"]
+    assert not tracks["rec-jam"]["monitored"]
+
+
+def test_link_home_conflict_records_choice(db: Database, tmp_path: Path):
+    _seed_album(db, tmp_path, "alb-junk", "Unknown Album",
+                [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    _seed_album(db, tmp_path, "alb-home", "Exodus",
+                [{"num": 5, "title": "Could I Be In Love", "rec_id": "rec-bob"}], rg_id="rg-home")
+    enricher = _enricher({"rec-bob": [_group("rg-home", "Exodus")]})
+
+    counts = link_albums_by_recording(db, enricher)
+
+    assert counts["merge_conflict"] == 1
+    assert counts["filed_home"] == 0
+    assert db.get_library_album("alb-junk") is not None
+    assert db.get_library_track("alb-junk-1") is not None
+    conflicts = db.list_merge_conflicts()
+    assert any(c["source_album_id"] == "alb-junk" and c["holder_album_id"] == "alb-home" for c in conflicts)
+
+
+def test_link_does_not_link_various_group_under_track_artist(db: Database, tmp_path: Path):
+    """A Various Artists group is never linked to a track artist's album (a non-matching title falls through)."""
+    _seed_album(db, tmp_path, "alb-two", "Different Name",
+                [{"num": 1, "title": "A", "rec_id": "rec-a"}, {"num": 2, "title": "B", "rec_id": "rec-b"}])
+    various = _group("rg-va", "Some Hits", various=True)
+    enricher = _enricher({"rec-a": [various], "rec-b": [various]})
+
+    counts = link_albums_by_recording(db, enricher)
+
+    assert counts["linked_by_agreement"] == 0
+    assert counts["linked"] == 0
+    assert counts["no_title_match"] == 1
+    album = db.get_library_album("alb-two")
+    assert album is not None and not album.get("mb_release_group_id")
+
+
+# --- refile_various_albums ---------------------------------------------------------------------------------------
+
+
+def test_refile_various_albums_moves_linked_compilation(db: Database, tmp_path: Path):
+    _seed_album(db, tmp_path, "alb-now", "Now That's What I Call Music! 44",
+                [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}], rg_id="rg-now44")
+    enricher = _enricher({"rec-bob": [NOW_44]}, NOW_TRACKS)
+
+    counts = refile_various_albums(db, enricher)
+
+    assert counts["albums"] == 1 and counts["moved"] == 1 and counts["errors"] == 0
+    album = db.get_library_album("alb-now")
+    va = db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID)
+    assert va is not None and album is not None
+    assert album["artist_id"] == va["id"]
+    track = db.get_library_track("alb-now-1")
+    assert track is not None and track["artist_id"] == va["id"]
+    assert db.list_track_artists("alb-now-1")[0]["artist_name"] == "Bob Marley vs. Funkstar De Luxe"
+    assert refile_various_albums(db, enricher)["albums"] == 0
+
+
+def test_refile_various_albums_merges_into_existing_va_album(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+                [{"num": 2, "title": "Other Song", "rec_id": "rec-other", "file": False}],
+                rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID)
+    _seed_album(db, tmp_path, "alb-now", "Now That's What I Call Music! 44",
+                [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}], rg_id="rg-now44")
+    enricher = _enricher({"rec-bob": [NOW_44]})
+
+    counts = refile_various_albums(db, enricher)
+
+    assert counts["merged"] == 1 and counts["moved"] == 0
+    assert db.get_library_album("alb-now") is None
+    moved = [t for t in db.list_library_tracks(album_id="alb-va", limit=50) if t["has_file"]]
+    assert [t["mb_recording_id"] for t in moved] == ["rec-bob"]
+    assert db.list_track_artists(str(moved[0]["id"]))[0]["artist_name"] == "Bob Marley vs. Funkstar De Luxe"
+
+
+# --- album_for_recording (new files) ------------------------------------------------------------------------------
+
+
+def test_album_for_recording_files_new_compilation_file_under_va(db: Database):
+    db.upsert_library_artist(LibraryArtist(id="artist-bob", name="Bob Marley vs. Funkstar De Luxe", mbid=BOB_MBID))
+    enricher = _enricher({"rec-bob": [NOW_44]}, NOW_TRACKS)
+    with patch("trackseerr.release_matching.mb_metadata_store.get_shared_enricher", return_value=enricher):
+        album = album_for_recording(
+            db, "artist-bob", "rec-bob", album_title="Now That's What I Call Music! 44", track_title="Could I Be In Love"
+        )
+    assert album is not None
+    va = db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID)
+    assert va is not None and album["artist_id"] == va["id"]
+    assert album["mb_release_group_id"] == "rg-now44"
+
+
+def test_album_for_recording_junk_title_under_home(db: Database):
+    db.upsert_library_artist(LibraryArtist(id="artist-bob", name="Bob Marley", mbid=BOB_MBID))
+    home = _group("rg-home", "Exodus")
+    enricher = _enricher({"rec-bob": [home]}, {"rg-home": [
+        {"title": "Could I Be In Love", "track_number": 5, "disc_number": 1, "mb_recording_id": "rec-bob"}
+    ]})
+    with patch("trackseerr.release_matching.mb_metadata_store.get_shared_enricher", return_value=enricher):
+        album = album_for_recording(
+            db, "artist-bob", "rec-bob", album_title="Beatport Top 100 August 2026", track_title="Could I Be In Love"
+        )
+        none_without_title = album_for_recording(db, "artist-other", "rec-bob")
+    assert album is not None and album["artist_id"] == "artist-bob" and album["title"] == "Exodus"
+    assert none_without_title is None
+
+
+def test_album_for_recording_keeps_title_matching_album_unfiled(db: Database):
+    """A file whose album tag matches a real release of the recording is left to the normal album creation."""
+    db.upsert_library_artist(LibraryArtist(id="artist-bob", name="Bob Marley", mbid=BOB_MBID))
+    enricher = _enricher({"rec-bob": [_group("rg-home", "Exodus")]})
+    with patch("trackseerr.release_matching.mb_metadata_store.get_shared_enricher", return_value=enricher):
+        assert album_for_recording(db, "artist-bob", "rec-bob", album_title="Exodus", track_title="X") is None
