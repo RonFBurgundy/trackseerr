@@ -455,7 +455,8 @@ def test_second_song_from_existing_pack_torrent() -> None:
         assert not any(c[1]["data"]["priority"] == 0 for c in prio_calls)
 
 
-def test_non_qbit_client_skips_pack_candidate(db: Database) -> None:
+def test_non_qbit_client_skips_pack_candidate(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("trackseerr.acquisition_coordinator.PARTIAL_DOWNLOAD_DRIVERS", ("qbittorrent", "rtorrent"))
     # Configure Transmission client (non-qbittorrent)
     db.create_download_client(
         DownloadClientConfig(
@@ -490,7 +491,7 @@ def test_non_qbit_client_skips_pack_candidate(db: Database) -> None:
         trigger=GrabTrigger(kind="manual"),
     )
     assert res["success"] is False
-    assert "Only qBittorrent or rTorrent can download part of a torrent" in res["reason"]
+    assert "This download client can't download part of a torrent" in res["reason"]
 
     # 2. search_and_grab falls back to normal non-pack candidate if available
     normal_cand = AcquisitionSearchResult(
@@ -1371,7 +1372,35 @@ def test_dispatch_partial_candidate_to_rtorrent(db: Database) -> None:
     mock_driver.download.assert_called_once_with(cand)
 
 
-def test_dispatch_partial_candidate_skips_transmission(db: Database) -> None:
+@pytest.mark.parametrize(
+    "dtype,url",
+    [
+        (DownloadDriverType.TRANSMISSION, "http://transmission:9091"),
+        (DownloadDriverType.DELUGE, "http://deluge:8112"),
+    ],
+)
+def test_dispatch_partial_candidate_to_transmission_and_deluge(
+    db: Database, dtype: DownloadDriverType, url: str
+) -> None:
+    db.create_download_client(DownloadClientConfig(id="c-1", name="client", driver_type=dtype, host_url=url))
+    coord = AcquisitionCoordinator()
+    cand = AcquisitionSearchResult(
+        download_id="packhash:0",
+        title="Daft Punk - One More Time [FLAC] (in pack: Best)",
+        artist="Daft Punk",
+        protocol="torrent",
+        extra={"file_indices": [0], "file_paths": ["01 - One More Time.flac"]},
+    )
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "hash-1"
+    client, dl_hash = coord.dispatch_with_failover(db, cand, driver_factory=lambda _c: mock_driver)
+    assert client["id"] == "c-1"
+    assert dl_hash == "hash-1"
+    mock_driver.download.assert_called_once_with(cand)
+
+
+def test_dispatch_partial_candidate_skips_transmission(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("trackseerr.acquisition_coordinator.PARTIAL_DOWNLOAD_DRIVERS", ("qbittorrent", "rtorrent"))
     db.create_download_client(
         DownloadClientConfig(
             id="c-trans",
@@ -1407,7 +1436,8 @@ def test_dispatch_partial_candidate_skips_transmission(db: Database) -> None:
     mock_driver.download.assert_called_once_with(cand)
 
 
-def test_dispatch_partial_candidate_no_capable_client(db: Database) -> None:
+def test_dispatch_partial_candidate_no_capable_client(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("trackseerr.acquisition_coordinator.PARTIAL_DOWNLOAD_DRIVERS", ("qbittorrent", "rtorrent"))
     db.create_download_client(
         DownloadClientConfig(
             id="c-trans",
@@ -1426,7 +1456,7 @@ def test_dispatch_partial_candidate_no_capable_client(db: Database) -> None:
     )
     with pytest.raises(AcquisitionUnavailableError) as exc_info:
         coord.dispatch_with_failover(db, cand)
-    assert "Only qBittorrent or rTorrent can download part of a torrent" in str(exc_info.value)
+    assert "This download client can't download part of a torrent" in str(exc_info.value)
 
 
 def test_select_grab_candidate_keeps_pack_for_rtorrent(db: Database) -> None:

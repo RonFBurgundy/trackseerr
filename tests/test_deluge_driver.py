@@ -551,3 +551,91 @@ def test_route_create_deluge(client: TestClient, auth_headers: dict[str, str]):
     assert data["driver_type"] == "deluge"
     assert "••••" in data["password"]
     assert "secretpassword" not in data["password"]
+
+
+# ---------------------------------------------------------------------------
+# Partial (selected files only) downloads
+# ---------------------------------------------------------------------------
+def _partial_torrent() -> bytes:
+    def _s(v: bytes) -> bytes:
+        return str(len(v)).encode() + b":" + v
+
+    def _file(length: int, path: bytes, attr: bytes = b"") -> bytes:
+        body = b"d" + (_s(b"attr") + _s(attr) if attr else b"")
+        body += _s(b"length") + b"i" + str(length).encode() + b"e" + _s(b"path") + b"l" + _s(path) + b"ee"
+        return body
+
+    files = _file(10, b"01 - A.flac") + _file(5, b".pad", b"p") + _file(10, b"02 - B.flac") + _file(10, b"03 - C.flac")
+    info = b"d" + _s(b"files") + b"l" + files + b"e" + _s(b"name") + _s(b"Album") + b"e"
+    return b"d" + _s(b"info") + info + b"e"
+
+
+def _partial_item(indices: list[int], paths: list[str], magnet: bool = False) -> AcquisitionSearchResult:
+    return AcquisitionSearchResult(
+        download_id="placeholder",
+        title="Album",
+        artist="Artist",
+        download_url=None if magnet else "https://tracker.org/album.torrent",
+        magnet_url="magnet:?xt=urn:btih:1122334455667788990011223344556677889900" if magnet else None,
+        extra={"file_indices": indices, "file_paths": paths},
+    )
+
+
+def _deluge_handler(calls: list[tuple[str, list[Any]]]):
+    def _rpc_handler(url, json=None, **kwargs):
+        method = json.get("method") if json else ""
+        calls.append((method, json.get("params", []) if json else []))
+        if method == "auth.login":
+            return _mock_response(200, {"result": True, "error": None}, {"set-cookie": "sess=1"})
+        if method == "web.connected":
+            return _mock_response(200, {"result": True, "error": None})
+        if method in ("core.add_torrent_file", "core.add_torrent_url", "core.add_torrent_magnet"):
+            return _mock_response(200, {"result": "fedcba9876543210fedcba9876543210fedcba98", "error": None})
+        return _mock_response(200, {"result": [], "error": None})
+
+    return _rpc_handler
+
+
+def test_deluge_partial_download_uses_add_torrent_file_with_priorities():
+    import base64
+
+    driver = DelugeDriver("http://deluge.local:8112", password="pwd", label=None, download_location="/data")
+    calls: list[tuple[str, list[Any]]] = []
+    raw = _partial_torrent()
+    with patch("trackseerr.clients.acquisition.torznab.fetch_torrent_file", return_value=raw), patch(
+        "httpx.Client.post", side_effect=_deluge_handler(calls)
+    ):
+        thash = driver.download(_partial_item([0, 2], ["Album/01 - A.flac", "Album/02 - B.flac"]))
+    assert thash == "fedcba9876543210fedcba9876543210fedcba98"
+    methods = [c[0] for c in calls]
+    assert "core.add_torrent_file" in methods
+    assert "core.add_torrent_url" not in methods
+    params = [c[1] for c in calls if c[0] == "core.add_torrent_file"][0]
+    assert base64.b64decode(params[1]) == raw
+    assert params[2]["file_priorities"] == [1, 0, 1, 0]
+    assert params[2]["download_location"] == "/data"
+
+
+def test_deluge_partial_download_magnet_raises():
+    from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
+
+    driver = DelugeDriver("http://deluge.local:8112", password="pwd")
+    with patch("httpx.Client.post") as mock_post:
+        with pytest.raises(AcquisitionUnavailableError, match="needs the .torrent file"):
+            driver.download(_partial_item([0], ["Album/01 - A.flac"], magnet=True))
+    mock_post.assert_not_called()
+
+
+def test_deluge_full_download_unchanged_without_file_indices():
+    driver = DelugeDriver("http://deluge.local:8112", password="pwd", label=None)
+    calls: list[tuple[str, list[Any]]] = []
+    item = AcquisitionSearchResult(
+        download_id="x", title="Album", artist="Artist", download_url="https://tracker.org/a.torrent"
+    )
+    with patch("trackseerr.clients.acquisition.torznab.fetch_torrent_file") as fetch, patch(
+        "httpx.Client.post", side_effect=_deluge_handler(calls)
+    ):
+        driver.download(item)
+    fetch.assert_not_called()
+    methods = [c[0] for c in calls]
+    assert "core.add_torrent_url" in methods and "core.add_torrent_file" not in methods

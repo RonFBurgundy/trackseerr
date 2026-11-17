@@ -489,7 +489,7 @@ def _dispatch_manual_grab(
         if not supports_partial_download(client):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Only qBittorrent or rTorrent can download part of a torrent",
+                detail="This download client can't download part of a torrent",
             )
     try:
         if client is not None:

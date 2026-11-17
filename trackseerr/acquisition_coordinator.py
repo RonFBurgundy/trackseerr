@@ -169,7 +169,7 @@ def candidate_rank(
 
 
 CLIENT_BACKOFF_SECONDS = 300.0
-PARTIAL_DOWNLOAD_DRIVERS = ("qbittorrent", "rtorrent")
+PARTIAL_DOWNLOAD_DRIVERS = ("qbittorrent", "rtorrent", "transmission", "deluge")
 
 
 def supports_partial_download(client: dict[str, Any]) -> bool:
@@ -1270,7 +1270,7 @@ class AcquisitionCoordinator:
             clients = [c for c in clients if supports_partial_download(c)]
         if not clients:
             if candidate.extra and candidate.extra.get("file_indices"):
-                raise AcquisitionUnavailableError("Only qBittorrent or rTorrent can download part of a torrent")
+                raise AcquisitionUnavailableError("This download client can't download part of a torrent")
             raise NoClientAvailable(f"No enabled download client available for {candidate.protocol}")
         last_error: Optional[Exception] = None
         for client in clients:
@@ -1298,12 +1298,12 @@ class AcquisitionCoordinator:
                 clients = self.clients_for_protocol(cand.protocol, db)
                 if not any(supports_partial_download(c) for c in clients):
                     logger.info(
-                        "Skipping candidate '%s': Only qBittorrent or rTorrent can download part of a torrent",
+                        "Skipping candidate '%s': This download client can't download part of a torrent",
                         cand.title,
                     )
                     continue
             return cand, res, None
-        skip_reason = "Only qBittorrent or rTorrent can download part of a torrent" if has_pack else None
+        skip_reason = "This download client can't download part of a torrent" if has_pack else None
         return None, None, skip_reason
 
     def search_and_grab(
@@ -1650,7 +1650,7 @@ class AcquisitionCoordinator:
         )
         if top_candidate.extra and top_candidate.extra.get("file_indices"):
             if not self._has_partial_torrent_client(db, top_candidate.protocol):
-                reason = "Only qBittorrent or rTorrent can download part of a torrent"
+                reason = "This download client can't download part of a torrent"
                 logger.info("Skipping candidate '%s': %s", top_candidate.title, reason)
                 return {
                     "success": False,
