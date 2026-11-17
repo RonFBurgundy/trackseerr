@@ -165,3 +165,28 @@ def test_album_lookup_respects_release_group(db: Database):
         release_group_id="rg-ziggy",
     )
     assert unlinked_hit is not None and unlinked_hit["id"] == unlinked["id"]
+
+
+def test_album_lookup_ignores_year_and_single_suffix(db: Database):
+    artist = db.upsert_library_artist(LibraryArtist(id="a-cake", name="Cake"))
+    stored_with_junk = db.upsert_library_album(
+        LibraryAlbum(
+            id="alb-lj",
+            artist_id=artist["id"],
+            title="Long Jacket - Single (2026)",
+        )
+    )
+
+    hit = db.get_library_album_by_title(artist["id"], "Long Jacket")
+    assert hit is not None and hit["id"] == stored_with_junk["id"]
+
+    plain = db.upsert_library_album(
+        LibraryAlbum(
+            id="alb-fn",
+            artist_id=artist["id"],
+            title="Fashion Nugget",
+        )
+    )
+    hit_with_year = db.get_library_album_by_title(artist["id"], "Fashion Nugget (1996)")
+    assert hit_with_year is not None and hit_with_year["id"] == plain["id"]
+
