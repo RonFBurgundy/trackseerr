@@ -65,6 +65,8 @@ def _status_reply(**overrides: Any) -> MagicMock:
         "d.is_multi_file": 1,
         "d.ratio": 1500,
         "d.timestamp.finished": 0,
+        "d.is_partially_done": 0,
+        "d.left_bytes": 750,
     }
     base.update(overrides)
     order = list(base)
@@ -322,6 +324,27 @@ def test_rtorrent_status_mapping(overrides: dict[str, Any], status: str, progres
     assert res["ratio"] == 1.5
 
 
+def test_rtorrent_status_partial_done_is_completed():
+    driver = RtorrentDriver(HOST)
+    reply = _status_reply(**{"d.is_partially_done": 1, "d.complete": 0, "d.completed_bytes": 30, "d.left_bytes": 0})
+    with patch("httpx.Client.post", return_value=reply):
+        res = driver.get_status(HASH)
+    assert res["status"] == DownloadStatus.COMPLETED.value
+    assert res["progress"] == 100.0
+
+
+def test_rtorrent_status_partial_progress_counts_wanted_only():
+    driver = RtorrentDriver(HOST)
+    reply = _status_reply(
+        **{"d.size_bytes": 600_000_000, "d.completed_bytes": 10_000_000, "d.left_bytes": 30_000_000, "d.down.rate": 1_000_000}
+    )
+    with patch("httpx.Client.post", return_value=reply):
+        res = driver.get_status(HASH)
+    assert res["status"] == DownloadStatus.DOWNLOADING.value
+    assert res["progress"] == 25.0
+    assert res["eta_seconds"] == 30
+
+
 def test_rtorrent_status_eta_and_speed():
     driver = RtorrentDriver(HOST)
     with patch("httpx.Client.post", return_value=_status_reply()):
@@ -426,13 +449,15 @@ def test_rtorrent_invalid_reply_is_runtime_error():
 def test_rtorrent_list_category():
     driver = RtorrentDriver(HOST, category="trackseerr")
     rows = [
-        [HASH.upper(), "TrackSeerr Album", 1000, 1500, 0, "/dl/TrackSeerr Album", "/dl", "trackseerr", 1, 1],
-        ["CD" * 20, "Other", 5, 0, 0, "/dl/Other", "/dl", "other", 1, 0],
+        [HASH.upper(), "TrackSeerr Album", 1000, 1500, 0, "/dl/TrackSeerr Album", "/dl", "trackseerr", 1, 1, 0],
+        ["CD" * 20, "Other", 5, 0, 0, "/dl/Other", "/dl", "other", 1, 0, 0],
+        ["EF" * 20, "Partial", 600, 0, 0, "/dl/Partial", "/dl", "trackseerr", 1, 0, 1],
     ]
     with patch("httpx.Client.post", return_value=_ok(rows)):
         items = driver.list_category()
     assert items is not None
-    assert len(items) == 1
+    assert len(items) == 2
+    assert items[1]["state"] == "seeding"
     assert items[0]["hash"] == HASH
     assert items[0]["ratio"] == 1.5
     assert items[0]["state"] == "seeding"
