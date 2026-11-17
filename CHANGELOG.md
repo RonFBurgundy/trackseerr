@@ -144,6 +144,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- New downloads and scans no longer create the duplicates the weekly repair has to clean up: "JAY‐Z" files under "JAY-Z", "Simon and Garfunkel" under "Simon & Garfunkel", "2Pac; Dr. Dre" under 2Pac (when 2Pac is matched on MusicBrainz), "Hunky Dory (2015 Remaster)" under "Hunky Dory", and a playlist song tagged with its single's title goes onto the album you already have that contains it.
 - One-song albums created by playlist imports (like "Something - Remastered 2009") are folded into the real album you already have ("Abbey Road") by MusicBrainz Release Match and Library Self-Heal. The song keeps its file, history and requests; only the extra album disappears. Run Rename Files afterwards to move the files into the album's folder.
 - The Requests page updates on its own while requests are in progress, so a finished request moves to Fulfilled without a refresh.
 - On phones, the Library search results now span the whole toolbar instead of only the search box, so long names are no longer cut off.
