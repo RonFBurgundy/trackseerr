@@ -251,3 +251,56 @@ def test_seconds_since_parses_naive_as_utc() -> None:
     assert elapsed == pytest.approx(120.0, abs=5.0)
 
 
+
+
+def _never_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        lsh,
+        "run_self_heal",
+        lambda *a, **kw: (_ for _ in ()).throw(AssertionError("run_self_heal must not start a second run")),
+    )
+
+
+def test_scheduled_skips_while_manual_run_unfinished(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    db.start_task_run("library_self_heal", "manual", datetime.now(timezone.utc).isoformat())
+    _never_run(monkeypatch)
+    assert LibrarySelfHealWorker().run_if_due(db, _cfg(), 7 * 86400) is False
+
+
+def test_run_once_skips_when_self_heal_running(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    _never_run(monkeypatch)
+    run_id = db.start_task_run("library_self_heal", "manual", datetime.now(timezone.utc).isoformat())
+    assert LibrarySelfHealWorker().run_once(db, _cfg()) is False
+    db.finish_task_run(run_id, "success", datetime.now(timezone.utc).isoformat(), "done", 10)
+    worker = LibrarySelfHealWorker()
+    worker._active_run = True
+    assert worker.run_once(db, _cfg()) is False
+
+
+def test_stale_unfinished_row_does_not_block_forever(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A row orphaned by a restart is closed by startup housekeeping, after which the worker can run again."""
+    from trackseerr.task_manager import startup_housekeeping
+
+    db.start_task_run("library_self_heal", "manual", (datetime.now(timezone.utc) - timedelta(days=9)).isoformat())
+    startup_housekeeping(db)
+    called: list[bool] = []
+    monkeypatch.setattr(lsh, "run_self_heal", lambda d, cfg, run: called.append(True))
+    assert LibrarySelfHealWorker().run_if_due(db, _cfg(), 7 * 86400) is True
+    assert called == [True]
+
+
+def test_manual_trigger_refused_while_scheduled_run_active(db: Database) -> None:
+    from fastapi import HTTPException
+
+    from trackseerr.api.routes.system import tasks as tasks_mod
+
+    tasks_mod.library_self_heal_worker._active_run = True
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            tasks_mod.run_scheduled_task(
+                "library_self_heal", db=db, config=_cfg(), plex_client=None, spotify_client=None,
+                deezer_client=None, lidarr_client=None, media_server=None, _admin={},
+            )
+        assert exc_info.value.status_code == 409
+    finally:
+        tasks_mod.library_self_heal_worker._active_run = False
