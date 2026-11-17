@@ -6,6 +6,8 @@ import type {
   MatchApplyRequest,
   MatchApplyResponse,
   MatchSuggestionsResponse,
+  StoredMatchApplyResponse,
+  StoredMatchSuggestionsPage,
 } from '@/types/models';
 import { apiRequest } from './apiClient';
 import { buildIndexUrl, buildListUrl } from './listUrl';
@@ -380,6 +382,29 @@ export async function applyMatch(albumId: string | number, body: MatchApplyReque
   return apiRequest<MatchApplyResponse>(`/api/library/musicbrainz/unlinked/${encodeURIComponent(String(albumId))}/apply`, {
     method: 'POST',
     body,
+  });
+}
+
+export interface GetStoredSuggestionsOptions {
+  page?: number;
+  pageSize?: number;
+  signal?: AbortSignal;
+}
+
+export async function getStoredSuggestions(options: GetStoredSuggestionsOptions = {}): Promise<StoredMatchSuggestionsPage> {
+  const params = new URLSearchParams();
+  if (options.page !== undefined) params.set('page', String(options.page));
+  if (options.pageSize !== undefined) params.set('page_size', String(options.pageSize));
+  const qs = params.toString();
+  return apiRequest<StoredMatchSuggestionsPage>(`/api/library/musicbrainz/suggestions${qs ? `?${qs}` : ''}`, {
+    signal: options.signal,
+  });
+}
+
+export async function applyStoredSuggestions(albumIds: string[]): Promise<StoredMatchApplyResponse> {
+  return apiRequest<StoredMatchApplyResponse>('/api/library/musicbrainz/suggestions/apply', {
+    method: 'POST',
+    body: { album_ids: albumIds },
   });
 }
 

@@ -307,6 +307,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
             setRetagAfterRename(scope);
             setRenameScope(scope);
           }}
+          onReviewLibrary={() => setRenameScope({})}
           onToast={showToast}
         />
       )}
