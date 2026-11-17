@@ -2912,6 +2912,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/musicbrainz/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Stored Match Suggestions
+         * @description Lists the unsure matches Self-Heal stored for bulk review, most confident first.
+         */
+        get: operations["list_stored_match_suggestions_api_library_musicbrainz_suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/musicbrainz/suggestions/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Stored Match Suggestions
+         * @description Applies the stored suggestion of each chosen album; files on disk are not touched.
+         */
+        post: operations["apply_stored_match_suggestions_api_library_musicbrainz_suggestions_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/musicbrainz/unlinked": {
         parameters: {
             query?: never;
@@ -14479,6 +14519,82 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * StoredMatchApplyRequest
+         * @description Albums whose stored suggestion should be applied.
+         */
+        StoredMatchApplyRequest: {
+            /** Album Ids */
+            album_ids: string[];
+        };
+        /**
+         * StoredMatchApplyResponse
+         * @description Per-album outcomes of a bulk apply.
+         */
+        StoredMatchApplyResponse: {
+            /** Results */
+            results: components["schemas"]["StoredMatchApplyResult"][];
+        };
+        /**
+         * StoredMatchApplyResult
+         * @description Outcome of applying one stored suggestion.
+         */
+        StoredMatchApplyResult: {
+            /** Album Id */
+            album_id: string;
+            /** Final Album Id */
+            final_album_id: string;
+            /** Message */
+            message?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "applied" | "conflict" | "missing" | "error";
+        };
+        /**
+         * StoredMatchSuggestion
+         * @description The best unsure MusicBrainz match kept for one unlinked album.
+         */
+        StoredMatchSuggestion: {
+            /** Album Id */
+            album_id: string;
+            /** Album Title */
+            album_title: string;
+            /**
+             * Artist Name
+             * @default
+             */
+            artist_name: string;
+            candidate: components["schemas"]["MatchCandidate"];
+            /** Computed At */
+            computed_at: string;
+            /** Confidence */
+            confidence: number;
+            /** File Count */
+            file_count: number;
+            /** Files Found */
+            files_found: number;
+            /**
+             * Track Count
+             * @default 0
+             */
+            track_count: number;
+        };
+        /**
+         * StoredMatchSuggestionsPage
+         * @description One page of stored match suggestions, most confident first.
+         */
+        StoredMatchSuggestionsPage: {
+            /** Items */
+            items: components["schemas"]["StoredMatchSuggestion"][];
+            /** Page */
+            page: number;
+            /** Page Size */
+            page_size: number;
+            /** Total */
+            total: number;
+        };
         /** SuccessFlag */
         SuccessFlag: {
             /** Success */
@@ -20541,6 +20657,71 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MigrationStatus"];
+                };
+            };
+        };
+    };
+    list_stored_match_suggestions_api_library_musicbrainz_suggestions_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredMatchSuggestionsPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_stored_match_suggestions_api_library_musicbrainz_suggestions_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StoredMatchApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredMatchApplyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

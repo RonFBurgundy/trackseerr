@@ -178,6 +178,50 @@ class MatchApplyResponse(ApiModel):
     conflict: bool
 
 
+class StoredMatchSuggestion(ApiModel):
+    """The best unsure MusicBrainz match kept for one unlinked album."""
+
+    album_id: str
+    album_title: str
+    artist_name: str = ""
+    track_count: int = 0
+    confidence: int
+    files_found: int
+    file_count: int
+    candidate: MatchCandidate
+    computed_at: str
+
+
+class StoredMatchSuggestionsPage(ApiModel):
+    """One page of stored match suggestions, most confident first."""
+
+    items: list[StoredMatchSuggestion]
+    total: int
+    page: int
+    page_size: int
+
+
+class StoredMatchApplyRequest(ApiModel):
+    """Albums whose stored suggestion should be applied."""
+
+    album_ids: list[str] = Field(min_length=1, max_length=500)
+
+
+class StoredMatchApplyResult(ApiModel):
+    """Outcome of applying one stored suggestion."""
+
+    album_id: str
+    final_album_id: str
+    status: Literal["applied", "conflict", "missing", "error"]
+    message: Optional[str] = None
+
+
+class StoredMatchApplyResponse(ApiModel):
+    """Per-album outcomes of a bulk apply."""
+
+    results: list[StoredMatchApplyResult]
+
+
 class LibraryAlbumRecord(ApiModel):
     """A library album (native row plus enrichments, or Lidarr's mapped album)."""
 
