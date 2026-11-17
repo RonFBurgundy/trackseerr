@@ -144,6 +144,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Library Self-Heal folds an album that isn't linked to MusicBrainz into your same-titled album that is ("Hunky Dory  (2015 Remaster)" into "Hunky Dory", "Violator (2006 Remaster)" into "Violator"), whatever its size, as long as only one album matches and the songs don't already have files there.
 - More albums link to MusicBrainz: album titles now match even with a year, "- Single"/"- EP", a disc number or a remaster note at the end ("The E•N•D (2009)", "In the Dark [2013 Remaster]"), and an album whose songs all belong to the same MusicBrainz album links even when the titles differ. New albums no longer get the year or "- Single" added to their title.
 - AcoustID matches are accepted for the same song with a small title difference ("Tonite"/"Tonight", "Sister Morphine (2009 Mix)"), when the artist matches. Different versions (remixes, dub edits, live, instrumental) are still kept apart.
 - New downloads and scans no longer create the duplicates the weekly repair has to clean up: "JAY‐Z" files under "JAY-Z", "Simon and Garfunkel" under "Simon & Garfunkel", "2Pac; Dr. Dre" under 2Pac (when 2Pac is matched on MusicBrainz), "Hunky Dory (2015 Remaster)" under "Hunky Dory", and a playlist song tagged with its single's title goes onto the album you already have that contains it.
