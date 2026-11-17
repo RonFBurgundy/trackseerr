@@ -163,10 +163,11 @@ def _seed_album_with_tracks(
     rg_id: str | None,
     tracks: list[dict],
     mb_release_id: str | None = None,
+    artist_name: str = "Test Artist",
 ) -> None:
-    if db.get_library_artist("artist-1") is None:
+    if db.get_library_artist("artist-1") is None or artist_name != "Test Artist":
         db.upsert_library_artist(
-            LibraryArtist(id="artist-1", name="Test Artist", monitored=True)
+            LibraryArtist(id="artist-1", name=artist_name, monitored=True)
         )
     db.upsert_library_album(
         LibraryAlbum(
@@ -696,6 +697,231 @@ def test_fill_stops_when_fingerprinting_unavailable(db: Database, tmp_path: Path
 
     counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
     assert counts["filled"] == 0
+
+
+def test_fill_accepts_small_wording_difference(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-trex",
+        rg_id=None,
+        artist_name="T. Rex",
+        tracks=[{"num": 1, "title": "King Of The Mountain Cometh", "rec_id": None, "file": True}],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, _file, _key: {
+            "status": "ok",
+            "matches": [
+                {
+                    "recording_id": "rec-king",
+                    "score": 1.00,
+                    "title": "The King of This Mountain Cometh",
+                    "artist": "T.Rex",
+                }
+            ],
+            "cached": True,
+        },
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["filled"] == 1
+    assert db.get_library_track("alb-trex-1")["mb_recording_id"] == "rec-king"
+
+
+def test_fill_accepts_year_mix_label(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-stones",
+        rg_id=None,
+        artist_name="The Rolling Stones",
+        tracks=[
+            {"num": 1, "title": "Sister Morphine (2009 Mix)", "rec_id": None, "file": True},
+            {"num": 2, "title": "Bitch (2009 Mix)", "rec_id": None, "file": True},
+        ],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    responses = {
+        "file-alb-stones-1": {
+            "status": "ok",
+            "matches": [{"recording_id": "rec-sister", "score": 0.98, "title": "Sister Morphine"}],
+            "cached": True,
+        },
+        "file-alb-stones-2": {
+            "status": "ok",
+            "matches": [{"recording_id": "rec-bitch", "score": 0.97, "title": "Bitch"}],
+            "cached": True,
+        },
+    }
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, file_row, _key: responses[file_row["id"]],
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["filled"] == 2
+    assert db.get_library_track("alb-stones-1")["mb_recording_id"] == "rec-sister"
+    assert db.get_library_track("alb-stones-2")["mb_recording_id"] == "rec-bitch"
+
+
+def test_fill_accepts_spelling_with_lower_score(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-tonite",
+        rg_id=None,
+        artist_name="April Wine",
+        tracks=[
+            {
+                "num": 1,
+                "title": "Tonite Is a Wonderful Time to Fall in Love",
+                "rec_id": None,
+                "file": True,
+            }
+        ],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, _file, _key: {
+            "status": "ok",
+            "matches": [
+                {
+                    "recording_id": "rec-tonite",
+                    "score": 0.87,
+                    "title": "Tonight Is a Wonderful Time to Fall in Love",
+                    "artist": "April Wine",
+                }
+            ],
+            "cached": True,
+        },
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["filled"] == 1
+    assert db.get_library_track("alb-tonite-1")["mb_recording_id"] == "rec-tonite"
+
+
+def test_fill_rejects_dub_edit(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-dub",
+        rg_id=None,
+        artist_name="The RAH Band",
+        tracks=[
+            {
+                "num": 1,
+                "title": "Spend The Night (feat. Dannielle Gaha) - H Man Dub Edit",
+                "rec_id": None,
+                "file": True,
+            }
+        ],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, _file, _key: {
+            "status": "ok",
+            "matches": [
+                {
+                    "recording_id": "rec-spend",
+                    "score": 0.97,
+                    "title": "Spend the Night",
+                    "artist": "The RAH Band",
+                }
+            ],
+            "cached": True,
+        },
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["filled"] == 0
+    assert counts["no_match"] == 1
+    assert db.get_library_track("alb-dub-1")["mb_recording_id"] is None
+
+
+def test_fill_rejects_close_title_wrong_artist(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-wrong-artist",
+        rg_id=None,
+        artist_name="T. Rex",
+        tracks=[{"num": 1, "title": "King Of The Mountain Cometh", "rec_id": None, "file": True}],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, _file, _key: {
+            "status": "ok",
+            "matches": [
+                {
+                    "recording_id": "rec-wrong",
+                    "score": 0.99,
+                    "title": "The King of This Mountain Cometh",
+                    "artist": "Other Artist",
+                }
+            ],
+            "cached": True,
+        },
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["filled"] == 0
+    assert counts["no_match"] == 1
+    assert db.get_library_track("alb-wrong-artist-1")["mb_recording_id"] is None
+
+
+def test_fill_rejects_close_title_without_artist(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import trackseerr.rename_verification
+
+    _seed_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-no-artist",
+        rg_id=None,
+        artist_name="T. Rex",
+        tracks=[{"num": 1, "title": "King Of The Mountain Cometh", "rec_id": None, "file": True}],
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    monkeypatch.setattr(
+        trackseerr.rename_verification,
+        "verify_file",
+        lambda _db, _file, _key: {
+            "status": "ok",
+            "matches": [
+                {
+                    "recording_id": "rec-no-artist",
+                    "score": 0.99,
+                    "title": "The King of This Mountain Cometh",
+                }
+            ],
+            "cached": True,
+        },
+    )
+
+    counts = fill_recordings_from_fingerprints(db, enricher, "test-key")
+    assert counts["filled"] == 0
+    assert counts["no_match"] == 1
+    assert db.get_library_track("alb-no-artist-1")["mb_recording_id"] is None
 
 
 # =============================================================================

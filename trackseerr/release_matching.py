@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import difflib
 import itertools
 import logging
+import re
 import sqlite3
 from collections.abc import Callable
 from typing import Any, Optional
@@ -354,22 +356,94 @@ def _usable_matches(matches: list[dict[str, Any]], used_rec_ids: set[str]) -> li
     return sorted(usable, key=lambda m: float(m.get("score") or 0.0), reverse=True)
 
 
+_VERSION_WORDS = frozenset({
+    "remix",
+    "mix",
+    "dub",
+    "edit",
+    "live",
+    "instrumental",
+    "acoustic",
+    "demo",
+    "extended",
+    "rework",
+    "bootleg",
+    "vip",
+    "version",
+    "karaoke",
+    "cover",
+})
+
+
+def _artist_key(name: str | None) -> str:
+    from trackseerr.clients.mbid_enricher import artist_name_key
+
+    return artist_name_key(str(name or "")).replace(" ", "")
+
+
+def _artists_match(match_artist: Any, track_artist: str | None) -> bool:
+    from trackseerr.artist_repair import primary_credit
+
+    m_key = _artist_key(str(match_artist or ""))
+    t_key = _artist_key(track_artist)
+    if not m_key or not t_key:
+        return False
+    if m_key == t_key:
+        return True
+    primary = primary_credit(track_artist or "")
+    return bool(primary and _artist_key(primary) == m_key)
+
+
+def _version_words(title: str) -> set[str]:
+    from trackseerr.lidarr_release import _fold
+
+    return set(re.findall(r"[a-z0-9]+", _fold(title))) & _VERSION_WORDS
+
+
+def _titles_close(left: str, right: str) -> bool:
+    from trackseerr.lidarr_release import norm_title
+    from trackseerr.rename_verification import _YEAR_MIX_SUFFIX
+
+    a_stripped = _YEAR_MIX_SUFFIX.sub("", left)
+    b_stripped = _YEAR_MIX_SUFFIX.sub("", right)
+    if _version_words(a_stripped) != _version_words(b_stripped):
+        return False
+    a_norm = norm_title(a_stripped)
+    b_norm = norm_title(b_stripped)
+    if not a_norm or not b_norm:
+        return False
+    return difflib.SequenceMatcher(None, a_norm, b_norm).ratio() >= 0.85
+
+
+def _same_song_match(
+    m: dict[str, Any], track_title: str, track_artist: str | None = None
+) -> bool:
+    from trackseerr.rename_verification import _same_song
+
+    score = float(m.get("score") or 0.0)
+    match_title = str(m.get("title") or "")
+    if score >= 0.90 and _same_song(match_title, track_title):
+        return True
+    if score < 0.85 or not _artists_match(m.get("artist"), track_artist):
+        return False
+    return _titles_close(match_title, track_title)
+
+
 def _pick_recording(
     matches: list[dict[str, Any]],
     track_title: str,
     rg_rec_ids: set[str],
     used_rec_ids: set[str],
-) -> Optional[dict[str, Any]]:
-    """Picks the best unused AcoustID match: inside the release group first, else >= 0.90 with a matching title."""
-    from trackseerr.lidarr_release import titles_match
-
+    track_artist: str | None = None,
+) -> dict[str, Any] | None:
+    """Picks the best unused AcoustID match: inside the release group first, else a same-song match."""
     available = _usable_matches(matches, used_rec_ids)
     if rg_rec_ids:
         for m in available:
             if str(m["recording_id"]).strip() in rg_rec_ids:
                 return m
     for m in available:
-        if float(m.get("score") or 0.0) >= 0.90 and titles_match(m.get("title"), track_title):
+        if _same_song_match(m, track_title, track_artist):
             return m
     return None
 
@@ -391,6 +465,18 @@ def _first_lookup_rejected(fp: dict[str, Any], state: dict[str, bool]) -> bool:
     return _key_rejected(fp)
 
 
+def _album_artist_name(
+    db: Any, album: dict[str, Any], tracks: list[dict[str, Any]]
+) -> str | None:
+    artist_id = album.get("artist_id") or (tracks[0].get("artist_id") if tracks else None)
+    if not artist_id:
+        return None
+    artist_row = db.get_library_artist(str(artist_id))
+    if not artist_row:
+        return None
+    return str(artist_row.get("name") or "").strip() or None
+
+
 def _fill_album(
     db: Any,
     enricher: Any,
@@ -407,6 +493,7 @@ def _fill_album(
     if not missing:
         return False
 
+    track_artist = _album_artist_name(db, album, all_tracks)
     used_rec_ids = _extract_owned_rec_ids(all_tracks)
     rg_id = str(album.get("mb_release_group_id") or "").strip()
     rg_rec_ids: Optional[set[str]] = None
@@ -430,7 +517,7 @@ def _fill_album(
             rg_rec_ids = _rg_recording_ids(enricher, rg_id)
 
         track_title = str(track.get("title") or "")
-        chosen = _pick_recording(matches, track_title, rg_rec_ids, used_rec_ids)
+        chosen = _pick_recording(matches, track_title, rg_rec_ids, used_rec_ids, track_artist)
         if chosen is None:
             counts["no_match"] += 1
             continue
