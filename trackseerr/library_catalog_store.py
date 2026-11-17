@@ -196,12 +196,12 @@ class LibraryCatalogStoreMixin:
     def get_library_album_by_title(
         self, artist_id: str, title: str, release_group_id: str | None = None
     ) -> dict[str, Any] | None:
-        """Retrieves a library album by artist ID and title using clean_library_name, then titles_match.
+        """Retrieves a library album by artist ID and title using clean_library_name, then album_titles_match.
 
         When ``release_group_id`` is given, a row already linked to a different release group is never returned
         (an album and a single can share a normalised title); an exact RG match is preferred over an unlinked row.
         """
-        from trackseerr.lidarr_release import titles_match
+        from trackseerr.album_titles import album_titles_match
 
         clean = clean_library_name(title)
         with self.reader() as conn:
@@ -216,7 +216,7 @@ class LibraryCatalogStoreMixin:
                 "SELECT * FROM library_albums WHERE artist_id = ?",
                 (str(artist_id),),
             ).fetchall()
-        matched = [row for row in all_rows if titles_match(row["title"], title)]
+        matched = [row for row in all_rows if album_titles_match(row["title"], title)]
         picked = self._pick_album_for_release_group(matched, release_group_id, require_unique=True)
         return self._map_library_album(picked) if picked is not None else None
 

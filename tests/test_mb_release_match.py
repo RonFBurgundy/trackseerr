@@ -865,5 +865,113 @@ def test_link_does_not_merge_large_album(db: Database, tmp_path: Path):
     assert db.get_library_album("alb-large") is not None
 
 
+def test_link_ignores_year_suffix_in_album_title(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-end",
+        title="The E•N•D (2009)",
+        rg_id=None,
+        tracks=[{"num": 1, "title": "Boom Boom Pow", "rec_id": "rec-bbp", "file": True}],
+    )
+
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_recording_release_groups.return_value = [
+        {
+            "id": "rg-end",
+            "title": "The E.N.D.",
+            "primary_type": "Album",
+            "secondary_types": [],
+            "first_release_date": "2009-06-03",
+        }
+    ]
+
+    counts = link_albums_by_recording(db, enricher)
+    assert counts["linked"] == 1
+    assert counts["linked_by_agreement"] == 0
+    album = db.get_library_album("alb-end")
+    assert album is not None and album["mb_release_group_id"] == "rg-end"
+
+
+def test_link_by_agreement_when_titles_differ(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-agree",
+        title="Custom Box Set Name",
+        rg_id=None,
+        tracks=[
+            {"num": 1, "title": "Come Together", "rec_id": "rec-1", "file": True},
+            {"num": 2, "title": "Something", "rec_id": "rec-2", "file": True},
+        ],
+    )
+
+    shared_rg = {
+        "id": "rg-abbey",
+        "title": "Abbey Road",
+        "primary_type": "Album",
+        "secondary_types": [],
+        "first_release_date": "1969-09-26",
+    }
+    other_rg = {
+        "id": "rg-comp",
+        "title": "1967-1970",
+        "primary_type": "Album",
+        "secondary_types": ["Compilation"],
+        "first_release_date": "1973-04-02",
+    }
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_recording_release_groups.side_effect = lambda rec_id: (
+        [shared_rg, other_rg] if rec_id == "rec-1" else [shared_rg]
+    )
+
+    counts = link_albums_by_recording(db, enricher)
+    assert counts["linked"] == 0
+    assert counts["linked_by_agreement"] == 1
+    album = db.get_library_album("alb-agree")
+    assert album is not None and album["mb_release_group_id"] == "rg-abbey"
+
+
+def test_no_agreement_when_groups_differ(db: Database, tmp_path: Path):
+    _seed_named_album_with_tracks(
+        db,
+        tmp_path,
+        album_id="alb-disagree",
+        title="Unmatched Mixtape",
+        rg_id=None,
+        tracks=[
+            {"num": 1, "title": "Song A", "rec_id": "rec-a", "file": True},
+            {"num": 2, "title": "Song B", "rec_id": "rec-b", "file": True},
+        ],
+    )
+
+    rg_a = {
+        "id": "rg-a",
+        "title": "Album A",
+        "primary_type": "Album",
+        "secondary_types": [],
+        "first_release_date": "1990-01-01",
+    }
+    rg_b = {
+        "id": "rg-b",
+        "title": "Album B",
+        "primary_type": "Album",
+        "secondary_types": [],
+        "first_release_date": "1991-01-01",
+    }
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.get_recording_release_groups.side_effect = lambda rec_id: (
+        [rg_a] if rec_id == "rec-a" else [rg_b]
+    )
+
+    counts = link_albums_by_recording(db, enricher)
+    assert counts["linked"] == 0
+    assert counts["linked_by_agreement"] == 0
+    assert counts["no_title_match"] == 1
+    album = db.get_library_album("alb-disagree")
+    assert album is not None and album["mb_release_group_id"] is None
+
+
+
 
 

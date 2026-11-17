@@ -11,6 +11,7 @@ from typing import Any
 
 from trackseerr import delay_gate
 from trackseerr.acquisition_coordinator import _to_quality_profile
+from trackseerr.album_titles import clean_new_album_title
 from trackseerr.library import (
     inspect_audio_file,
 )
@@ -182,7 +183,7 @@ class ImportCatalogMixin:
                 LibraryAlbum(
                     id=album_id,
                     artist_id=artist_id,
-                    title=album_title,
+                    title=clean_new_album_title(album_title, year_val),
                     year=year_val,
                     path=str(placed_p.parent),
                 )

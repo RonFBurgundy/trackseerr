@@ -200,9 +200,9 @@ def album_for_recording(
 
 def _pick_release_group(groups: list[dict[str, Any]], album_title: str) -> Optional[dict[str, Any]]:
     """Title-matching release group: plain Album first, then the earliest first release date."""
-    from trackseerr.lidarr_release import titles_match
+    from trackseerr.album_titles import album_titles_match
 
-    candidates = [g for g in groups if titles_match(g.get("title"), album_title)]
+    candidates = [g for g in groups if album_titles_match(g.get("title"), album_title)]
     if not candidates:
         return None
     return min(
@@ -239,24 +239,35 @@ def _first_holder_for_groups(
 
 def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
     tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
-    rec_ids = sorted(
-        {
-            str(t.get("mb_recording_id") or "").strip()
-            for t in tracks
-            if t.get("has_file") and str(t.get("mb_recording_id") or "").strip()
-        }
-    )
+    owned_rec_ids = [
+        str(t.get("mb_recording_id") or "").strip()
+        for t in tracks
+        if t.get("has_file") and str(t.get("mb_recording_id") or "").strip()
+    ]
+    rec_ids = sorted(set(owned_rec_ids))
     if not rec_ids:
         counts["no_recordings"] += 1
         return
 
     groups: dict[str, dict[str, Any]] = {}
+    per_rec_groups: dict[str, set[str]] = {}
     for rec_id in rec_ids:
+        rec_set: set[str] = set()
         for group in enricher.get_recording_release_groups(rec_id):
-            groups.setdefault(str(group.get("id")), group)
+            gid = str(group.get("id") or "")
+            if gid:
+                groups.setdefault(gid, group)
+                rec_set.add(gid)
+        per_rec_groups[rec_id] = rec_set
 
     can_merge = len(tracks) <= _SINGLE_ALBUM_MAX_TRACKS
     chosen = _pick_release_group(list(groups.values()), album["title"])
+    linked_key = "linked"
+    if chosen is None and len(owned_rec_ids) >= 2:
+        common = set.intersection(*(per_rec_groups[r] for r in owned_rec_ids))
+        if len(common) == 1:
+            chosen = groups[next(iter(common))]
+            linked_key = "linked_by_agreement"
     if chosen is None:
         holder = (
             _first_holder_for_groups(db, album["artist_id"], list(groups.keys()), album["id"]) if can_merge else None
@@ -278,7 +289,7 @@ def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], 
         return
 
     db.set_album_mb_release_group_id(album["id"], rg_id)
-    counts["linked"] += 1
+    counts[linked_key] += 1
 
 
 def link_albums_by_recording(
@@ -291,6 +302,7 @@ def link_albums_by_recording(
     counts = {
         "albums": 0,
         "linked": 0,
+        "linked_by_agreement": 0,
         "merged": 0,
         "merge_conflict": 0,
         "no_recordings": 0,

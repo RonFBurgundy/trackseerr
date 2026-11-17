@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from trackseerr import art_pipeline, delay_gate
 from trackseerr.acquisition_coordinator import _to_quality_profile
+from trackseerr.album_titles import clean_new_album_title
 from trackseerr.library import (
     AUDIO_EXTENSIONS,
     find_folder_art,
@@ -621,7 +622,7 @@ class LibraryScanner:
                 LibraryAlbum(
                     id=album_id,
                     artist_id=artist_id,
-                    title=album_title,
+                    title=clean_new_album_title(album_title, year),
                     year=year,
                     path=album_path,
                     cover_url=album_cover,
