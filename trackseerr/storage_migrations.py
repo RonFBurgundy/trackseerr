@@ -86,6 +86,7 @@ class MigrationsMixin:
                 (96, self._migration_v96),
                 (97, self._migration_v97),
                 (98, self._migration_v98),
+                (99, self._migration_v99),
             ]
 
             applied = 0
@@ -305,6 +306,25 @@ class MigrationsMixin:
         )
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_exclusions_scope_mbid ON exclusions(scope, mbid)"
+        )
+
+    def _migration_v99(self, cur: sqlite3.Cursor) -> None:
+        """v99: library_merge_conflicts records album merges blocked by duplicate files or several holders."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_merge_conflicts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_album_id TEXT NOT NULL REFERENCES library_albums(id) ON DELETE CASCADE,
+                holder_album_id TEXT NOT NULL REFERENCES library_albums(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                dismissed INTEGER NOT NULL DEFAULT 0,
+                detected_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                UNIQUE(source_album_id, holder_album_id)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_merge_conflicts_source ON library_merge_conflicts(source_album_id)"
         )
 
     def _migration_v98(self, cur: sqlite3.Cursor) -> None:

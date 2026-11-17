@@ -978,3 +978,13 @@ BEGIN
     UPDATE library_tracks SET has_file = EXISTS (SELECT 1 FROM library_files WHERE track_id = NEW.track_id), max_size_bytes = (SELECT MAX(size_bytes) FROM library_files WHERE track_id = NEW.track_id) WHERE id = NEW.track_id;
     UPDATE library_tracks SET has_file = EXISTS (SELECT 1 FROM library_files WHERE track_id = OLD.track_id), max_size_bytes = (SELECT MAX(size_bytes) FROM library_files WHERE track_id = OLD.track_id) WHERE id = OLD.track_id;
 END;
+CREATE TABLE library_merge_conflicts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_album_id TEXT NOT NULL REFERENCES library_albums(id) ON DELETE CASCADE,
+                holder_album_id TEXT NOT NULL REFERENCES library_albums(id) ON DELETE CASCADE,
+                kind TEXT NOT NULL,
+                dismissed INTEGER NOT NULL DEFAULT 0,
+                detected_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                UNIQUE(source_album_id, holder_album_id)
+            );
+CREATE INDEX idx_merge_conflicts_source ON library_merge_conflicts(source_album_id);

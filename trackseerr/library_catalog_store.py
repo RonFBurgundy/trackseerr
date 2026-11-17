@@ -1041,6 +1041,72 @@ class LibraryCatalogStoreMixin:
             ).fetchone()
         return str(row["id"]) if row is not None else None
 
+    def record_merge_conflict(self, source_album_id: str, holder_album_id: str, kind: str) -> None:
+        """Remembers an album merge that was blocked; a repeat refreshes kind and time and keeps ``dismissed``."""
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO library_merge_conflicts (source_album_id, holder_album_id, kind) VALUES (?, ?, ?) "
+                "ON CONFLICT(source_album_id, holder_album_id) DO UPDATE SET kind = excluded.kind, "
+                "detected_at = CURRENT_TIMESTAMP",
+                (str(source_album_id), str(holder_album_id), str(kind)),
+            )
+            self.conn.commit()
+
+    _MERGE_CONFLICT_SELECT = (
+        "SELECT c.id, c.source_album_id, c.holder_album_id, c.kind, c.dismissed, c.detected_at, "
+        "sa.title AS source_title, sar.name AS source_artist, ha.title AS holder_title, har.name AS holder_artist "
+        "FROM library_merge_conflicts c "
+        "JOIN library_albums sa ON sa.id = c.source_album_id "
+        "JOIN library_albums ha ON ha.id = c.holder_album_id "
+        "LEFT JOIN library_artists sar ON sar.id = sa.artist_id "
+        "LEFT JOIN library_artists har ON har.id = ha.artist_id "
+    )
+
+    @staticmethod
+    def _map_merge_conflict(row: Any) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "source_album_id": str(row["source_album_id"]),
+            "holder_album_id": str(row["holder_album_id"]),
+            "kind": str(row["kind"]),
+            "dismissed": bool(row["dismissed"]),
+            "detected_at": str(row["detected_at"] or ""),
+            "source_title": str(row["source_title"] or ""),
+            "source_artist": str(row["source_artist"] or ""),
+            "holder_title": str(row["holder_title"] or ""),
+            "holder_artist": str(row["holder_artist"] or ""),
+        }
+
+    def list_merge_conflicts(self, include_dismissed: bool = False) -> list[dict[str, Any]]:
+        """Recorded blocked merges (both albums still present), newest first."""
+        sql = self._MERGE_CONFLICT_SELECT
+        if not include_dismissed:
+            sql += "WHERE c.dismissed = 0 "
+        sql += "ORDER BY c.detected_at DESC, c.id DESC"
+        with self.reader() as conn:
+            return [self._map_merge_conflict(r) for r in conn.execute(sql).fetchall()]
+
+    def get_merge_conflict(self, conflict_id: int) -> Optional[dict[str, Any]]:
+        with self.reader() as conn:
+            row = conn.execute(self._MERGE_CONFLICT_SELECT + "WHERE c.id = ?", (int(conflict_id),)).fetchone()
+        return self._map_merge_conflict(row) if row is not None else None
+
+    def delete_merge_conflict(self, conflict_id: int) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM library_merge_conflicts WHERE id = ?", (int(conflict_id),))
+            self.conn.commit()
+
+    def dismiss_merge_conflict(self, conflict_id: int) -> None:
+        with self._lock:
+            self.conn.execute("UPDATE library_merge_conflicts SET dismissed = 1 WHERE id = ?", (int(conflict_id),))
+            self.conn.commit()
+
+    def clear_merge_conflicts_for_album(self, album_id: str) -> None:
+        """Drops every recorded conflict where the album is the source (it merged away or was resolved)."""
+        with self._lock:
+            self.conn.execute("DELETE FROM library_merge_conflicts WHERE source_album_id = ?", (str(album_id),))
+            self.conn.commit()
+
     def list_artist_albums_with_release_group(self, artist_id: str) -> list[dict[str, Any]]:
         """Albums of the artist that hold a release group, oldest first, as ``{id, title}`` dicts."""
         with self._lock:
