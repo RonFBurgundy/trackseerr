@@ -1,0 +1,288 @@
+"""Suggests MusicBrainz matches for albums Self-Heal could not link, and applies the one an admin picks.
+
+Suggestions only read (library and MusicBrainz). Applying changes catalog rows only; files on disk are never touched
+(rename and retag are separate, user-confirmed steps).
+"""
+
+from __future__ import annotations
+
+import logging
+from collections import defaultdict
+from typing import Any, Optional
+
+import requests
+
+from trackseerr.album_titles import album_titles_match, strip_album_junk
+from trackseerr.compilation_filing import (
+    ensure_release_group_album,
+    file_album_under_various,
+    various_artists_id,
+)
+from trackseerr.recording_search import (
+    MAX_DURATION_GAP_SECONDS,
+    _artist_ok,
+    _duration_gap,
+    _track_artist_name,
+    search_title,
+)
+from trackseerr.redaction import safe_exc
+from trackseerr.release_matching import _album_artist_name, _match_one_album, _merge_into_holder, _titles_close
+
+logger = logging.getLogger(__name__)
+
+LOOSE_SCORE = 70
+VARIOUS_NAME = "Various Artists"
+
+
+class _MusicBrainzUnavailable(Exception):
+    """A MusicBrainz text search failed transiently."""
+
+
+def _searched(result: Optional[list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    if result is None:
+        raise _MusicBrainzUnavailable()
+    return result
+
+
+def _group_fields(group: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(group.get("id") or ""),
+        "title": str(group.get("title") or ""),
+        "primary_type": group.get("primary_type"),
+        "secondary_types": list(group.get("secondary_types") or []),
+        "first_release_date": group.get("first_release_date"),
+        "artist_credit": group.get("artist_credit"),
+        "is_various": bool(group.get("is_various")),
+    }
+
+
+def _loose_recording_groups(enricher: Any, track: dict[str, Any], artist: Optional[str]) -> list[dict[str, Any]]:
+    """Release groups of the first search hit that clearly is this untagged track (looser bar than Self-Heal)."""
+    wanted = search_title(str(track.get("title") or ""), artist)
+    if not artist or not wanted:
+        return []
+    duration = track.get("duration_seconds")
+    for cand in _searched(enricher.search_recordings(artist, wanted)):
+        if int(cand.get("score") or 0) < LOOSE_SCORE or not _artist_ok(cand, artist):
+            continue
+        if not _titles_close(search_title(str(cand.get("title") or "")), wanted):
+            continue
+        gap = _duration_gap(cand, duration)
+        if gap is not None and gap > MAX_DURATION_GAP_SECONDS:
+            continue
+        return list(cand.get("release_groups") or [])
+    return []
+
+
+def _collect_groups(
+    enricher: Any,
+    tracks: list[dict[str, Any]],
+    artist: Optional[str],
+    clean_title: str,
+    track_artists: dict[str, Optional[str]],
+) -> tuple[dict[str, dict[str, Any]], set[str]]:
+    """Candidate release groups by id, plus the ids that come from the tracks' own recordings."""
+    groups: dict[str, dict[str, Any]] = {}
+    known: set[str] = set()
+    for track in tracks:
+        rec = str(track.get("mb_recording_id") or "").strip()
+        if not rec:
+            continue
+        for group in enricher.get_recording_release_groups(rec) or []:
+            if group.get("id"):
+                groups.setdefault(str(group["id"]), group)
+                known.add(str(group["id"]))
+    searches = [(artist, clean_title), (VARIOUS_NAME, clean_title)] if artist else [(VARIOUS_NAME, clean_title)]
+    for name, title in searches:
+        for group in _searched(enricher.search_release_groups(name, title)):
+            if group.get("id"):
+                groups.setdefault(str(group["id"]), group)
+    for track in tracks:
+        if str(track.get("mb_recording_id") or "").strip():
+            continue
+        for group in _loose_recording_groups(enricher, track, track_artists.get(str(track["id"]))):
+            if group.get("id"):
+                groups.setdefault(str(group["id"]), group)
+    return groups, known
+
+
+def _durations_agree(track: dict[str, Any], release_track: dict[str, Any]) -> Optional[bool]:
+    mine, theirs = track.get("duration_seconds"), release_track.get("duration_seconds")
+    if not mine or not theirs:
+        return None
+    return abs(float(mine) - float(theirs)) <= MAX_DURATION_GAP_SECONDS
+
+
+def _map_track(
+    track: dict[str, Any], release_tracks: list[dict[str, Any]], used: set[int]
+) -> Optional[tuple[int, dict[str, Any]]]:
+    rec = str(track.get("mb_recording_id") or "").strip()
+    if rec:
+        for idx, rt in enumerate(release_tracks):
+            if idx not in used and rt.get("mb_recording_id") == rec:
+                return idx, rt
+    wanted = search_title(str(track.get("title") or ""))
+    for idx, rt in enumerate(release_tracks):
+        if idx in used or not _titles_close(search_title(str(rt.get("title") or "")), wanted):
+            continue
+        if _durations_agree(track, rt) is False:
+            continue
+        return idx, rt
+    return None
+
+
+def _map_tracks(tracks: list[dict[str, Any]], release_tracks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    used: set[int] = set()
+    rows: list[dict[str, Any]] = []
+    for track in tracks:
+        found = _map_track(track, release_tracks, used)
+        row: dict[str, Any] = {
+            "track_id": str(track["id"]),
+            "title": str(track.get("title") or ""),
+            "has_file": bool(track.get("has_file")),
+            "release_track_title": None,
+            "release_track_number": None,
+            "recording_id": None,
+        }
+        if found is not None:
+            used.add(found[0])
+            rt = found[1]
+            row.update(
+                release_track_title=rt.get("title"),
+                release_track_number=rt.get("track_number"),
+                recording_id=rt.get("mb_recording_id") or None,
+                _duration_ok=_durations_agree(track, rt),
+            )
+        rows.append(row)
+    return rows
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _score(rows: list[dict[str, Any]], files: int, title_match: bool, from_recordings: bool) -> tuple[int, list[str]]:
+    mapped = [r for r in rows if r["release_track_title"] is not None and r["has_file"]]
+    comparable = [r for r in mapped if r.get("_duration_ok") is not None]
+    agree = sum(1 for r in comparable if r["_duration_ok"])
+    share = (len(mapped) / files) if files else 0.0
+    duration_share = (agree / len(comparable)) if comparable else 0.0
+    confidence = round(
+        40 * share + 30 * (1 if title_match else 0) + 20 * duration_share + 10 * (1 if from_recordings else 0)
+    )
+    if files and len(mapped) == files:
+        reasons = [f"All {_plural(files, 'file')} found on this release"]
+    else:
+        reasons = [f"{len(mapped)} of {_plural(files, 'file')} found on this release"]
+    if title_match:
+        reasons.append("Album title matches")
+    if comparable and agree == len(comparable):
+        reasons.append("Track lengths agree")
+    if from_recordings:
+        reasons.append("Contains recordings already identified in your files")
+    return min(100, confidence), reasons
+
+
+def _build_candidate(
+    enricher: Any,
+    group: dict[str, Any],
+    tracks: list[dict[str, Any]],
+    files: int,
+    album_artist: str,
+    clean_title: str,
+    from_recordings: bool,
+) -> dict[str, Any]:
+    release_tracks = enricher.get_release_group_tracks(str(group["id"])) or []
+    rows = _map_tracks(tracks, release_tracks)
+    title_match = album_titles_match(group.get("title"), clean_title)
+    confidence, reasons = _score(rows, files, title_match, from_recordings)
+    various = bool(group.get("is_various"))
+    if various:
+        reasons.append("Released as a compilation by Various Artists")
+    mapped = sum(1 for r in rows if r["release_track_title"] is not None)
+    for row in rows:
+        row.pop("_duration_ok", None)
+    candidate = _group_fields(group)
+    candidate.update(
+        target_artist=VARIOUS_NAME if various else album_artist,
+        mapped=mapped,
+        track_count=len(release_tracks),
+        track_map=rows,
+        confidence=confidence,
+        reasons=reasons,
+    )
+    return candidate
+
+
+def suggest_matches(db: Any, enricher: Any, album_id: str, limit: int = 5) -> dict[str, Any]:
+    """Ranked MusicBrainz release groups an unlinked album could be, with how each file would map. Never writes."""
+    album = db.get_library_album(album_id)
+    if album is None:
+        raise ValueError("Album not found")
+    tracks = db.list_library_tracks(album_id=album_id, limit=1000)
+    files = [t for t in tracks if t.get("has_file")] or tracks
+    artist = _album_artist_name(db, album, tracks) or ""
+    summary = {
+        "id": str(album["id"]),
+        "title": str(album.get("title") or ""),
+        "artist_name": artist,
+        "track_count": len(tracks),
+    }
+    clean_title = strip_album_junk(str(album.get("title") or "")) or str(album.get("title") or "")
+    track_artists = {str(t["id"]): _track_artist_name(db, t, artist or None) for t in tracks}
+    try:
+        groups, known = _collect_groups(enricher, files, artist or None, clean_title, track_artists)
+    except _MusicBrainzUnavailable:
+        logger.info("MusicBrainz unavailable while suggesting matches for album %s", album_id)
+        return {"album": summary, "candidates": [], "unavailable": True}
+    candidates = [
+        _build_candidate(enricher, group, tracks, len(files), artist, clean_title, gid in known)
+        for gid, group in groups.items()
+    ]
+    candidates.sort(key=lambda c: (-c["confidence"], str(c["first_release_date"] or "9999"), c["id"]))
+    return {"album": summary, "candidates": candidates[: max(1, limit)], "unavailable": False}
+
+
+def _set_recordings(db: Any, album_id: str, track_recordings: dict[str, str]) -> None:
+    own = {str(t["id"]) for t in db.list_library_tracks(album_id=album_id, limit=1000)}
+    for track_id, rec_id in track_recordings.items():
+        if str(track_id) in own and str(rec_id).strip():
+            db.set_track_mb_recording_id(str(track_id), str(rec_id).strip())
+
+
+def apply_match(
+    db: Any, enricher: Any, album_id: str, group: dict[str, Any], track_recordings: dict[str, str]
+) -> dict[str, Any]:
+    """Links the album to the chosen release group (folding it into an existing album when one holds it).
+
+    Raises ``ValueError`` for an unknown album, one that already has a release group, or a group without an id.
+    """
+    album = db.get_library_album(album_id)
+    if album is None:
+        raise ValueError("Album not found")
+    if str(album.get("mb_release_group_id") or "").strip():
+        raise ValueError("Album already has a MusicBrainz release group")
+    rg_id = str(group.get("id") or "").strip()
+    if not rg_id:
+        raise ValueError("Release group id is required")
+
+    _set_recordings(db, album_id, track_recordings)
+    counts: dict[str, int] = defaultdict(int)
+    final_id = album_id
+    try:
+        if group.get("is_various"):
+            file_album_under_various(db, enricher, album, group, counts)
+            holder = db.album_holding_release_group(various_artists_id(db), rg_id, "")
+            final_id = str(holder) if counts["merged"] and holder else album_id
+        elif db.album_holding_release_group(str(album["artist_id"]), rg_id, album_id) is not None:
+            holder_id = ensure_release_group_album(db, enricher, str(album["artist_id"]), group)
+            _merge_into_holder(db, album_id, holder_id, counts)
+            final_id = holder_id if counts["merged"] else album_id
+        else:
+            db.set_album_mb_release_group_id(album_id, rg_id)
+            linked = db.get_library_album(album_id) or album
+            _match_one_album(db, enricher, linked, counts)
+    except requests.RequestException as exc:
+        logger.warning("Applying match for album %s failed: %s", album_id, safe_exc(exc))
+        raise
+    return {"album_id": final_id, "merged": counts["merged"] > 0, "conflict": counts["merge_conflict"] > 0}

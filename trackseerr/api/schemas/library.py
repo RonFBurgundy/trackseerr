@@ -112,6 +112,72 @@ class MbLinkRequest(ApiModel):
     release_mbid: str
 
 
+class MatchReleaseGroup(ApiModel):
+    """A MusicBrainz release group offered as a match."""
+
+    id: str
+    title: str = ""
+    primary_type: Optional[str] = None
+    secondary_types: list[str] = []
+    first_release_date: Optional[str] = None
+    artist_credit: Optional[str] = None
+    is_various: bool = False
+
+
+class MatchTrackMapping(ApiModel):
+    """How one album track maps onto a release track."""
+
+    track_id: str
+    title: str
+    has_file: bool
+    release_track_title: Optional[str] = None
+    release_track_number: Optional[int] = None
+    recording_id: Optional[str] = None
+
+
+class MatchCandidate(MatchReleaseGroup):
+    """A suggested release group with its per-track mapping and confidence."""
+
+    target_artist: str
+    mapped: int
+    track_count: int
+    track_map: list[MatchTrackMapping]
+    confidence: int
+    reasons: list[str]
+
+
+class MatchAlbumSummary(ApiModel):
+    """The unlinked album suggestions are for."""
+
+    id: str
+    title: str
+    artist_name: str = ""
+    track_count: int = 0
+
+
+class MatchSuggestionsResponse(ApiModel):
+    """Ranked MusicBrainz match suggestions for one unlinked album."""
+
+    album: MatchAlbumSummary
+    candidates: list[MatchCandidate]
+    unavailable: bool = False
+
+
+class MatchApplyRequest(ApiModel):
+    """The release group the admin picked and the recording id chosen for each track."""
+
+    release_group: MatchReleaseGroup
+    track_recordings: dict[str, str] = {}
+
+
+class MatchApplyResponse(ApiModel):
+    """Outcome of applying a suggested match."""
+
+    album_id: str
+    merged: bool
+    conflict: bool
+
+
 class LibraryAlbumRecord(ApiModel):
     """A library album (native row plus enrichments, or Lidarr's mapped album)."""
 

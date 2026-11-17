@@ -2932,6 +2932,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/musicbrainz/unlinked/{album_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Apply Unlinked Album Match
+         * @description Links an unlinked album to the release group the admin picked; files on disk are not touched.
+         */
+        post: operations["apply_unlinked_album_match_api_library_musicbrainz_unlinked__album_id__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/musicbrainz/unlinked/{album_id}/suggestions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Unlinked Album Suggestions
+         * @description Suggests MusicBrainz release groups an unlinked album could be (read only).
+         */
+        get: operations["get_unlinked_album_suggestions_api_library_musicbrainz_unlinked__album_id__suggestions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/release-profiles": {
         parameters: {
             query?: never;
@@ -10829,6 +10869,93 @@ export interface components {
             /** Status */
             status: string;
         };
+        /**
+         * MatchAlbumSummary
+         * @description The unlinked album suggestions are for.
+         */
+        MatchAlbumSummary: {
+            /**
+             * Artist Name
+             * @default
+             */
+            artist_name: string;
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Track Count
+             * @default 0
+             */
+            track_count: number;
+        };
+        /**
+         * MatchApplyRequest
+         * @description The release group the admin picked and the recording id chosen for each track.
+         */
+        MatchApplyRequest: {
+            release_group: components["schemas"]["MatchReleaseGroup"];
+            /**
+             * Track Recordings
+             * @default {}
+             */
+            track_recordings: {
+                [key: string]: string;
+            };
+        };
+        /**
+         * MatchApplyResponse
+         * @description Outcome of applying a suggested match.
+         */
+        MatchApplyResponse: {
+            /** Album Id */
+            album_id: string;
+            /** Conflict */
+            conflict: boolean;
+            /** Merged */
+            merged: boolean;
+        };
+        /**
+         * MatchCandidate
+         * @description A suggested release group with its per-track mapping and confidence.
+         */
+        MatchCandidate: {
+            /** Artist Credit */
+            artist_credit?: string | null;
+            /** Confidence */
+            confidence: number;
+            /** First Release Date */
+            first_release_date?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Is Various
+             * @default false
+             */
+            is_various: boolean;
+            /** Mapped */
+            mapped: number;
+            /** Primary Type */
+            primary_type?: string | null;
+            /** Reasons */
+            reasons: string[];
+            /**
+             * Secondary Types
+             * @default []
+             */
+            secondary_types: string[];
+            /** Target Artist */
+            target_artist: string;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** Track Count */
+            track_count: number;
+            /** Track Map */
+            track_map: components["schemas"]["MatchTrackMapping"][];
+        };
         /** MatchCreatedResponse */
         MatchCreatedResponse: {
             override: components["schemas"]["MatchOverride"];
@@ -10888,6 +11015,67 @@ export interface components {
              * @description Title of the track from source playlist
              */
             source_title: string;
+        };
+        /**
+         * MatchReleaseGroup
+         * @description A MusicBrainz release group offered as a match.
+         */
+        MatchReleaseGroup: {
+            /** Artist Credit */
+            artist_credit?: string | null;
+            /** First Release Date */
+            first_release_date?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Is Various
+             * @default false
+             */
+            is_various: boolean;
+            /** Primary Type */
+            primary_type?: string | null;
+            /**
+             * Secondary Types
+             * @default []
+             */
+            secondary_types: string[];
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+        };
+        /**
+         * MatchSuggestionsResponse
+         * @description Ranked MusicBrainz match suggestions for one unlinked album.
+         */
+        MatchSuggestionsResponse: {
+            album: components["schemas"]["MatchAlbumSummary"];
+            /** Candidates */
+            candidates: components["schemas"]["MatchCandidate"][];
+            /**
+             * Unavailable
+             * @default false
+             */
+            unavailable: boolean;
+        };
+        /**
+         * MatchTrackMapping
+         * @description How one album track maps onto a release track.
+         */
+        MatchTrackMapping: {
+            /** Has File */
+            has_file: boolean;
+            /** Recording Id */
+            recording_id?: string | null;
+            /** Release Track Number */
+            release_track_number?: number | null;
+            /** Release Track Title */
+            release_track_title?: string | null;
+            /** Title */
+            title: string;
+            /** Track Id */
+            track_id: string;
         };
         /**
          * MbLinkRequest
@@ -20377,6 +20565,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MbUnlinkedPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_unlinked_album_match_api_library_musicbrainz_unlinked__album_id__apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MatchApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchApplyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_unlinked_album_suggestions_api_library_musicbrainz_unlinked__album_id__suggestions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                album_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MatchSuggestionsResponse"];
                 };
             };
             /** @description Validation Error */
