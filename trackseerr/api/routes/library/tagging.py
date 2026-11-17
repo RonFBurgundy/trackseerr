@@ -79,6 +79,7 @@ from trackseerr.rename_verification import (
     start_verification,
     verdict_for,
 )
+from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
 from trackseerr.storage import Database
 
 
@@ -677,9 +678,6 @@ TAG_DIFF_FIELDS: tuple[tuple[str, str], ...] = (
     ("musicbrainz_releasegroupid", "musicbrainz_releasegroupid"),
     ("musicbrainz_trackid", "musicbrainz_trackid"),
 )
-
-VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"
-
 
 def _resolve_retag_album_artist_mbid(
     db: Database,

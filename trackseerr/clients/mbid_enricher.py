@@ -17,6 +17,8 @@ import requests
 from trackseerr.storage_common import clean_library_name
 from trackseerr.system_paths import is_system_folder_name
 
+VARIOUS_ARTISTS_MBID = "89ad4ac3-39f7-470e-963a-56509c546377"
+
 if TYPE_CHECKING:
     from trackseerr.mb_metadata_store import MbMetadataStore
 
@@ -68,6 +70,77 @@ def _sanitize_lucene_query(text: str) -> str:
         return ""
     # Strip double quotes, backslashes, and control characters
     return re.sub(r'["\\/]', " ", text).strip()
+
+
+def _credit_artist_ids(credit: Any) -> list[str]:
+    """Artist MBIDs of a MusicBrainz ``artist-credit`` list (empty when absent or malformed)."""
+    ids: list[str] = []
+    for entry in credit if isinstance(credit, list) else []:
+        artist = entry.get("artist") if isinstance(entry, dict) else None
+        if isinstance(artist, dict) and artist.get("id"):
+            ids.append(str(artist["id"]).strip())
+    return ids
+
+
+def _credit_text(credit: Any) -> tuple[str, list[str]]:
+    """Joined credit text ('A feat. B') and the credited artist names of an ``artist-credit`` list."""
+    text = ""
+    names: list[str] = []
+    for entry in credit if isinstance(credit, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        artist = entry.get("artist") if isinstance(entry.get("artist"), dict) else {}
+        name = str(entry.get("name") or artist.get("name") or "").strip()
+        if name:
+            names.append(name)
+        text += name + str(entry.get("joinphrase") or "")
+    return text.strip(), names
+
+
+def _search_release_groups(releases: Any, recording_credit_ids: list[str]) -> list[dict[str, Any]]:
+    """Unique release groups of a recording-search hit; ``is_various`` comes from each release's own credit."""
+    groups: dict[str, dict[str, Any]] = {}
+    for release in releases if isinstance(releases, list) else []:
+        rg = release.get("release-group") if isinstance(release, dict) else None
+        if not isinstance(rg, dict) or not rg.get("id"):
+            continue
+        rg_id = str(rg["id"]).strip()
+        if rg_id in groups:
+            continue
+        release_ids = _credit_artist_ids(release.get("artist-credit")) or recording_credit_ids
+        groups[rg_id] = {
+            "id": rg_id,
+            "title": rg.get("title"),
+            "primary_type": rg.get("primary-type"),
+            "secondary_types": list(rg.get("secondary-types") or []),
+            "is_various": VARIOUS_ARTISTS_MBID in release_ids,
+        }
+    return list(groups.values())
+
+
+def _parse_search_recording(rec: dict[str, Any]) -> Optional[dict[str, Any]]:
+    """One ``/ws/2/recording`` search hit in the shape ``search_recordings`` returns (None when it has no id)."""
+    rec_id = str(rec.get("id") or "").strip()
+    if not rec_id:
+        return None
+    credit = rec.get("artist-credit")
+    credit_text, names = _credit_text(credit)
+    artist_ids = _credit_artist_ids(credit)
+    length = rec.get("length")
+    try:
+        score = int(rec.get("score") or 0)
+    except (TypeError, ValueError):
+        score = 0
+    return {
+        "id": rec_id,
+        "title": str(rec.get("title") or ""),
+        "score": score,
+        "length_ms": int(length) if isinstance(length, (int, float)) else None,
+        "artist_credit": credit_text,
+        "artist_names": names,
+        "artist_ids": artist_ids,
+        "release_groups": _search_release_groups(rec.get("releases"), artist_ids),
+    }
 
 
 def _strip_article(text: str) -> str:
@@ -784,6 +857,52 @@ class MbidEnricherClient:
             self._set_cached(cache_key, None)
             return None
 
+    def search_recordings(self, artist: str, title: str, limit: int = 10) -> Optional[list[dict[str, Any]]]:
+        """Text-searches MusicBrainz recordings by artist and title, best match first.
+
+        None on a transient failure (never cached); an empty list when MusicBrainz has no hit.
+        """
+        clean_artist = _sanitize_lucene_query(artist)
+        clean_title = _sanitize_lucene_query(title)
+        if not clean_artist or not clean_title:
+            return []
+        cache_key = f"rec_search:v1:{artist.lower()}:{title.lower()}"
+        hit, cached_data = self._lookup(cache_key)
+        if hit:
+            return cached_data
+
+        try:
+            url = f"{self.base_url}/ws/2/recording"
+            params = {
+                "query": f'recording:"{clean_title}" AND artist:"{clean_artist}"',
+                "fmt": "json",
+                "limit": limit,
+            }
+            resp = self._request(url, params=params)
+            if resp is None or (resp.status_code != 200 and resp.status_code != 404):
+                logger.info(
+                    "Recording search for '%s - %s' returned status %s",
+                    artist,
+                    title,
+                    resp.status_code if resp is not None else "None",
+                )
+                self._set_cached(cache_key, None)
+                return None
+            result: list[dict[str, Any]] = []
+            if resp.status_code == 200:
+                data = resp.json()
+                recordings = data.get("recordings") if isinstance(data, dict) else None
+                for rec in recordings if isinstance(recordings, list) else []:
+                    parsed = _parse_search_recording(rec) if isinstance(rec, dict) else None
+                    if parsed is not None:
+                        result.append(parsed)
+            self._remember(cache_key, "rec_search", result)
+            return result
+        except (requests.RequestException, ValueError, AttributeError, TypeError) as exc:
+            logger.info("MbidEnricherClient: search_recordings failed for '%s - %s': %s", artist, title, exc)
+            self._set_cached(cache_key, None)
+            return None
+
     def lookup_artist_mbid_by_url(self, resource_url: str) -> Optional[str]:
         """Resolves the artist MBID that has a MusicBrainz URL relation to ``resource_url`` (e.g. a Deezer artist page).
 
@@ -1178,14 +1297,14 @@ class MbidEnricherClient:
             return []
 
         clean_id = str(recording_id).strip()
-        cache_key = f"rec_rgs:v1:{clean_id.lower()}"
+        cache_key = f"rec_rgs:v2:{clean_id.lower()}"
         hit, cached_data = self._lookup(cache_key)
         if hit:
             return cached_data or []
 
         try:
             url = f"{self.base_url}/ws/2/release"
-            params = {"recording": clean_id, "inc": "release-groups", "fmt": "json", "limit": 100}
+            params = {"recording": clean_id, "inc": "release-groups+artist-credits", "fmt": "json", "limit": 100}
             resp = self._request(url, params=params)
             if resp is None or resp.status_code != 200:
                 if resp is not None and resp.status_code == 404:
@@ -1209,12 +1328,15 @@ class MbidEnricherClient:
                 rg_id = str(rg["id"]).strip()
                 if rg_id in groups:
                     continue
+                artist_ids = _credit_artist_ids(release.get("artist-credit"))
                 groups[rg_id] = {
                     "id": rg_id,
                     "title": rg.get("title"),
                     "primary_type": rg.get("primary-type"),
                     "secondary_types": list(rg.get("secondary-types") or []),
                     "first_release_date": rg.get("first-release-date"),
+                    "artist_ids": artist_ids,
+                    "is_various": VARIOUS_ARTISTS_MBID in artist_ids,
                 }
             result = list(groups.values())
             self._remember(cache_key, "rec_rgs", result)
