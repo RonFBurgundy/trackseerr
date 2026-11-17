@@ -1,5 +1,6 @@
 """Transmission BitTorrent Client Acquisition Driver."""
 
+import base64
 import logging
 import posixpath
 import re
@@ -10,7 +11,9 @@ import httpx
 from trackseerr.clients.acquisition.base import (
     AcquisitionDriver,
     AcquisitionRetryableError,
+    AcquisitionUnavailableError,
 )
+from trackseerr.clients.acquisition.partial import prepare_partial_download
 from trackseerr.models import AcquisitionSearchResult, DownloadStatus
 from trackseerr.security import is_safe_service_url
 
@@ -142,6 +145,18 @@ class TransmissionDriver(AcquisitionDriver):
             torrent_hash = btih_match.group(1).lower()
 
         arguments: dict[str, Any] = {"filename": target_url}
+        extra = result.extra if isinstance(result.extra, dict) else {}
+        wanted = [int(i) for i in extra.get("file_indices") or []]
+        if wanted:
+            torrent_bytes, total = prepare_partial_download(
+                result, wanted, list(extra.get("file_paths") or []), self.timeout, "Transmission"
+            )
+            wanted_set = set(wanted)
+            arguments = {
+                "metainfo": base64.b64encode(torrent_bytes).decode("ascii"),
+                "files-wanted": sorted(wanted_set),
+                "files-unwanted": [i for i in range(total) if i not in wanted_set],
+            }
 
         # download-dir from setting or category path
         target_dir = self.download_dir
@@ -161,6 +176,8 @@ class TransmissionDriver(AcquisitionDriver):
                 added = res.get("torrent-added") or res.get("torrent-duplicate") or {}
                 if isinstance(added, dict) and added.get("hashString"):
                     torrent_hash = str(added["hashString"]).lower()
+        except AcquisitionUnavailableError:
+            raise
         except PermissionError as exc:
             raise PermissionError(f"Transmission authentication failed: {exc}") from exc
         except (httpx.RequestError, httpx.HTTPError) as exc:

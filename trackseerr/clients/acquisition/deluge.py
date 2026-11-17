@@ -1,5 +1,6 @@
 """Deluge Web UI Acquisition Driver."""
 
+import base64
 import logging
 import posixpath
 import re
@@ -10,7 +11,9 @@ import httpx
 from trackseerr.clients.acquisition.base import (
     AcquisitionDriver,
     AcquisitionRetryableError,
+    AcquisitionUnavailableError,
 )
+from trackseerr.clients.acquisition.partial import prepare_partial_download
 from trackseerr.models import AcquisitionSearchResult, DownloadStatus
 from trackseerr.security import is_safe_service_url
 
@@ -202,6 +205,16 @@ class DelugeDriver(AcquisitionDriver):
         if self.download_location:
             options["download_location"] = self.download_location
 
+        extra = result.extra if isinstance(result.extra, dict) else {}
+        wanted = [int(i) for i in extra.get("file_indices") or []]
+        torrent_bytes: Optional[bytes] = None
+        if wanted:
+            torrent_bytes, total = prepare_partial_download(
+                result, wanted, list(extra.get("file_paths") or []), self.timeout, "Deluge"
+            )
+            wanted_set = set(wanted)
+            options["file_priorities"] = [1 if i in wanted_set else 0 for i in range(total)]
+
         try:
             with httpx.Client(timeout=self.timeout) as client:
                 if not self._cookie:
@@ -209,7 +222,13 @@ class DelugeDriver(AcquisitionDriver):
                         raise PermissionError("Deluge authentication failed")
                     self._ensure_connected(client)
 
-                if target_url.startswith("magnet:"):
+                if torrent_bytes is not None:
+                    res = self._rpc(
+                        client,
+                        "core.add_torrent_file",
+                        ["trackseerr.torrent", base64.b64encode(torrent_bytes).decode("ascii"), options],
+                    )
+                elif target_url.startswith("magnet:"):
                     res = self._rpc(client, "core.add_torrent_magnet", [target_url, options])
                 else:
                     res = self._rpc(client, "core.add_torrent_url", [target_url, options])
@@ -233,6 +252,8 @@ class DelugeDriver(AcquisitionDriver):
                     except Exception as e:
                         logger.warning("Error inspecting Deluge label plugin: %s", e)
 
+        except AcquisitionUnavailableError:
+            raise
         except PermissionError as exc:
             raise PermissionError(f"Deluge authentication failed: {exc}") from exc
         except (httpx.RequestError, httpx.HTTPError) as exc:

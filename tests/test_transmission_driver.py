@@ -454,3 +454,118 @@ def test_route_create_transmission(client: TestClient, auth_headers: dict[str, s
     assert data["driver_type"] == "transmission"
     assert "••••" in data["password"]
     assert "secretpassword" not in data["password"]
+
+
+# ---------------------------------------------------------------------------
+# Partial (selected files only) downloads
+# ---------------------------------------------------------------------------
+def _partial_torrent() -> bytes:
+    def _s(v: bytes) -> bytes:
+        return str(len(v)).encode() + b":" + v
+
+    def _file(length: int, path: bytes, attr: bytes = b"") -> bytes:
+        body = b"d" + (_s(b"attr") + _s(attr) if attr else b"")
+        body += _s(b"length") + b"i" + str(length).encode() + b"e" + _s(b"path") + b"l" + _s(path) + b"ee"
+        return body
+
+    files = _file(10, b"01 - A.flac") + _file(5, b".pad", b"p") + _file(10, b"02 - B.flac") + _file(10, b"03 - C.flac")
+    info = b"d" + _s(b"files") + b"l" + files + b"e" + _s(b"name") + _s(b"Album") + b"e"
+    return b"d" + _s(b"info") + info + b"e"
+
+
+def _partial_item(indices: list[int], paths: list[str], magnet: bool = False) -> AcquisitionSearchResult:
+    return AcquisitionSearchResult(
+        download_id="placeholder",
+        title="Album",
+        artist="Artist",
+        download_url=None if magnet else "https://tracker.org/album.torrent",
+        magnet_url="magnet:?xt=urn:btih:1122334455667788990011223344556677889900" if magnet else None,
+        extra={"file_indices": indices, "file_paths": paths},
+    )
+
+
+def test_transmission_partial_download_sends_metainfo_and_unwanted():
+    import base64
+
+    driver = TransmissionDriver("http://transmission.local:9091")
+    resp = _mock_response(
+        200,
+        {"result": "success", "arguments": {"torrent-added": {"hashString": "AA" * 20, "id": 1}}},
+    )
+    raw = _partial_torrent()
+    item = _partial_item([2], ["Album/02 - B.flac"])
+    with patch("trackseerr.clients.acquisition.torznab.fetch_torrent_file", return_value=raw), patch(
+        "httpx.Client.post", return_value=resp
+    ) as mock_post:
+        assert driver.download(item) == "aa" * 20
+    args = mock_post.call_args.kwargs["json"]["arguments"]
+    assert "filename" not in args
+    assert base64.b64decode(args["metainfo"]) == raw
+    assert args["files-wanted"] == [2]
+    assert args["files-unwanted"] == [0, 1, 3]
+
+
+def test_transmission_partial_download_magnet_raises():
+    from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
+
+    driver = TransmissionDriver("http://transmission.local:9091")
+    with patch("httpx.Client.post") as mock_post:
+        with pytest.raises(AcquisitionUnavailableError, match="needs the .torrent file"):
+            driver.download(_partial_item([0], ["Album/01 - A.flac"], magnet=True))
+    mock_post.assert_not_called()
+
+
+def test_transmission_partial_download_path_mismatch_raises():
+    from trackseerr.clients.acquisition.base import AcquisitionUnavailableError
+
+    driver = TransmissionDriver("http://transmission.local:9091")
+    with patch("trackseerr.clients.acquisition.torznab.fetch_torrent_file", return_value=_partial_torrent()), patch(
+        "httpx.Client.post"
+    ) as mock_post:
+        with pytest.raises(AcquisitionUnavailableError, match="Index drift"):
+            driver.download(_partial_item([2], ["Album/99 - Other.flac"]))
+    mock_post.assert_not_called()
+
+
+def test_transmission_full_download_unchanged_without_file_indices():
+    driver = TransmissionDriver("http://transmission.local:9091")
+    resp = _mock_response(200, {"result": "success", "arguments": {"torrent-added": {"hashString": "bb" * 20}}})
+    item = AcquisitionSearchResult(
+        download_id="x", title="Album", artist="Artist", download_url="https://tracker.org/a.torrent"
+    )
+    with patch("trackseerr.clients.acquisition.torznab.fetch_torrent_file") as fetch, patch(
+        "httpx.Client.post", return_value=resp
+    ) as mock_post:
+        driver.download(item)
+    fetch.assert_not_called()
+    args = mock_post.call_args.kwargs["json"]["arguments"]
+    assert args["filename"] == "https://tracker.org/a.torrent"
+    assert "metainfo" not in args and "files-unwanted" not in args
+
+
+def test_transmission_partial_torrent_done_reports_completed():
+    driver = TransmissionDriver("http://transmission.local:9091")
+    resp = _mock_response(
+        200,
+        {
+            "result": "success",
+            "arguments": {
+                "torrents": [
+                    {
+                        "id": 1,
+                        "hashString": "abc",
+                        "name": "Album",
+                        "totalSize": 35,
+                        "percentDone": 1.0,
+                        "status": 6,
+                        "error": 0,
+                        "downloadDir": "/dl",
+                    }
+                ]
+            },
+        },
+    )
+    with patch("httpx.Client.post", return_value=resp):
+        status = driver.get_status("abc")
+    assert status["status"] == DownloadStatus.COMPLETED.value
+    assert status["progress"] == 100.0
