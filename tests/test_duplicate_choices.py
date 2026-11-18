@@ -31,10 +31,19 @@ def env(test_db: Database, tmp_path: Path):
     return root, tmp_path / "bin"
 
 
-def _album(db: Database, album_id: str, title: str, rg: str | None = None) -> None:
+def _album(
+    db: Database,
+    album_id: str,
+    title: str,
+    rg: str | None = None,
+    album_type: str = "album",
+    secondary_types: list[str] | None = None,
+) -> None:
     db.upsert_library_album({
         "id": album_id, "artist_id": "art", "title": title, "monitored": True,
         "mb_release_group_id": rg, "mb_release_id": rg and "rel-" + rg,
+        "album_type": album_type,
+        "secondary_types": secondary_types,
     })
 
 
@@ -124,6 +133,59 @@ def test_ambiguous_holders_recorded(test_db, env):
     assert counts["ambiguous"] == 1
     rows = test_db.list_merge_conflicts()
     assert sorted((r["holder_album_id"], r["kind"]) for r in rows) == [("hold", "ambiguous"), ("hold2", "ambiguous")]
+
+
+def test_ambiguous_prefers_single_studio_album(test_db, env):
+    root, _ = env
+    _album(test_db, "src", "Paranoid (Remaster)")
+    _album(test_db, "hold-studio", "Paranoid", rg="rg-studio", album_type="album")
+    _album(test_db, "hold-single", "Paranoid", rg="rg-single", album_type="single")
+    _album(test_db, "hold-live", "Paranoid", rg="rg-live", album_type="album", secondary_types=["live"])
+    counts = {"merged": 0, "merge_conflict": 0, "ambiguous": 0}
+    release_matching._fold_title_duplicate(test_db, test_db.get_library_album("src"), counts)
+    assert counts["merged"] == 1
+    assert counts["ambiguous"] == 0
+    assert test_db.get_library_album("src") is None
+    assert test_db.list_merge_conflicts() == []
+
+
+def test_ambiguous_still_recorded_with_two_studio_albums(test_db, env):
+    root, _ = env
+    _album(test_db, "src", "Paranoid (Remaster)")
+    _album(test_db, "hold1", "Paranoid", rg="rg1", album_type="album")
+    _album(test_db, "hold2", "Paranoid", rg="rg2", album_type="album")
+    counts = {"merged": 0, "merge_conflict": 0, "ambiguous": 0}
+    release_matching._fold_title_duplicate(test_db, test_db.get_library_album("src"), counts)
+    assert counts["ambiguous"] == 1
+    rows = test_db.list_merge_conflicts()
+    assert sorted((r["holder_album_id"], r["kind"]) for r in rows) == [("hold1", "ambiguous"), ("hold2", "ambiguous")]
+
+
+def test_duplicate_files_row_hides_ambiguous_rows(test_db, env):
+    root, _ = env
+    _album(test_db, "src", "Hotel California (Hi-Res Version)")
+    _album(test_db, "hold-studio", "Hotel California", rg="rg1")
+    _album(test_db, "hold-single", "Hotel California", rg="rg2")
+    test_db.record_merge_conflict("src", "hold-studio", "ambiguous")
+    test_db.record_merge_conflict("src", "hold-single", "ambiguous")
+    test_db.record_merge_conflict("src", "hold-studio", "duplicate_files")
+    rows = test_db.list_merge_conflicts()
+    assert [(r["holder_album_id"], r["kind"]) for r in rows] == [("hold-studio", "duplicate_files")]
+
+    # A subsequent ambiguous insert for the same source is ignored
+    test_db.record_merge_conflict("src", "hold-single", "ambiguous")
+    rows = test_db.list_merge_conflicts()
+    assert [(r["holder_album_id"], r["kind"]) for r in rows] == [("hold-studio", "duplicate_files")]
+
+    # A pre-existing ambiguous row inserted directly via SQL is still hidden by list_merge_conflicts
+    with test_db._lock:
+        test_db.conn.execute(
+            "INSERT INTO library_merge_conflicts (source_album_id, holder_album_id, kind) VALUES (?, ?, ?)",
+            ("src", "hold-single", "ambiguous"),
+        )
+        test_db.conn.commit()
+    rows = test_db.list_merge_conflicts()
+    assert [(r["holder_album_id"], r["kind"]) for r in rows] == [("hold-studio", "duplicate_files")]
 
 
 def test_resolve_keep_existing_recycles_incoming_and_merges(test_db, env):
