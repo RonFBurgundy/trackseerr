@@ -5,6 +5,7 @@ No FastAPI imports: the route maps ``LookupError`` / ``ValueError`` / ``RelinkCo
 
 from __future__ import annotations
 
+import functools
 import logging
 from pathlib import Path
 from typing import Any, Optional
@@ -40,6 +41,20 @@ def quality_key(f: dict[str, Any]) -> tuple[int, int, int, int, int]:
     )
 
 
+def compare_quality(a: dict[str, Any], b: dict[str, Any]) -> int:
+    """Pairwise quality comparison (-1/0/1): lossless first, then known non-zero depth/rate/bitrate/size."""
+    a_lossless = 1 if str(a.get("codec") or "").upper() in LOSSLESS_CODECS else 0
+    b_lossless = 1 if str(b.get("codec") or "").upper() in LOSSLESS_CODECS else 0
+    if a_lossless != b_lossless:
+        return 1 if a_lossless > b_lossless else -1
+    for field in ("bits_per_sample", "sample_rate", "bitrate", "size_bytes"):
+        va = int(a.get(field) or 0)
+        vb = int(b.get(field) or 0)
+        if va and vb and va != vb:
+            return 1 if va > vb else -1
+    return 0
+
+
 def _dispose(db: Any, row: dict[str, Any], kept: dict[str, Any], title: str, settings: tuple[Any, ...]) -> None:
     """Recycles (or deletes, per settings) a file and drops its row. A file that cannot be moved stays on disk with
     its row in place and ``OSError`` is raised."""
@@ -68,10 +83,11 @@ def _resolve_conflict(
         raise ValueError(f"Unknown conflict choice: {conflict!r}")
     if conflict != "prefer_quality":
         return conflict
-    best = max(existing, key=quality_key)
-    if quality_key(incoming) == quality_key(best):
+    best = max(existing, key=functools.cmp_to_key(compare_quality))
+    cmp = compare_quality(incoming, best)
+    if cmp == 0:
         raise RelinkConflict(best, incoming)
-    return "keep_incoming" if quality_key(incoming) > quality_key(best) else "keep_existing"
+    return "keep_incoming" if cmp > 0 else "keep_existing"
 
 
 def _record_relink(db: Any, file_row: dict[str, Any], old: dict[str, Any], target: dict[str, Any]) -> None:

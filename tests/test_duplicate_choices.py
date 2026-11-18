@@ -47,7 +47,17 @@ def _album(
     })
 
 
-def _track(db: Database, root: Path, album_id: str, n: int, codec: str | None, size: int = 100) -> Path | None:
+def _track(
+    db: Database,
+    root: Path,
+    album_id: str,
+    n: int,
+    codec: str | None,
+    size: int = 100,
+    bits_per_sample: int | None = None,
+    sample_rate: int | None = None,
+    bitrate: int | None = None,
+) -> Path | None:
     tid = f"{album_id}-t{n}"
     db.upsert_library_track({
         "id": tid, "album_id": album_id, "artist_id": "art", "title": SONGS[n - 1],
@@ -60,17 +70,25 @@ def _track(db: Database, root: Path, album_id: str, n: int, codec: str | None, s
     path.write_bytes(b"x" * size)
     db.upsert_library_file({
         "id": f"{tid}-f", "track_id": tid, "file_path": str(path), "relative_path": f"{album_id}/{path.name}",
-        "codec": codec, "bitrate": 320 if codec == "MP3" else None, "size_bytes": size,
+        "codec": codec, "bits_per_sample": bits_per_sample, "sample_rate": sample_rate,
+        "bitrate": bitrate if bitrate is not None else (320 if codec == "MP3" else None), "size_bytes": size,
     })
     return path
 
 
-def _pair(db: Database, root: Path, src_codec: str = "FLAC", hold_codec: str = "FLAC"):
+def _pair(
+    db: Database,
+    root: Path,
+    src_codec: str = "FLAC",
+    hold_codec: str = "FLAC",
+    src_kwargs: dict | None = None,
+    hold_kwargs: dict | None = None,
+):
     """src album (no release group) and hold album (has one), each with one file on track 1; returns both paths."""
     _album(db, "src", "Pet Sounds (UDSACD)")
     _album(db, "hold", "Pet Sounds", rg="rg1")
-    sp = _track(db, root, "src", 1, src_codec)
-    hp = _track(db, root, "hold", 1, hold_codec)
+    sp = _track(db, root, "src", 1, src_codec, **(src_kwargs or {}))
+    hp = _track(db, root, "hold", 1, hold_codec, **(hold_kwargs or {}))
     return sp, hp
 
 
@@ -212,6 +230,21 @@ def test_resolve_keep_incoming_recycles_existing(test_db, env):
 def test_resolve_prefer_quality_keeps_flac_over_mp3(test_db, env):
     root, _ = env
     sp, hp = _pair(test_db, root, src_codec="MP3", hold_codec="FLAC")
+    result = duplicate_choices.resolve_choice(test_db, _conflict_id(test_db), "prefer_quality")
+    assert result["kept_file_ids"] == ["hold-t1-f"] and result["recycled_file_ids"] == ["src-t1-f"]
+    assert hp.exists() and not sp.exists()
+
+
+def test_resolve_prefer_quality_unprobed_larger_existing_kept(test_db, env):
+    root, _ = env
+    sp, hp = _pair(
+        test_db,
+        root,
+        src_codec="FLAC",
+        hold_codec="FLAC",
+        src_kwargs={"bits_per_sample": 24, "sample_rate": 44100, "bitrate": 1_364_862, "size": 280},
+        hold_kwargs={"size": 1030},
+    )
     result = duplicate_choices.resolve_choice(test_db, _conflict_id(test_db), "prefer_quality")
     assert result["kept_file_ids"] == ["hold-t1-f"] and result["recycled_file_ids"] == ["src-t1-f"]
     assert hp.exists() and not sp.exists()

@@ -204,6 +204,33 @@ def test_quality_key_orders_lossless_then_depth_then_rate():
     assert quality_key(mp3) < quality_key(flac16) < quality_key(flac24)
 
 
+def test_compare_quality_skips_unknown_fields():
+    from trackseerr.file_relink import compare_quality
+
+    existing = {"codec": "FLAC", "bits_per_sample": None, "sample_rate": None, "bitrate": None, "size_bytes": 103_000_000}
+    incoming = {"codec": "FLAC", "bits_per_sample": 24, "sample_rate": 44100, "bitrate": 1_364_862, "size_bytes": 28_000_000}
+    assert compare_quality(existing, incoming) > 0
+    assert compare_quality(incoming, existing) < 0
+
+
+def test_compare_quality_lossless_beats_lossy_even_when_unknown():
+    from trackseerr.file_relink import compare_quality
+
+    flac_unknown = {"codec": "FLAC", "bits_per_sample": None, "sample_rate": None, "bitrate": None, "size_bytes": None}
+    mp3_320 = {"codec": "MP3", "bitrate": 320, "size_bytes": 10_000_000}
+    assert compare_quality(flac_unknown, mp3_320) > 0
+    assert compare_quality(mp3_320, flac_unknown) < 0
+
+
+def test_compare_quality_depth_when_both_known():
+    from trackseerr.file_relink import compare_quality
+
+    flac16 = {"codec": "FLAC", "bits_per_sample": 16, "sample_rate": 44100, "size_bytes": 50_000_000}
+    flac24 = {"codec": "FLAC", "bits_per_sample": 24, "sample_rate": 44100, "size_bytes": 28_000_000}
+    assert compare_quality(flac24, flac16) > 0
+    assert compare_quality(flac16, flac24) < 0
+
+
 def test_relinked_row_previews_verified(app_and_client, test_db, env):
     _, client = app_and_client
     headers, root, _ = env
