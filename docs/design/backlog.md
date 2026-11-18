@@ -265,7 +265,7 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     vinyl/CD, not ripped": it does not count as in the library, so requests and playlists still want a digital copy;
     the item shows the physical copy so the admin can choose to rip it. Store links live in the existing tools menu.
 
-36. **P2 · Match playlist songs to the library by ID, not only by fuzzy title** (backlogged 2026-11-18, pick up when
+36. **DONE 2026-11-18 (Plex) · P2 · Match playlist songs to the library by ID, not only by fuzzy title** (backlogged 2026-11-18, pick up when
     convenient). Playlist → Plex sync and Missing detection search by title/artist/album today
     (`trackseerr/clients/plex.py` `match_track` ~L421, after match-memory overrides). Add an ID step before the fuzzy
     one: playlist song ISRC → MusicBrainz recording (MB recordings carry ISRCs) → library track with that

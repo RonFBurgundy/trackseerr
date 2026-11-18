@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- Plex playlist sync matches songs by ID before guessing by name. Spotify songs (and Deezer songs when Deezer includes it) carry their ISRC, which leads straight to the exact file in your library and its Plex track, so a remaster or live copy is no longer picked by mistake. Songs that name matching can't find are looked up on MusicBrainz by artist, title and length, up to 40 per sync.
 - **Find match** in Library tools → Not on MusicBrainz: suggests the MusicBrainz release for an album, with how sure it is and which of your files it found. Choosing one links the album, then shows the new file names and tags to approve.
 - Library Self-Heal links albums to MusicBrainz on its own when the match is certain (every file found, no close second). The rest appear under **Suggested** in Not on MusicBrainz, where you can tick them and apply many at once.
 - **Duplicates** in Library tools: when two copies of the same album or song stop a merge, choose to keep the existing copy, the incoming one, the better quality, or both. The copy you don't keep goes to the recycle bin.
