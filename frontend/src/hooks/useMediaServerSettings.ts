@@ -16,6 +16,7 @@ export interface UseMediaServerSettingsReturn {
   error: string | null;
   save: (input: MediaServerSettingsInput) => Promise<{ ok: boolean; message: string }>;
   test: (input: MediaServerSettingsInput) => Promise<MediaServerTestResult>;
+  reload: () => Promise<void>;
 }
 
 /** Loads and saves the media server chosen on the Settings page. Secrets stay masked (`********`). */
@@ -25,6 +26,16 @@ export function useMediaServerSettings(enabled: boolean): UseMediaServerSettings
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    try {
+      const next = await getMediaServerSettings();
+      setSettings(next);
+      setError(null);
+    } catch (err: unknown) {
+      setError(errorMessage(err, 'Could not load media server settings'));
+    }
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -70,5 +81,5 @@ export function useMediaServerSettings(enabled: boolean): UseMediaServerSettings
     }
   }, []);
 
-  return { settings, isLoading, isSaving, isTesting, error, save, test };
+  return { settings, isLoading, isSaving, isTesting, error, save, test, reload };
 }

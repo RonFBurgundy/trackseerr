@@ -63,6 +63,7 @@ export * from './useImportListItems';
 export * from './useItunesImport';
 export * from './useMediaServer';
 export * from './useMediaServerSettings';
+export * from './usePlexAccountSignIn';
 export * from './useAppRoute';
 export * from './useLoadedList';
 export * from './useQualityDefinitions';

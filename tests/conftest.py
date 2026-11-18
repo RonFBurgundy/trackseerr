@@ -104,11 +104,12 @@ def _reset_media_server_process_state():
     """The Settings-page media-server overlay, its change listeners and the shared Subsonic adapter are process-wide:
     never let one test's saved settings reach the next."""
     from trackseerr import media_servers
-    from trackseerr.config import set_media_server_overlay
+    from trackseerr.config import set_media_server_overlay, set_plex_account_token
     from trackseerr.media_servers import settings as media_server_settings
 
     def _reset() -> None:
         set_media_server_overlay(None)
+        set_plex_account_token("")
         media_server_settings.clear_listeners()
         with media_servers._subsonic_lock:
             media_servers._subsonic_cached = None

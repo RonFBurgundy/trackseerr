@@ -20,3 +20,9 @@ export interface MediaServerSettingsInput {
 }
 
 export type MediaServerTestResult = Schema<'MediaServerTestResponse'>;
+
+export type PlexPinResponse = Schema<'PlexPinResponse'>;
+
+export type PlexAccountCheckResponse = Schema<'PlexAccountCheckResponse'>;
+
+export type PlexAccountDisconnectResponse = Schema<'PlexAccountDisconnectResponse'>;

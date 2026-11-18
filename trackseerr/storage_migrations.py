@@ -88,6 +88,7 @@ class MigrationsMixin:
                 (98, self._migration_v98),
                 (99, self._migration_v99),
                 (100, self._migration_v100),
+                (101, self._migration_v101),
             ]
 
             applied = 0
@@ -308,6 +309,19 @@ class MigrationsMixin:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_exclusions_scope_mbid ON exclusions(scope, mbid)"
         )
+
+    def _migration_v101(self, cur: sqlite3.Cursor) -> None:
+        """v101: Add plex_account_token and plex_account_username to media_server_settings."""
+        cur.execute("PRAGMA table_info(media_server_settings)")
+        cols = {row[1] for row in cur.fetchall()}
+        if "plex_account_token" not in cols:
+            cur.execute(
+                "ALTER TABLE media_server_settings ADD COLUMN plex_account_token TEXT NOT NULL DEFAULT ''"
+            )
+        if "plex_account_username" not in cols:
+            cur.execute(
+                "ALTER TABLE media_server_settings ADD COLUMN plex_account_username TEXT NOT NULL DEFAULT ''"
+            )
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:
         """v100: library_match_suggestions keeps the best unsure MusicBrainz match per unlinked album."""

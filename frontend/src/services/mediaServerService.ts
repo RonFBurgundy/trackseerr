@@ -5,6 +5,9 @@ import type {
   MediaServerStatus,
   MediaServerTestResult,
   MediaServerType,
+  PlexAccountCheckResponse,
+  PlexAccountDisconnectResponse,
+  PlexPinResponse,
 } from '@/types/mediaServer';
 
 const MEDIA_SERVER_TYPES: readonly MediaServerType[] = ['plex', 'subsonic', 'jellyfin', 'none'];
@@ -46,4 +49,19 @@ export async function saveMediaServerSettings(input: MediaServerSettingsInput): 
 
 export async function testMediaServerSettings(input: MediaServerSettingsInput): Promise<MediaServerTestResult> {
   return apiRequest<MediaServerTestResult>('/api/settings/media-server/test', { method: 'POST', body: input });
+}
+
+export async function startPlexAccountSignIn(): Promise<PlexPinResponse> {
+  return apiRequest<PlexPinResponse>('/api/settings/media-server/plex-account/pin', { method: 'POST' });
+}
+
+export async function checkPlexAccountSignIn(pinId: number): Promise<PlexAccountCheckResponse> {
+  return apiRequest<PlexAccountCheckResponse>('/api/settings/media-server/plex-account/check', {
+    method: 'POST',
+    body: { pin_id: pinId },
+  });
+}
+
+export async function disconnectPlexAccount(): Promise<PlexAccountDisconnectResponse> {
+  return apiRequest<PlexAccountDisconnectResponse>('/api/settings/media-server/plex-account', { method: 'DELETE' });
 }

@@ -17,6 +17,7 @@ from trackseerr.config import (
     MEDIA_SERVER_SUBSONIC,
     Config,
     set_media_server_overlay,
+    set_plex_account_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -67,11 +68,18 @@ def load_into_process(db: Any) -> None:
         logger.warning("Could not load the saved media-server settings: %s", type(exc).__name__)
         return
     set_media_server_overlay(stored)
+    try:
+        plex_account = db.get_plex_account()
+    except Exception as exc:  # noqa: BLE001 - sqlite3.Error and a closed handle; startup must not depend on this
+        logger.warning("Could not load the saved Plex account token: %s", type(exc).__name__)
+        return
+    set_plex_account_token(str((plex_account or {}).get("token") or ""))
 
 
 def present(config: Config, db: Any) -> dict[str, Any]:
     """The Settings-page view: saved values with secrets masked, plus what is effectively active and why."""
     stored = db.get_media_server_settings()
+    plex_account = db.get_plex_account()
     return {
         "type": stored["type"] or (config.media_server_type if config.media_server_env_controlled else MEDIA_SERVER_NONE),
         "url": stored["url"],
@@ -80,6 +88,8 @@ def present(config: Config, db: Any) -> dict[str, Any]:
         "api_key": SECRET_PLACEHOLDER if stored["api_key"] else "",
         "effective_type": config.media_server_type,
         "locked_by_env": config.media_server_env_controlled,
+        "plex_account_connected": bool(plex_account.get("token")),
+        "plex_account_username": str(plex_account.get("username") or ""),
     }
 
 

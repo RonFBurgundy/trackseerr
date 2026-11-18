@@ -28,3 +28,13 @@ class LidarrOptionsResponse(ApiModel):
     quality_profiles: list[LidarrNamedOption]
     metadata_profiles: list[LidarrNamedOption]
     tags: list[LidarrTagOption]
+
+
+class PlexAccountCheckResponse(ApiModel):
+    connected: bool
+    pending: bool
+    username: str | None = None
+
+
+class PlexAccountDisconnectResponse(ApiModel):
+    connected: bool

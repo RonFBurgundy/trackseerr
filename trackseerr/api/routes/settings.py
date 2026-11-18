@@ -4,16 +4,21 @@ import logging
 import sqlite3
 from typing import Any, Literal, Union
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import JSONResponse
+from plexapi.exceptions import PlexApiException
 from pydantic import BaseModel, Field, field_validator, model_validator
 from trackseerr.api.response_models import ApiModel
 
 from trackseerr import library_manager, lidarr_library, recycle_bin
 from trackseerr.download_roots import allowed_roots_for_all_clients
 from trackseerr.seed_rules import seed_rule_conflict
-from trackseerr.api.dependencies import get_config, get_db, require_admin, require_core_tier
-from trackseerr.config import Config
+from trackseerr.api.dependencies import get_config, get_db, get_plex_client, require_admin, require_core_tier
+from trackseerr.api.schemas.auth import PlexPinResponse
+from trackseerr.auth import PlexAuthError, check_plex_pin, create_plex_pin
+from trackseerr.clients.plex import PlexAccountNotOwner, PlexClient
+from trackseerr.config import MEDIA_SERVER_PLEX, Config, set_plex_account_token
 from trackseerr.media_servers import JellyfinMediaServer, MediaServerError, SubsonicMediaServer
 from trackseerr.media_servers import settings as media_server_settings
 from trackseerr.library_monitoring import accept_deprecated_profile_keys, validate_monitor_option
@@ -30,7 +35,11 @@ from trackseerr.naming import (
     resolve_track_formats,
     validate_format,
 )
-from trackseerr.api.schemas.settings import LidarrOptionsResponse
+from trackseerr.api.schemas.settings import (
+    LidarrOptionsResponse,
+    PlexAccountCheckResponse,
+    PlexAccountDisconnectResponse,
+)
 from trackseerr.security import MASK_MARKER, is_safe_service_url, mask_secret, resolve_masked_value
 from trackseerr.storage import Database
 
@@ -800,6 +809,12 @@ class MediaServerSettingsResponse(ApiModel):
     api_key: str
     effective_type: str
     locked_by_env: bool
+    plex_account_connected: bool
+    plex_account_username: str
+
+
+class PlexAccountCheckRequest(BaseModel):
+    pin_id: int = Field(..., description="Plex PIN ID returned by POST /media-server/plex-account/pin")
 
 
 class MediaServerTestResponse(ApiModel):
@@ -913,6 +928,110 @@ def test_media_server_settings(
     finally:
         server.close()
     return MediaServerTestResponse(ok=result.ok, message=result.message)
+
+
+@router.post(
+    "/media-server/plex-account/pin",
+    response_model=PlexPinResponse,
+    summary="Create a Plex OAuth PIN for linking the server owner's Plex account (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
+def create_plex_account_pin(
+    config: Config = Depends(get_config),
+    admin_user: dict[str, Any] = Depends(require_admin),
+) -> PlexPinResponse:
+    if config.media_server_type != MEDIA_SERVER_PLEX:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Plex is not the active media server.",
+        )
+    try:
+        pin_data = create_plex_pin()
+    except PlexAuthError as exc:
+        logger.warning("Failed to create Plex account PIN: %s", safe_exc(exc, safe_types=(PlexAuthError,)))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=safe_exc(exc, safe_types=(PlexAuthError,)),
+        ) from exc
+    return PlexPinResponse(**pin_data)
+
+
+@router.post(
+    "/media-server/plex-account/check",
+    response_model=PlexAccountCheckResponse,
+    response_model_exclude_none=True,
+    summary="Check a Plex OAuth PIN and store the server owner's account token (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
+def check_plex_account_pin(
+    payload: PlexAccountCheckRequest,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+    plex: PlexClient | None = Depends(get_plex_client),
+    admin_user: dict[str, Any] = Depends(require_admin),
+) -> PlexAccountCheckResponse:
+    if config.media_server_type != MEDIA_SERVER_PLEX:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Plex is not the active media server.",
+        )
+    try:
+        token = check_plex_pin(payload.pin_id)
+    except PlexAuthError as exc:
+        logger.warning("Failed to check Plex account PIN: %s", safe_exc(exc, safe_types=(PlexAuthError,)))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=safe_exc(exc, safe_types=(PlexAuthError,)),
+        ) from exc
+    if token is None:
+        return PlexAccountCheckResponse(connected=False, pending=True)
+    if plex is None:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not connect to the configured Plex server.",
+        )
+    try:
+        username = plex.verify_account_owns_server(token)
+    except PlexAccountNotOwner as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except (PlexApiException, requests.RequestException) as exc:
+        logger.warning("Failed to verify Plex account ownership: %s", safe_exc(exc))
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to verify Plex account: {safe_exc(exc)}",
+        ) from exc
+    try:
+        db.set_plex_account(token, username)
+    except sqlite3.Error as exc:
+        logger.error("Failed to save Plex account token: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database update failed",
+        ) from exc
+    set_plex_account_token(token)
+    return PlexAccountCheckResponse(connected=True, pending=False, username=username)
+
+
+@router.delete(
+    "/media-server/plex-account",
+    response_model=PlexAccountDisconnectResponse,
+    summary="Disconnect the stored Plex owner account token (Admin Only)",
+    dependencies=[Depends(require_core_tier)],
+)
+def disconnect_plex_account(
+    db: Database = Depends(get_db),
+    admin_user: dict[str, Any] = Depends(require_admin),
+) -> PlexAccountDisconnectResponse:
+    try:
+        db.clear_plex_account()
+    except sqlite3.Error as exc:
+        logger.error("Failed to clear Plex account token: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database update failed",
+        ) from exc
+    set_plex_account_token("")
+    return PlexAccountDisconnectResponse(connected=False)
 
 
 # -----------------------------------------------------------------------------
