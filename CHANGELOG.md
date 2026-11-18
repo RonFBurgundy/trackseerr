@@ -100,6 +100,8 @@ heading becomes the version and date.
 
 ### Changed
 
+- Switching on one song in an album now also monitors its album and artist, so the song is really searched for. The album's other songs stay as they were.
+- TrackSeerr no longer contacts plex.tv with your Plex token unless it can tell the token is your own sign-in token. If your Plex server doesn't say, Settings → System → Status explains why, home users come from your Plex server only, and other users' playlists aren't changed. Set `PLEX_TOKEN_CONFIRMED=1` if the token is your own sign-in token.
 - Rename Files now pre-selects renames that only remove a copy number like " (1)" or stray spaces from a name, even when AcoustID flags the audio, because the name still names the same song. If the name without the copy number is already taken by another file, the rename is marked as a name collision and left unselected.
 - After this update, TrackSeerr tidies your artists once in the background (it backs up the database first, and you can see it on the Tasks page): artists listed twice under different spellings ("Jay Z" and "JAY-Z") become one, artists that were matched to the wrong MusicBrainz artist are fixed, and combined names like "2Pac; Dr. Dre" are filed under the main artist. Files are not moved; run Rename Files afterwards if you want the folders to follow. The MusicBrainz release match task runs the same tidy-up.
 - Backups no longer pile up. Every backup older than 28 days is deleted automatically, including manual and pre-restore backups, and the newest scheduled backup is always kept so you always have one to restore. Change the number of days in Settings → System → Backups → Settings ("Keep Backups For"). Cleanup runs after each backup and as soon as you save a new value. This replaces the old "keep the last 7 scheduled backups" setting.
@@ -150,6 +152,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Requested songs whose title differs slightly from the album's track list, such as "(feat. …)" versus "(ft. …)" or an added "Edit" or "Original Mix", now link to that song. They are monitored and show on Wanted → Missing. Requests that couldn't be linked are tried again every day.
+- In an artist's album list, a song's status badge and its Monitored label now change as soon as you flip its switch. On phones the song rows fit the screen and the title stays readable.
+- A manual grab of an album torrent for one song downloads only that song when the torrent client can download part of a torrent, as automatic grabs already did.
 - MusicBrainz matching ignores edition words such as "Deluxe Edition", "25th Anniversary", "Remastered" or "Hi-Res Version", so a remastered album now matches the original release and links on its own.
 - Deluxe and remastered albums with bonus tracks now link to MusicBrainz on their own: matching checks every edition of the album, not just the first one, so bonus tracks are found.
 - Suggested matches prefer the artist's own album or single over a Various Artists compilation, and guesses with no matching tracks are no longer listed.
