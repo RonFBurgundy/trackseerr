@@ -2,16 +2,21 @@ import csv
 import logging
 import re
 import sqlite3
+import time
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, List, Optional, Tuple
 
+import plexapi
 import requests
 import urllib.parse
 import urllib3
 from plexapi.exceptions import BadRequest, NotFound, PlexApiException, Unauthorized
 from plexapi.server import PlexServer
+
+import trackseerr
+import trackseerr.auth
 
 from ..censored import censored_pattern, search_text
 from ..models import Playlist, SyncResult, Track
@@ -191,6 +196,28 @@ def _search_section_tracks(section: Any, clean_query: str, limit: int) -> list[A
     return results
 
 
+_PLEXAPI_IDENTITY_SET = False
+_LOCAL_ACCOUNT_TTL = 600.0
+_SERVER_TOKEN_WARNING = (
+    "PLEX_TOKEN is the Plex server's own token. "
+    "Use a token from your own Plex sign-in instead; see docs/CONFIGURATION.md"
+)
+
+
+def _set_plexapi_identity() -> None:
+    """Configure PlexAPI's client identity headers once per process."""
+    global _PLEXAPI_IDENTITY_SET
+    if _PLEXAPI_IDENTITY_SET:
+        return
+    plexapi.X_PLEX_PRODUCT = "TrackSeerr"
+    plexapi.X_PLEX_DEVICE_NAME = "TrackSeerr"
+    plexapi.X_PLEX_VERSION = trackseerr.__version__
+    plexapi.X_PLEX_PROVIDES = "controller"
+    plexapi.X_PLEX_IDENTIFIER = trackseerr.auth.DEFAULT_CLIENT_IDENTIFIER
+    plexapi.BASE_HEADERS = plexapi.reset_base_headers()
+    _PLEXAPI_IDENTITY_SET = True
+
+
 class PlexClient:
     """Manages interactions with the Plex Media Server."""
 
@@ -206,6 +233,10 @@ class PlexClient:
         self.token = token
         self.verify_ssl = verify_ssl
         self.music_section = music_section
+        self._local_account_cache: Optional[tuple[float, dict[str, str]]] = None
+        self._server_token_warned = False
+
+        _set_plexapi_identity()
 
         session = requests.Session()
         if not verify_ssl:
@@ -225,6 +256,78 @@ class PlexClient:
         """Return the unique machine identifier of the Plex Media Server."""
         return str(getattr(self.server, "machineIdentifier", "") or "")
 
+    def _local_account(self) -> dict[str, str]:
+        """Query the local PMS /myplex/account endpoint (never plex.tv), cached for 10 minutes."""
+        now = time.monotonic()
+        if self._local_account_cache is not None:
+            cached_at, cached_val = self._local_account_cache
+            if now - cached_at < _LOCAL_ACCOUNT_TTL:
+                return cached_val
+        try:
+            el = self.server.query("/myplex/account")
+            result = {
+                "username": str(el.attrib.get("username", "") or ""),
+                "auth_token": str(el.attrib.get("authToken", "") or ""),
+            }
+        except (PlexApiException, requests.RequestException, AttributeError) as e:
+            logger.warning("Could not query local /myplex/account: %s", safe_exc(e))
+            result = {}
+        self._local_account_cache = (now, result)
+        return result
+
+    @property
+    def uses_server_token(self) -> bool:
+        """True when PLEX_TOKEN matches the Plex server's own PlexOnlineToken."""
+        auth_token = self._local_account().get("auth_token", "")
+        return bool(auth_token) and auth_token == self.token
+
+    def token_warning(self) -> Optional[str]:
+        """Return a warning message if PLEX_TOKEN is the server's own token, else None."""
+        if self.uses_server_token:
+            return _SERVER_TOKEN_WARNING
+        return None
+
+    def _get_home_users_local(self) -> List[dict]:
+        """Build home users list from local PMS endpoints without contacting plex.tv."""
+        if not self._server_token_warned:
+            logger.warning(_SERVER_TOKEN_WARNING)
+            self._server_token_warned = True
+
+        local_username = self._local_account().get("username", "")
+        admin_name = local_username or str(getattr(self.server, "friendlyName", "Admin") or "Admin")
+        home_users: List[dict] = [
+            {
+                "id": "admin",
+                "username": admin_name,
+                "email": "",
+                "thumb": "",
+                "is_admin": True,
+            }
+        ]
+        try:
+            accounts = self.server.systemAccounts()
+        except Exception as e:
+            logger.warning("Could not retrieve local systemAccounts: %s", safe_exc(e))
+            return home_users
+
+        for acct in accounts or []:
+            acct_id = getattr(acct, "id", None)
+            if acct_id in (0, 1, "0", "1"):
+                continue
+            name = str(getattr(acct, "name", "") or "")
+            if not name or name.lower() == admin_name.lower():
+                continue
+            home_users.append(
+                {
+                    "id": str(acct_id) if acct_id is not None else name,
+                    "username": name,
+                    "email": "",
+                    "thumb": "",
+                    "is_admin": False,
+                }
+            )
+        return home_users
+
     def get_home_users(self) -> List[dict]:
         """Retrieve all Plex Home and managed users including the admin user.
 
@@ -235,6 +338,9 @@ class PlexClient:
         Returns:
             List of dicts: [{'id': ..., 'username': ..., 'email': ..., 'thumb': ..., 'is_admin': ...}, ...]
         """
+        if self.uses_server_token:
+            return self._get_home_users_local()
+
         home_users: List[dict] = []
         try:
             account = self.server.myPlexAccount()
@@ -743,6 +849,11 @@ class PlexClient:
 
     def _get_admin_username(self) -> str:
         """Return the Plex admin account username, or '' when it cannot be determined."""
+        local_username = self._local_account().get("username", "")
+        if local_username:
+            return local_username
+        if self.uses_server_token:
+            return ""
         try:
             account = self.server.myPlexAccount()
             return str(getattr(account, "username", "") or "")
