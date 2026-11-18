@@ -256,6 +256,7 @@ class PlexClient:
         self.music_section = music_section
         self._account_token_override = account_token
         self._local_account_cache: Optional[tuple[float, dict[str, str]]] = None
+        self._cloud_names_cache: Optional[tuple[float, frozenset[str]]] = None
         self._sections_cache: Optional[list[Any]] = None
         self._server_token_warned = False
         self._token_confirmed: bool = (
@@ -308,6 +309,10 @@ class PlexClient:
                 "username": _str_attr("username"),
                 "auth_token": _str_attr("authToken"),
             }
+            if email := _str_attr("email"):
+                result["email"] = email
+            if title := _str_attr("title"):
+                result["title"] = title
         except (PlexApiException, requests.RequestException, AttributeError) as e:
             logger.warning("Could not query local /myplex/account: %s", safe_exc(e))
             result = {}
@@ -1109,8 +1114,48 @@ class PlexClient:
     # Plex Playlist Control: identity helpers
     # -------------------------------------------------------------------------
 
+    def _cloud_admin_names(self) -> frozenset[str]:
+        """Return lower-cased cloud account names (username, email, title), cached for 10 minutes."""
+        if not self.cloud_calls_allowed:
+            return frozenset()
+        now = time.monotonic()
+        if self._cloud_names_cache is not None:
+            cached_at, cached_val = self._cloud_names_cache
+            if now - cached_at < _LOCAL_ACCOUNT_TTL:
+                return cached_val
+        try:
+            account = self._cloud_account()
+            cloud_names = frozenset(
+                val.lower()
+                for attr in ("username", "email", "title")
+                if isinstance((val := getattr(account, attr, None)), str) and val
+            )
+        except (PlexApiException, requests.RequestException, Exception) as e:
+            logger.warning("Could not determine cloud admin names: %s", safe_exc(e))
+            cloud_names = frozenset()
+        self._cloud_names_cache = (now, cloud_names)
+        return cloud_names
+
+    def _admin_names(self) -> frozenset[str]:
+        """Return all lower-cased names that identify the Plex server owner."""
+        local = self._local_account()
+        local_names = frozenset(
+            val.lower()
+            for key in ("username", "email", "title")
+            if (val := local.get(key, ""))
+        )
+        return local_names | self._cloud_admin_names()
+
     def _get_admin_username(self) -> str:
         """Return the Plex admin account username, or '' when it cannot be determined."""
+        if self.account_token and self.cloud_calls_allowed:
+            try:
+                account = self._cloud_account()
+                cloud_username = str(getattr(account, "username", "") or "")
+                if cloud_username:
+                    return cloud_username
+            except (PlexApiException, requests.RequestException) as e:
+                logger.warning("Could not determine admin username from myPlexAccount: %s", safe_exc(e))
         local_username = self._local_account().get("username", "")
         if local_username:
             return local_username
@@ -1119,16 +1164,19 @@ class PlexClient:
         try:
             account = self._cloud_account()
             return str(getattr(account, "username", "") or "")
-        except Exception as e:  # myPlexAccount raises assorted plexapi/requests/Unauthorized errors
+        except Exception as e:
             logger.warning("Could not determine admin username from myPlexAccount: %s", safe_exc(e))
             return ""
 
     def is_admin_username(self, username: str, admin_username: Optional[str] = None) -> bool:
         """True when ``username`` is the Plex admin account (case-insensitive)."""
-        admin_name = self._get_admin_username() if admin_username is None else admin_username
-        if admin_name and username.lower() == admin_name.lower():
+        lower = username.lower()
+        if admin_username and lower == admin_username.lower():
             return True
-        if not admin_name and username.lower() in (
+        names = self._admin_names()
+        if lower in names:
+            return True
+        if not names and not admin_username and lower in (
             "admin",
             str(getattr(self.server, "friendlyName", "") or "").lower(),
         ):
