@@ -186,6 +186,72 @@ def _score(rows: list[dict[str, Any]], files: int, title_match: bool, from_recor
     return min(100, confidence), reasons
 
 
+def _release_tracks(release: dict[str, Any]) -> list[dict[str, Any]]:
+    """Converts a release's media list into the track dict shape expected by ``_map_tracks``."""
+    tracks: list[dict[str, Any]] = []
+    for medium in release.get("media") or []:
+        disc_number = medium.get("position", 1)
+        for trk in medium.get("tracks") or []:
+            length = trk.get("length")
+            duration_seconds: Optional[float]
+            if length is None:
+                duration_seconds = None
+            else:
+                try:
+                    duration_seconds = float(length) / 1000.0
+                except (TypeError, ValueError):
+                    duration_seconds = None
+            tracks.append(
+                {
+                    "title": str(trk.get("title") or ""),
+                    "track_number": trk.get("position"),
+                    "disc_number": disc_number,
+                    "duration_seconds": duration_seconds,
+                    "mb_recording_id": trk.get("recording_id") or None,
+                }
+            )
+    return tracks
+
+
+def _mapped_file_count(rows: list[dict[str, Any]]) -> int:
+    return sum(1 for r in rows if r["has_file"] and r["release_track_title"] is not None)
+
+
+def _pick_best_release_mapping(
+    enricher: Any,
+    group_id: str,
+    tracks: list[dict[str, Any]],
+    files: int,
+    default_tracks: list[dict[str, Any]],
+    default_rows: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], Optional[str]]:
+    if not any(r["has_file"] and r["release_track_title"] is None for r in default_rows):
+        return default_tracks, default_rows, None
+
+    best_mapped = _mapped_file_count(default_rows)
+    best_diff: Optional[int] = None
+    best_tracks = default_tracks
+    best_rows = default_rows
+    best_release_id: Optional[str] = None
+
+    for release in enricher.get_release_group_releases(group_id) or []:
+        rel_tracks = _release_tracks(release)
+        rel_rows = _map_tracks(tracks, rel_tracks)
+        mapped = _mapped_file_count(rel_rows)
+        rel_count = int(release.get("track_count") or len(rel_tracks))
+        diff = abs(rel_count - files)
+        if mapped > best_mapped or (
+            best_release_id is not None and mapped == best_mapped and best_diff is not None and diff < best_diff
+        ):
+            best_mapped = mapped
+            best_diff = diff
+            best_tracks = rel_tracks
+            best_rows = rel_rows
+            best_release_id = str(release.get("id") or "").strip() or None
+
+    return best_tracks, best_rows, best_release_id
+
+
 def _build_candidate(
     enricher: Any,
     group: dict[str, Any],
@@ -195,8 +261,12 @@ def _build_candidate(
     clean_title: str,
     from_recordings: bool,
 ) -> dict[str, Any]:
-    release_tracks = enricher.get_release_group_tracks(str(group["id"])) or []
-    rows = _map_tracks(tracks, release_tracks)
+    group_id = str(group["id"])
+    default_tracks = enricher.get_release_group_tracks(group_id) or []
+    default_rows = _map_tracks(tracks, default_tracks)
+    release_tracks, rows, release_id = _pick_best_release_mapping(
+        enricher, group_id, tracks, files, default_tracks, default_rows
+    )
     title_match = album_titles_match(group.get("title"), clean_title)
     confidence, reasons = _score(rows, files, title_match, from_recordings)
     various = bool(group.get("is_various"))
@@ -217,6 +287,8 @@ def _build_candidate(
         confidence=confidence,
         reasons=reasons,
     )
+    if release_id is not None:
+        candidate["release_id"] = release_id
     return candidate
 
 
@@ -311,6 +383,11 @@ def apply_match(
     except requests.RequestException as exc:
         logger.warning("Applying match for album %s failed: %s", album_id, safe_exc(exc))
         raise
+    release_id = str(group.get("release_id") or "").strip()
+    if release_id and not counts["merge_conflict"]:
+        final_album = db.get_library_album(final_id)
+        if final_album is not None and not str(final_album.get("mb_release_id") or "").strip():
+            db.set_album_mb_release_id(final_id, release_id)
     return {"album_id": final_id, "merged": counts["merged"] > 0, "conflict": counts["merge_conflict"] > 0}
 
 
