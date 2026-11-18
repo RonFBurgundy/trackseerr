@@ -1,9 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import { Loader2, Save, Lock } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ExternalLink, Loader2, Lock, LogIn, LogOut, Save, X } from 'lucide-react';
 import { MachinedCard, PageLoader, TapeDeckButton } from '@/components/ui';
 import { inputClass, labelClass } from '@/components/settings/formClasses';
 import type { MediaServerSettings, MediaServerSettingsInput, SettableMediaServerType } from '@/types/mediaServer';
+import { errorMessage } from '@/services/apiClient';
+import { disconnectPlexAccount } from '@/services/mediaServerService';
 import { useMediaServerSettings } from '@/hooks/useMediaServerSettings';
+import { usePlexAccountSignIn } from '@/hooks/usePlexAccountSignIn';
 
 export interface MediaServerPanelProps {
   onToast: (msg: string, tone?: 'ok' | 'error') => void;
@@ -32,12 +35,29 @@ function toSettableType(value: string): SettableMediaServerType {
 /** Settings > Media Server: pick Subsonic (Navidrome, Gonic, Airsonic), Jellyfin or none; Plex is set through the environment. */
 export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) => {
   const hook = useMediaServerSettings(true);
-  const { settings } = hook;
+  const { settings, reload } = hook;
   const [form, setForm] = useState<MediaServerSettingsInput>(EMPTY);
+  const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
+
+  const handlePlexConnected = useCallback(
+    (username: string) => {
+      onToast(username ? `Signed in to Plex as ${username}` : 'Signed in to Plex', 'ok');
+      void reload();
+    },
+    [onToast, reload]
+  );
+
+  const plexSignIn = usePlexAccountSignIn(handlePlexConnected);
 
   useEffect(() => {
     if (settings) setForm(toInput(settings));
   }, [settings]);
+
+  useEffect(() => {
+    if (plexSignIn.error) {
+      onToast(plexSignIn.error, 'error');
+    }
+  }, [plexSignIn.error, onToast]);
 
   if (hook.isLoading) {
     return <PageLoader message="Reading media server settings" />;
@@ -59,6 +79,21 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
     const res = await hook.test(form);
     onToast(res.message || (res.ok ? 'Connected' : 'Connection failed'), res.ok ? 'ok' : 'error');
   };
+
+  const handlePlexDisconnect = async () => {
+    setIsDisconnecting(true);
+    try {
+      await disconnectPlexAccount();
+      await reload();
+    } catch (err: unknown) {
+      onToast(errorMessage(err, 'Failed to sign out of Plex'), 'error');
+    } finally {
+      setIsDisconnecting(false);
+    }
+  };
+
+  const isPlex = settings?.effective_type === 'plex';
+  const isWaitingForPlex = plexSignIn.phase === 'waiting' || plexSignIn.phase === 'blocked';
 
   return (
     <div className="space-y-4 max-w-2xl">
@@ -85,6 +120,89 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
               it here.
             </span>
           </p>
+        )}
+
+        {isPlex && (
+          <div className="rounded-[4px] border border-[#222222] bg-[#0f0f0f] p-3 sm:p-4 space-y-3">
+            <div className="space-y-1">
+              <h5 className="text-xs font-bold uppercase font-mono text-white">Plex account</h5>
+              {settings?.plex_account_connected ? (
+                <p className="text-xs font-mono text-neutral-300">
+                  Signed in as <span className="text-white font-semibold">{settings.plex_account_username}</span>.
+                  TrackSeerr uses this account for Plex Home users and other users&apos; playlists.
+                </p>
+              ) : (
+                <p className="text-xs font-mono text-neutral-400">
+                  Sign in as the Plex server owner so TrackSeerr can reach Plex Home users and other users&apos;
+                  playlists safely.
+                </p>
+              )}
+            </div>
+
+            {settings?.plex_account_connected ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <TapeDeckButton
+                  type="button"
+                  size="sm"
+                  className="w-full sm:w-auto"
+                  aria-label="Sign out of Plex account"
+                  disabled={isDisconnecting}
+                  onClick={() => void handlePlexDisconnect()}
+                  icon={
+                    isDisconnecting ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <LogOut className="h-3.5 w-3.5" />
+                    )
+                  }
+                >
+                  Sign out
+                </TapeDeckButton>
+              </div>
+            ) : isWaitingForPlex ? (
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
+                <div className="flex items-center gap-2 text-xs font-mono text-neutral-300">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-[#e5a00d] shrink-0" aria-hidden="true" />
+                  <span>Waiting for Plex sign-in…</span>
+                </div>
+                {plexSignIn.phase === 'blocked' && plexSignIn.authUrl && (
+                  <a
+                    href={plexSignIn.authUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-mono text-[#e5a00d] underline hover:text-[#f5b82e]"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                    <span>Open Plex sign-in</span>
+                  </a>
+                )}
+                <TapeDeckButton
+                  type="button"
+                  size="sm"
+                  className="w-full sm:w-auto sm:ml-auto"
+                  aria-label="Cancel Plex sign-in"
+                  onClick={plexSignIn.cancel}
+                  icon={<X className="h-3.5 w-3.5" />}
+                >
+                  Cancel
+                </TapeDeckButton>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <TapeDeckButton
+                  type="button"
+                  size="sm"
+                  active
+                  className="w-full sm:w-auto"
+                  aria-label="Sign in with Plex"
+                  onClick={() => void plexSignIn.start()}
+                  icon={<LogIn className="h-3.5 w-3.5" />}
+                >
+                  Sign in with Plex
+                </TapeDeckButton>
+              </div>
+            )}
+          </div>
         )}
 
         <form onSubmit={(e) => void handleSave(e)} className="space-y-4">
