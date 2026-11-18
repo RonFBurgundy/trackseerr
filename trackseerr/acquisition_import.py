@@ -239,6 +239,7 @@ class _PollContext:
 
 _SOURCE_WAIT_PREFIX = "Waiting for files to appear"
 _SYNC_WAIT_PREFIX = "Waiting for files to finish syncing"
+_SELECTED_GAVE_UP_PREFIX = "Selected file still missing"
 _SYNC_WAIT_TIMEOUT = timedelta(hours=6)
 _SYNC_SETTLE_SECONDS = 60.0
 _MIN_SELECTED_AUDIO_BYTES = 64 * 1024
@@ -834,7 +835,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
             db.update_download_status(
                 job.download_id,
                 status=DownloadStatus.WARNING.value,
-                error_message=f"Selected file not found: {filename}",
+                error_message=f"Selected file still missing after 6 hours: {filename}",
             )
             return
         msg = f"{_SYNC_WAIT_PREFIX} at {base_dir} (check the remote path mapping or your sync)"

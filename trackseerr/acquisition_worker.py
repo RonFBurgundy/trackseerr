@@ -82,6 +82,7 @@ logger = logging.getLogger(__name__)
 from trackseerr.acquisition_import import (
     ImportPipelineMixin,
     _PollContext,
+    _SELECTED_GAVE_UP_PREFIX,
     _download_artist_id,
     _parse_job_selected_files,
 )
@@ -1056,7 +1057,11 @@ class AcquisitionWorker(ImportPipelineMixin):
         remaining: list[dict[str, Any]] = []
         for item in warning_items:
             err = str(item.get("error_message") or "")
-            if _parse_job_selected_files(item) and err.startswith("Selected file not found"):
+            if (
+                _parse_job_selected_files(item)
+                and err.startswith("Selected file not found")
+                and not err.startswith(_SELECTED_GAVE_UP_PREFIX)
+            ):
                 logger.info("Requeuing parked selected-file download %s for sync retry", item["id"])
                 db.update_download_status(
                     item["id"],

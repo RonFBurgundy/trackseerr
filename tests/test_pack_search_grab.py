@@ -841,7 +841,7 @@ def test_selected_file_missing_warns_after_timeout(tmp_path: Path, db: Database)
     updated_dl = db.get_active_download("dl-missing-timeout")
     assert updated_dl is not None
     assert updated_dl["status"] == DownloadStatus.WARNING.value
-    assert "Selected file not found: ghost_song.flac" in updated_dl["error_message"]
+    assert "Selected file still missing after 6 hours: ghost_song.flac" in updated_dl["error_message"]
 
 
 def test_selected_file_placeholder_waits(tmp_path: Path, db: Database) -> None:
