@@ -1395,3 +1395,207 @@ def test_manual_search_dedupes_results(app_and_client, test_db, test_config, see
     assert returned_ids.count("dup-1") == 1
 
 
+def _seed_qbit_and_track_request(
+    test_db,
+    *,
+    request_id: str = "req-track-1",
+    item_type: str = "track",
+    title: str = "Song",
+    artist: str = "Artist",
+):
+    qbit_cfg = DownloadClientConfig(
+        id="qbit-client-1",
+        name="qBittorrent Primary",
+        driver_type="qbittorrent",
+        host_url="http://127.0.0.1:8080",
+        enabled=True,
+        priority=1,
+    )
+    test_db.create_download_client(qbit_cfg)
+    req = MusicRequest(
+        id=request_id,
+        user_id="user-alice",
+        item_type=item_type,
+        title=title,
+        artist=artist,
+        status=RequestStatus.PENDING,
+    )
+    test_db.create_request(req)
+
+
+def _track_grab_payload(
+    *,
+    request_id: str = "req-track-1",
+    item_type: str = "track",
+    extra: dict | None = None,
+) -> dict:
+    return {
+        "release": {
+            "id": "rel-qbit-track-1",
+            "title": "Artist - Album (2024) [FLAC]",
+            "indexer_name": "Redacted",
+            "protocol": "torrent",
+            "size_bytes": 400_000_000,
+            "seeders": 12,
+            "download_url": "http://indexer.local/dl/album.torrent",
+            "magnet_url": "magnet:?xt=urn:btih:album1234567890abcdef",
+            "parsed_quality": "FLAC",
+            "is_acceptable": True,
+            "score": 900,
+            "meets_cutoff": True,
+            "rejection_reasons": [],
+            "extra": extra if extra is not None else {"indexer_name": "Redacted"},
+        },
+        "artist": "Artist",
+        "title": "Song",
+        "album": "Album",
+        "item_type": item_type,
+        "request_id": request_id,
+    }
+
+
+def test_manual_grab_track_selects_single_file(app_and_client, test_db, test_config, seeded_users):
+    """Manual grab for a single track on a torrent selects only that track's file."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_qbit_and_track_request(test_db)
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "album1234567890abcdef"
+
+    with (
+        patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=mock_driver),
+        patch("trackseerr.track_file_selection.fetch_torrent_bytes", return_value=b"torrent-bytes"),
+        patch(
+            "trackseerr.track_file_selection.select_track_file",
+            return_value=({"file_index": 3, "path": "Album/04 - Song.flac", "size_bytes": 123}, "selected"),
+        ),
+    ):
+        resp = client.post("/api/acquisition/grab", headers=admin_headers, json=_track_grab_payload())
+
+    assert resp.status_code == 200
+    res = resp.json()
+    assert res["success"] is True
+
+    mock_driver.download.assert_called_once()
+    download_arg = mock_driver.download.call_args[0][0]
+    assert download_arg.extra["file_indices"] == [3]
+
+    active_dl = test_db.get_active_download(res["download_id"])
+    assert active_dl is not None
+    assert active_dl["selected_files"] == [{"file_index": 3, "path": "Album/04 - Song.flac"}]
+
+
+def test_manual_grab_album_item_downloads_whole_torrent(app_and_client, test_db, test_config, seeded_users):
+    """Manual grab for an album item does not run single-track file selection."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_qbit_and_track_request(test_db, item_type="album", title="Album")
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "album1234567890abcdef"
+
+    with (
+        patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=mock_driver),
+        patch("trackseerr.track_file_selection.fetch_torrent_bytes") as mock_fetch,
+        patch("trackseerr.track_file_selection.select_track_file") as mock_select,
+    ):
+        resp = client.post(
+            "/api/acquisition/grab",
+            headers=admin_headers,
+            json=_track_grab_payload(item_type="album"),
+        )
+
+    assert resp.status_code == 200
+    mock_fetch.assert_not_called()
+    mock_select.assert_not_called()
+    download_arg = mock_driver.download.call_args[0][0]
+    assert "file_indices" not in download_arg.extra
+
+
+def test_manual_grab_pack_result_keeps_its_file(app_and_client, test_db, test_config, seeded_users):
+    """Pack-index results that already carry file_indices keep them untouched."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_qbit_and_track_request(test_db)
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "album1234567890abcdef"
+    pack_extra = {
+        "indexer_name": "Redacted",
+        "file_indices": [7],
+        "file_paths": ["Pack/07 - Song.flac"],
+    }
+
+    with (
+        patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=mock_driver),
+        patch("trackseerr.track_file_selection.fetch_torrent_bytes") as mock_fetch,
+        patch("trackseerr.track_file_selection.select_track_file") as mock_select,
+    ):
+        resp = client.post(
+            "/api/acquisition/grab",
+            headers=admin_headers,
+            json=_track_grab_payload(extra=pack_extra),
+        )
+
+    assert resp.status_code == 200
+    mock_fetch.assert_not_called()
+    mock_select.assert_not_called()
+    download_arg = mock_driver.download.call_args[0][0]
+    assert download_arg.extra["file_indices"] == [7]
+
+
+def test_manual_grab_ambiguous_track_downloads_whole_torrent(app_and_client, test_db, test_config, seeded_users):
+    """Ambiguous track match falls back to whole torrent and records a note on the request."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_qbit_and_track_request(test_db)
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "album1234567890abcdef"
+
+    with (
+        patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=mock_driver),
+        patch("trackseerr.track_file_selection.fetch_torrent_bytes", return_value=b"torrent-bytes"),
+        patch("trackseerr.track_file_selection.select_track_file", return_value=(None, "ambiguous")),
+        patch.object(test_db, "set_request_outcome", wraps=test_db.set_request_outcome) as mock_outcome,
+    ):
+        resp = client.post("/api/acquisition/grab", headers=admin_headers, json=_track_grab_payload())
+
+    assert resp.status_code == 200
+    download_arg = mock_driver.download.call_args[0][0]
+    assert "file_indices" not in download_arg.extra
+
+    mock_outcome.assert_called_once()
+    assert mock_outcome.call_args[0][0] == "req-track-1"
+    assert mock_outcome.call_args[0][1] == "whole_release"
+
+
+def test_manual_grab_torrent_fetch_error_falls_back(app_and_client, test_db, test_config, seeded_users, caplog):
+    """A RequestException while fetching .torrent bytes logs a warning and falls back to whole torrent."""
+    import requests
+
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_qbit_and_track_request(test_db)
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "album1234567890abcdef"
+
+    with (
+        patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=mock_driver),
+        patch(
+            "trackseerr.track_file_selection.fetch_torrent_bytes",
+            side_effect=requests.RequestException("indexer timeout"),
+        ),
+        caplog.at_level("WARNING"),
+    ):
+        resp = client.post("/api/acquisition/grab", headers=admin_headers, json=_track_grab_payload())
+
+    assert resp.status_code == 200
+    download_arg = mock_driver.download.call_args[0][0]
+    assert "file_indices" not in download_arg.extra
+    assert any("falling back to whole torrent" in rec.message for rec in caplog.records)
+
+
+
