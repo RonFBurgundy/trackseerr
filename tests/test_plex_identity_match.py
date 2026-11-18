@@ -11,7 +11,7 @@ import pytest
 from trackseerr.album_track_hydration import clear_negative_cache
 from trackseerr.clients.plex import PlexClient
 from trackseerr.models import Track
-from trackseerr.playlist_identity import MusicBrainzBudget
+from trackseerr.playlist_identity import LibraryHit, MusicBrainzBudget
 from trackseerr.storage import Database
 
 
@@ -246,3 +246,72 @@ def test_no_db_keeps_old_behaviour(mock_server) -> None:
     enricher.lookup_track_mbids.assert_not_called()
     enricher.search_recordings.assert_not_called()
     assert budget.used == 0
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_plex_item_for_file_finds_track_via_album(mock_server) -> None:
+    client = PlexClient("http://localhost:32400", "token")
+    client.server.search.return_value = [
+        MockPlexTrack("Harvest", f"Other {i}", f"Other Album {i}", file_path=f"/plex/Other{i}/Album/01 Harvest.flac")
+        for i in range(10)
+    ]
+    right_track = MockPlexTrack(
+        "Harvest",
+        "Neil Young",
+        "Harvest",
+        file_path="/plex/Neil Young/Harvest (1972)/02 - Harvest.flac",
+    )
+    wrong_album = MagicMock(parentTitle="Other Artist")
+    wrong_album.tracks.return_value = [
+        MockPlexTrack("Harvest", "Other Artist", "Harvest", file_path="/plex/Other/Harvest/01 Harvest.flac")
+    ]
+    right_album = MagicMock(parentTitle="Neil Young")
+    right_album.tracks.return_value = [right_track]
+
+    section = MagicMock(title="Music", type="artist")
+    section.searchAlbums.return_value = [wrong_album, right_album]
+    client.server.library.sections.return_value = [section]
+
+    hit = LibraryHit(
+        track_id="trk-harvest",
+        title="Harvest",
+        artist="Neil Young",
+        album="Harvest",
+        file_path="/data/media/music/Neil Young/Harvest (1972)/02 - Harvest.flac",
+        via="musicbrainz",
+    )
+    assert client._plex_item_for_file(hit) is right_track
+    section.searchAlbums.assert_called_once_with(title="Harvest", maxresults=10)
+    wrong_album.tracks.assert_not_called()
+    client.server.search.assert_not_called()
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_plex_item_for_file_artist_scoped_fallback(mock_server) -> None:
+    client = PlexClient("http://localhost:32400", "token")
+    client.server.search.return_value = []
+    right_track = MockPlexTrack(
+        "Harvest",
+        "Neil Young",
+        "Harvest",
+        file_path="/plex/Neil Young/Harvest (1972)/02 - Harvest.flac",
+    )
+    section = MagicMock(title="Music", type="artist")
+    section.searchAlbums.return_value = []
+    section.searchTracks.return_value = [right_track]
+    client.server.library.sections.return_value = [section]
+
+    hit = LibraryHit(
+        track_id="trk-harvest",
+        title="Harvest",
+        artist="Neil Young",
+        album="Harvest",
+        file_path="/data/media/music/Neil Young/Harvest (1972)/02 - Harvest.flac",
+        via="musicbrainz",
+    )
+    assert client._plex_item_for_file(hit) is right_track
+    section.searchTracks.assert_called_once_with(
+        title="Harvest",
+        filters={"artist.title": "Neil Young"},
+        maxresults=25,
+    )

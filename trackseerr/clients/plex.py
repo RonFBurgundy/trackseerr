@@ -237,6 +237,7 @@ class PlexClient:
         self.verify_ssl = verify_ssl
         self.music_section = music_section
         self._local_account_cache: Optional[tuple[float, dict[str, str]]] = None
+        self._sections_cache: Optional[list[Any]] = None
         self._server_token_warned = False
 
         _set_plexapi_identity()
@@ -426,16 +427,44 @@ class PlexClient:
             return None
         return (parts[-2], parts[-1])
 
-    def _plex_item_for_file(self, hit: "LibraryHit") -> Optional[object]:
-        """Find the Plex track whose media part file shares the album-folder/file tail of ``hit.file_path``."""
-        target_tail = self._tail_two_components(hit.file_path)
-        if target_tail is None or not hit.title:
-            return None
+    def _sections(self) -> list[Any]:
+        """Return cached Plex music sections, or an empty list on Plex/network error."""
+        if self._sections_cache is not None:
+            return self._sections_cache
         try:
-            candidates = self.server.search(hit.title, mediatype="track", limit=10)
-        except BadRequest as e:
-            logger.debug("BadRequest searching for library hit %s: %s", hit.title, safe_exc(e))
-            return None
+            sections = music_sections(self.server, self.music_section)
+        except (PlexApiException, requests.RequestException) as e:
+            logger.warning("Failed to list Plex music sections: %s", safe_exc(e))
+            return []
+        self._sections_cache = sections
+        return sections
+
+    def _artist_scoped_tracks(self, title: str, artist: str) -> list[object]:
+        """Search each music section for tracks matching title and artist, falling back if filters fail."""
+        if not title:
+            return []
+        results: list[object] = []
+        for section in self._sections():
+            try:
+                if artist:
+                    try:
+                        found = section.searchTracks(
+                            title=title,
+                            filters={"artist.title": artist},
+                            maxresults=25,
+                        )
+                    except (BadRequest, TypeError):
+                        found = section.searchTracks(title=title, maxresults=50)
+                else:
+                    found = section.searchTracks(title=title, maxresults=50)
+                if found:
+                    results.extend(found)
+            except (PlexApiException, requests.RequestException) as e:
+                logger.debug("Section track search failed for '%s' - '%s': %s", artist, title, safe_exc(e))
+        return results
+
+    def _match_tail(self, candidates: Any, target_tail: Tuple[str, str]) -> Optional[object]:
+        """Return the first candidate track whose media part shares ``target_tail``."""
         for candidate in candidates or []:
             for media in getattr(candidate, "media", None) or []:
                 for part in getattr(media, "parts", None) or []:
@@ -443,6 +472,48 @@ class PlexClient:
                     if part_file and self._tail_two_components(str(part_file)) == target_tail:
                         return candidate
         return None
+
+    def _plex_item_from_albums(self, hit: "LibraryHit", target_tail: Tuple[str, str]) -> Optional[object]:
+        """Look up ``hit.album`` in music sections and match track media part tails."""
+        if not hit.album:
+            return None
+        for section in self._sections():
+            try:
+                albums = section.searchAlbums(title=hit.album, maxresults=10)
+            except (PlexApiException, requests.RequestException) as e:
+                logger.debug("Section album search failed for '%s': %s", hit.album, safe_exc(e))
+                continue
+            for album in albums or []:
+                parent_title = str(getattr(album, "parentTitle", "") or "")
+                if hit.artist and not artist_matches(parent_title, hit.artist):
+                    continue
+                try:
+                    tracks = album.tracks()
+                except (PlexApiException, requests.RequestException) as e:
+                    logger.debug("Album tracks fetch failed for '%s': %s", hit.album, safe_exc(e))
+                    continue
+                matched = self._match_tail(tracks, target_tail)
+                if matched is not None:
+                    return matched
+        return None
+
+    def _plex_item_for_file(self, hit: "LibraryHit") -> Optional[object]:
+        """Find the Plex track whose media part file shares the album-folder/file tail of ``hit.file_path``."""
+        target_tail = self._tail_two_components(hit.file_path)
+        if target_tail is None or not hit.title:
+            return None
+        album_match = self._plex_item_from_albums(hit, target_tail)
+        if album_match is not None:
+            return album_match
+        scoped_match = self._match_tail(self._artist_scoped_tracks(hit.title, hit.artist), target_tail)
+        if scoped_match is not None:
+            return scoped_match
+        try:
+            candidates = self.server.search(hit.title, mediatype="track", limit=10)
+        except BadRequest as e:
+            logger.debug("BadRequest searching for library hit %s: %s", hit.title, safe_exc(e))
+            return None
+        return self._match_tail(candidates, target_tail)
 
     def _match_by_isrc(self, track: Track, db: Optional[Any]) -> Optional[object]:
         if db is None or not track.isrc:
@@ -517,6 +588,11 @@ class PlexClient:
                     return matched
             except BadRequest as e:
                 logger.debug("BadRequest searching for sanitized title %s: %s", stripped_title, safe_exc(e))
+
+        scoped_candidates = self._artist_scoped_tracks(stripped_title or track.title, track.artist)
+        matched = self._eval_candidates(scoped_candidates, track, threshold)
+        if matched:
+            return matched
 
         censored_match = self._match_censored(track, threshold)
         if censored_match is not None:
