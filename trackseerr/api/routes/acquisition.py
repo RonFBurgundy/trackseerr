@@ -6,6 +6,8 @@ from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import uuid
 
+import requests
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from trackseerr.api.response_models import ApiModel
@@ -515,6 +517,36 @@ def _dispatch_manual_grab(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Download client error: {redact_text(str(e))}")
 
 
+def _maybe_select_track_file(
+    db: Database,
+    search_result: AcquisitionSearchResult,
+    payload: ManualGrabPayload,
+    client: Optional[dict[str, Any]],
+) -> None:
+    """Narrow a single-track torrent manual grab to the matching file when possible."""
+    if payload.item_type != "track" or search_result.protocol != "torrent":
+        return
+    if search_result.extra and search_result.extra.get("file_indices"):
+        return
+    if client is not None and not supports_partial_download(client):
+        return
+    try:
+        acquisition_coordinator._choose_track_file(
+            db,
+            search_result,
+            payload.item_type,
+            payload.artist,
+            payload.request_id,
+            payload.track_id,
+        )
+    except (requests.RequestException, ValueError, sqlite3.Error) as exc:
+        logger.warning(
+            "Track file selection failed for '%s'; falling back to whole torrent: %s",
+            payload.release.title,
+            safe_exc(exc),
+        )
+
+
 def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any]) -> dict[str, Any]:
     """Force-enqueues a manually selected candidate release to the target download client.
 
@@ -557,6 +589,9 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
         extra=payload.release.extra or {},
         protocol=payload.release.protocol,
     )
+
+    # 2b. Narrow single-track torrent grabs to the matching file
+    _maybe_select_track_file(db, search_result, payload, client)
 
     # 3. Dispatch download to client driver
     client, client_driver, download_hash = _dispatch_manual_grab(
