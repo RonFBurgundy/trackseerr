@@ -24,6 +24,7 @@ from trackseerr.clients.plex import (
     MixNotFoundError,
     PlaylistProtectedError,
     PlexClient,
+    PlexCloudCallsBlocked,
     classify_playlist_owner,
     is_smart_playlist,
 )
@@ -128,6 +129,8 @@ def _resolve_user(plex: PlexClient, current_user: dict[str, Any], user: Optional
 def _server_for(plex: PlexClient, username: str) -> Any:
     try:
         return plex.get_user_server(username)
+    except PlexCloudCallsBlocked as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=redact_text(str(e))) from e
     except (NotFound, BadRequest, Unauthorized, requests.exceptions.RequestException) as e:
         logger.warning("Could not switch to Plex user '%s': %s", username, safe_exc(e))
         raise HTTPException(
@@ -541,7 +544,7 @@ def copy_playlist(
                 }
             )
         except (PlexApiException, requests.exceptions.RequestException, ValueError) as e:
-            error_text = safe_exc(e, safe_types=(ValueError,))
+            error_text = safe_exc(e, safe_types=(ValueError, PlexCloudCallsBlocked))
             logger.warning("Copy of playlist %s to '%s' failed: %s", rating_key, canonical, error_text)
             results.append(
                 {"username": canonical, "success": False, "error": error_text, "copied_tracks": 0, "omitted_tracks": 0}

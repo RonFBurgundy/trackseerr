@@ -5,8 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import plexapi
+import pytest
+import requests
 
-from trackseerr.clients.plex import PlexClient
+from trackseerr.clients.plex import PlexClient, PlexCloudCallsBlocked, _UNCONFIRMED_TOKEN_WARNING
 from trackseerr.media_servers.plex import PlexMediaServer
 
 
@@ -33,15 +35,21 @@ def test_admin_username_comes_from_local_server():
 def test_server_token_detected():
     el_same = ET.Element("MyPlex", {"username": "admin", "authToken": "server-tok"})
     client_same, _ = _make_client(token="server-tok", query_el=el_same)
+    assert client_same.token_kind == "server"
     assert client_same.uses_server_token is True
+    assert client_same.cloud_calls_allowed is False
 
     el_diff = ET.Element("MyPlex", {"username": "admin", "authToken": "other-tok"})
     client_diff, _ = _make_client(token="user-tok", query_el=el_diff)
+    assert client_diff.token_kind == "account"
     assert client_diff.uses_server_token is False
+    assert client_diff.cloud_calls_allowed is True
 
     el_missing = ET.Element("MyPlex", {"username": "admin"})
     client_missing, _ = _make_client(token="user-tok", query_el=el_missing)
+    assert client_missing.token_kind == "unknown"
     assert client_missing.uses_server_token is False
+    assert client_missing.cloud_calls_allowed is False
 
 
 def test_home_users_with_server_token_never_calls_plex_tv(caplog):
@@ -111,8 +119,93 @@ def test_test_connection_reports_server_token_warning():
 
 def test_local_account_ignores_non_string_attributes():
     client, mock_server = _make_client(token="tok")
-    mock_server.myPlexAccount.return_value = SimpleNamespace(username="admin_user")
 
     assert client._local_account() == {"username": "", "auth_token": ""}
+    assert client.token_kind == "unknown"
+    assert client._get_admin_username() == ""
+    mock_server.myPlexAccount.assert_not_called()
+
+
+def test_missing_auth_token_never_calls_plex_tv():
+    el = ET.Element("MyPlex", {"username": "admin_user"})
+    client, mock_server = _make_client(token="tok-123", query_el=el)
+    mock_server.systemAccounts.return_value = [
+        SimpleNamespace(id=1, name="admin_user"),
+        SimpleNamespace(id=2, name="alice"),
+    ]
+
+    users = client.get_home_users()
+    assert [u["username"] for u in users] == ["admin_user", "alice"]
     assert client._get_admin_username() == "admin_user"
+    mock_server.myPlexAccount.assert_not_called()
+
+
+def test_local_account_query_failure_is_unknown():
+    client, mock_server = _make_client(token="tok-123")
+    mock_server.query.side_effect = requests.RequestException("boom")
+
+    assert client.token_kind == "unknown"
+    assert client.cloud_calls_allowed is False
+    assert client._get_admin_username() == ""
+    mock_server.myPlexAccount.assert_not_called()
+
+
+def test_unconfirmed_token_status_warning():
+    el = ET.Element("MyPlex", {"username": "admin_user"})
+    client, _ = _make_client(token="tok-123", query_el=el)
+    adapter = PlexMediaServer(client)
+
+    result = adapter.test_connection()
+
+    assert result.ok is True
+    assert _UNCONFIRMED_TOKEN_WARNING in result.message
+
+
+def test_confirmed_env_allows_cloud_calls(monkeypatch):
+    monkeypatch.setenv("PLEX_TOKEN_CONFIRMED", "1")
+    el = ET.Element("MyPlex", {"username": "admin_user"})
+    client, mock_server = _make_client(token="tok-123", query_el=el)
+    managed = SimpleNamespace(username="alice", id="u-2", email="", thumb="")
+    mock_server.myPlexAccount.return_value = SimpleNamespace(
+        username="admin_user",
+        id="u-1",
+        email="admin@example.com",
+        thumb="",
+        users=lambda: [managed],
+    )
+
+    assert client.token_kind == "account"
+    assert client.cloud_calls_allowed is True
+    users = client.get_home_users()
     mock_server.myPlexAccount.assert_called_once()
+    assert [u["username"] for u in users] == ["admin_user", "alice"]
+
+
+def test_confirmed_env_does_not_override_server_match(monkeypatch):
+    monkeypatch.setenv("PLEX_TOKEN_CONFIRMED", "1")
+    el = ET.Element("MyPlex", {"username": "admin_user", "authToken": "server-tok"})
+    client, mock_server = _make_client(token="server-tok", query_el=el)
+    mock_server.systemAccounts.return_value = [SimpleNamespace(id=1, name="admin_user")]
+
+    assert client.token_kind == "server"
+    assert client.cloud_calls_allowed is False
+    client.get_home_users()
+    mock_server.myPlexAccount.assert_not_called()
+
+
+def test_different_auth_token_is_account():
+    el = ET.Element("MyPlex", {"username": "admin_user", "authToken": "server-tok"})
+    client, _ = _make_client(token="user-tok", query_el=el)
+
+    assert client.token_kind == "account"
+    assert client.token_warning() is None
+
+
+def test_get_user_server_blocked_when_unknown():
+    el = ET.Element("MyPlex", {"username": "admin_user"})
+    client, mock_server = _make_client(token="tok-123", query_el=el)
+
+    assert client.get_user_server("admin_user") is mock_server
+    with pytest.raises(PlexCloudCallsBlocked):
+        client.get_user_server("alice")
+    mock_server.switchUser.assert_not_called()
