@@ -80,6 +80,8 @@ def set_track_monitored(
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
 
+    art = None
+    alb = None
     if body.monitored:
         art = db.get_library_artist(track["artist_id"]) if track.get("artist_id") else None
         art_name = art["name"] if art else None
@@ -99,11 +101,77 @@ def set_track_monitored(
             )
 
     db.set_track_monitored(track_id=track_id, monitored=body.monitored)
+    if body.monitored:
+        if alb and not alb.get("monitored"):
+            db.set_album_monitored(str(alb["id"]), True, cascade_tracks=False)
+        if art and not art.get("monitored"):
+            db.set_artist_monitored(str(art["id"]), True, cascade_children=False)
     updated = db.get_library_track(track_id)
     if updated is None:  # deleted between the write and the read
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
     annotate_exclusions(db, "track", [updated])
     return updated
+
+def _filter_allowed_tracks_and_parents(
+    db: Database,
+    target_ids: list[str],
+) -> tuple[list[str], int, set[str], set[str]]:
+    """Filters out excluded tracks and collects unmonitored parent album/artist IDs for allowed tracks."""
+    placeholders = ",".join("?" for _ in target_ids)
+    rows = db.conn.execute(
+        f"SELECT id, artist_id, album_id, title, mb_recording_id FROM library_tracks WHERE id IN ({placeholders})",
+        target_ids,
+    ).fetchall()
+    track_map = {r["id"]: dict(r) for r in rows}
+    artist_ids = {r["artist_id"] for r in track_map.values() if r.get("artist_id")}
+    album_ids = {r["album_id"] for r in track_map.values() if r.get("album_id")}
+
+    artists: dict[str, dict[str, Any]] = {}
+    if artist_ids:
+        a_placeholders = ",".join("?" for _ in artist_ids)
+        a_rows = db.conn.execute(
+            f"SELECT id, name, monitored FROM library_artists WHERE id IN ({a_placeholders})",
+            list(artist_ids),
+        ).fetchall()
+        artists = {r["id"]: dict(r) for r in a_rows}
+
+    albums: dict[str, dict[str, Any]] = {}
+    if album_ids:
+        alb_placeholders = ",".join("?" for _ in album_ids)
+        alb_rows = db.conn.execute(
+            f"SELECT id, title, monitored FROM library_albums WHERE id IN ({alb_placeholders})",
+            list(album_ids),
+        ).fetchall()
+        albums = {r["id"]: dict(r) for r in alb_rows}
+
+    allowed_ids: list[str] = []
+    skipped_excluded = 0
+    unmonitored_albums: set[str] = set()
+    unmonitored_artists: set[str] = set()
+    for tid in target_ids:
+        t = track_map.get(tid)
+        if not t:
+            allowed_ids.append(tid)
+            continue
+        art = artists.get(t.get("artist_id") or "")
+        alb = albums.get(t.get("album_id") or "")
+        hit = find_exclusion(
+            db,
+            artist=art["name"] if art else None,
+            title=t.get("title"),
+            album=alb["title"] if alb else None,
+            recording_mbid=t.get("mb_recording_id"),
+        )
+        if hit is not None:
+            skipped_excluded += 1
+        else:
+            allowed_ids.append(tid)
+            if alb and not alb.get("monitored"):
+                unmonitored_albums.add(str(alb["id"]))
+            if art and not art.get("monitored"):
+                unmonitored_artists.add(str(art["id"]))
+    return allowed_ids, skipped_excluded, unmonitored_albums, unmonitored_artists
+
 
 @router.post("/tracks/bulk-edit", dependencies=[Depends(require_core_tier), Depends(native_only), Depends(track_admin_actor)], response_model=TracksUpdatedResponse, response_model_exclude_unset=True)
 def bulk_edit_tracks(
@@ -117,54 +185,20 @@ def bulk_edit_tracks(
 
     target_ids = list(body.track_ids)
     skipped_excluded = 0
+    unmonitored_albums: set[str] = set()
+    unmonitored_artists: set[str] = set()
     if body.monitored:
-        placeholders = ",".join("?" for _ in target_ids)
-        rows = db.conn.execute(
-            f"SELECT id, artist_id, album_id, title, mb_recording_id FROM library_tracks WHERE id IN ({placeholders})",
-            target_ids,
-        ).fetchall()
-        track_map = {r["id"]: dict(r) for r in rows}
-        artist_ids = {r["artist_id"] for r in track_map.values() if r.get("artist_id")}
-        album_ids = {r["album_id"] for r in track_map.values() if r.get("album_id")}
-        artist_names: dict[str, str] = {}
-        if artist_ids:
-            a_placeholders = ",".join("?" for _ in artist_ids)
-            a_rows = db.conn.execute(
-                f"SELECT id, name FROM library_artists WHERE id IN ({a_placeholders})",
-                list(artist_ids),
-            ).fetchall()
-            artist_names = {r["id"]: r["name"] for r in a_rows}
-        album_titles: dict[str, str] = {}
-        if album_ids:
-            alb_placeholders = ",".join("?" for _ in album_ids)
-            alb_rows = db.conn.execute(
-                f"SELECT id, title FROM library_albums WHERE id IN ({alb_placeholders})",
-                list(album_ids),
-            ).fetchall()
-            album_titles = {r["id"]: r["title"] for r in alb_rows}
-
-        allowed_ids: list[str] = []
-        for tid in target_ids:
-            t = track_map.get(tid)
-            if not t:
-                allowed_ids.append(tid)
-                continue
-            art_name = artist_names.get(t.get("artist_id"))
-            alb_title = album_titles.get(t.get("album_id"))
-            hit = find_exclusion(
-                db,
-                artist=art_name,
-                title=t.get("title"),
-                album=alb_title,
-                recording_mbid=t.get("mb_recording_id"),
-            )
-            if hit is not None:
-                skipped_excluded += 1
-            else:
-                allowed_ids.append(tid)
-        target_ids = allowed_ids
+        target_ids, skipped_excluded, unmonitored_albums, unmonitored_artists = _filter_allowed_tracks_and_parents(
+            db, target_ids
+        )
 
     updated = db.bulk_set_tracks_monitored(target_ids, body.monitored) if target_ids else 0
+    if body.monitored and updated > 0:
+        for alb_id in sorted(unmonitored_albums):
+            db.set_album_monitored(alb_id, True, cascade_tracks=False)
+        for art_id in sorted(unmonitored_artists):
+            db.set_artist_monitored(art_id, True, cascade_children=False)
+
     res: dict[str, Any] = {"tracks_updated": updated}
     if skipped_excluded > 0:
         res["skipped_excluded"] = skipped_excluded

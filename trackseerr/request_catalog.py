@@ -16,13 +16,15 @@ from trackseerr.library_manager import (
     get_library_mode,
     native_is_configured,
 )
+from trackseerr.lidarr_release import norm_title, titles_match
 from trackseerr.mb_metadata_store import (
     get_shared_discovery_client,
     get_shared_enricher,
 )
 from trackseerr.models import LibraryTrack
+from trackseerr.search_terms import strip_featuring, title_core
 from trackseerr.storage import Database, clean_library_name
-from trackseerr.track_matching import find_owned_equivalent
+from trackseerr.track_matching import _title_qualifiers, find_owned_equivalent, same_song_title
 
 logger = logging.getLogger(__name__)
 
@@ -226,9 +228,47 @@ def _find_track_via_foreign_details(
             trk = db.get_library_track_by_foreign_id(foreign_id)
             if not trk and req_title:
                 trk = db.get_library_track_by_title(str(trk_alb["id"]), req_title)
+            if not trk and req_title:
+                trk = _match_album_track(db.list_library_tracks(album_id=str(trk_alb["id"])), req_title)
             return trk
     except DISCOVERY_ERRORS as exc:
         logger.debug("Failed track details resolution for %s: %s", foreign_id, exc)
+    return None
+
+
+def _base_title_key(title: str) -> str:
+    """Normalized title with featuring credits and version/bracket qualifiers stripped."""
+    return norm_title(title_core(title))
+
+
+def _match_album_track(tracks: list[dict[str, Any]], req_title: str) -> dict[str, Any] | None:
+    """Finds an unambiguous album track matching ``req_title`` despite feat./edit/mix differences."""
+    if not tracks or not req_title:
+        return None
+
+    stripped_req = strip_featuring(req_title)
+    candidates = [
+        t
+        for t in tracks
+        if same_song_title(t.get("title"), req_title)
+        or titles_match(strip_featuring(t.get("title") or ""), stripped_req)
+    ]
+
+    if not candidates:
+        req_base = _base_title_key(req_title)
+        if not req_base:
+            return None
+        candidates = [t for t in tracks if _base_title_key(t.get("title") or "") == req_base]
+
+    if len(candidates) == 1:
+        return candidates[0]
+    if not candidates:
+        return None
+
+    req_quals = _title_qualifiers(req_title)
+    exact_quals = [t for t in candidates if _title_qualifiers(t.get("title") or "") == req_quals]
+    if len(exact_quals) == 1:
+        return exact_quals[0]
     return None
 
 
@@ -249,7 +289,11 @@ def _find_track(
 
     if alb:
         _hydrate_album_tracks(db, discovery_client, artist_id, str(alb["id"]), alb.get("foreign_album_id"))
-        trk = db.get_library_track_by_title(str(alb["id"]), req.get("title", ""))
+        req_title = req.get("title", "")
+        trk = db.get_library_track_by_title(str(alb["id"]), req_title)
+        if trk:
+            return trk
+        trk = _match_album_track(db.list_library_tracks(album_id=str(alb["id"])), req_title)
         if trk:
             return trk
 
@@ -266,6 +310,10 @@ def _find_track(
     title = req.get("title")
     if title:
         candidates = db.find_library_tracks_by_clean_title(title, artist_id=artist_id)
+        if not candidates:
+            stripped = clean_library_name(strip_featuring(title))
+            if stripped:
+                candidates = db.find_library_tracks_by_clean_title(stripped, artist_id=artist_id)
         if candidates:
             return candidates[0]
 

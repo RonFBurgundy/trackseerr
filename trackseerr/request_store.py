@@ -6,7 +6,7 @@ Mixed into ``storage.Database`` (uses ``self._lock`` / ``self.conn``).
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, Union
 
 from trackseerr.list_index import SortDef, build_index
@@ -361,7 +361,8 @@ class RequestStoreMixin:
             return [dict(r) for r in cur.fetchall()]
 
     def list_requests_needing_catalog(self, limit: int = 50) -> list[dict[str, Any]]:
-        """Approved requests in processing state whose catalog seeding has not run, oldest first."""
+        """Approved requests in processing state needing catalog seeding, never-seeded first."""
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat()
         with self.reader() as conn:
             cur = conn.execute(
                 """
@@ -374,11 +375,18 @@ class RequestStoreMixin:
                        u.username
                 FROM music_requests r
                 LEFT JOIN users u ON r.user_id = u.id
-                WHERE r.status = 'processing' AND r.catalog_seeded_at IS NULL
-                ORDER BY r.created_at ASC
+                WHERE r.status = 'processing'
+                  AND (
+                      r.catalog_seeded_at IS NULL
+                      OR (
+                          r.catalog_seed_status IN ('unmatched', 'no_artist', 'error')
+                          AND r.catalog_seeded_at < ?
+                      )
+                  )
+                ORDER BY (r.catalog_seeded_at IS NOT NULL) ASC, r.created_at ASC
                 LIMIT ?
                 """,
-                (int(limit),),
+                (cutoff, int(limit)),
             )
             return [dict(r) for r in cur.fetchall()]
 

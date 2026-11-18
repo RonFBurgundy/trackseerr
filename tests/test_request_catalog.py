@@ -1,5 +1,6 @@
 """Tests for request-catalog-seed: approved requests become monitored catalog items."""
 
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -703,3 +704,255 @@ def test_lidarr_mode_skipped(test_db: Database, mock_discovery, mock_enricher) -
     ).fetchone()
     assert row[0] == "skipped"
     assert row[1] is not None
+
+
+def _seed_album_catalog(
+    db: Database,
+    *,
+    artist_id: str,
+    artist_name: str,
+    album_id: str,
+    album_title: str,
+    track_titles: list[tuple[str, str]],
+) -> None:
+    db.upsert_library_artist({"id": artist_id, "name": artist_name, "monitored": False})
+    db.upsert_library_album({
+        "id": album_id,
+        "artist_id": artist_id,
+        "title": album_title,
+        "album_type": "album",
+        "monitored": False,
+    })
+    for idx, (tid, title) in enumerate(track_titles, start=1):
+        db.upsert_library_track(
+            LibraryTrack(
+                id=tid,
+                album_id=album_id,
+                artist_id=artist_id,
+                title=title,
+                track_number=idx,
+                disc_number=1,
+                monitored=False,
+            )
+        )
+
+
+def _assert_seeded_track(
+    db: Database,
+    req_id: str,
+    *,
+    expected_track_id: str,
+    expected_album_id: str,
+    expected_artist_id: str,
+    unmonitored_siblings: list[str],
+) -> None:
+    row = db.conn.execute(
+        "SELECT catalog_seed_status, catalog_track_id FROM music_requests WHERE id = ?",
+        (req_id,),
+    ).fetchone()
+    assert row[0] == "seeded"
+    assert row[1] == expected_track_id
+    assert db.get_library_track(expected_track_id)["monitored"] is True
+    assert db.get_library_album(expected_album_id)["monitored"] is True
+    assert db.get_library_artist(expected_artist_id)["monitored"] is True
+    for sib_id in unmonitored_siblings:
+        assert db.get_library_track(sib_id)["monitored"] is False
+
+
+def test_track_request_matches_feat_suffix(test_db: Database, mock_discovery, mock_enricher) -> None:
+    _seed_album_catalog(
+        test_db,
+        artist_id="art-feat",
+        artist_name="Sample Artist",
+        album_id="alb-feat",
+        album_title="Sample Album",
+        track_titles=[("trk-funk", "Funk"), ("trk-other", "Other Track")],
+    )
+    req = _create_req(
+        test_db,
+        req_id="req-feat",
+        artist="Sample Artist",
+        title="Funk (feat. Shang-High)",
+        album="Sample Album",
+    )
+    assert seed_request_catalog(test_db, req, discovery_client=mock_discovery, enricher=mock_enricher) == "seeded"
+    _assert_seeded_track(
+        test_db,
+        "req-feat",
+        expected_track_id="trk-funk",
+        expected_album_id="alb-feat",
+        expected_artist_id="art-feat",
+        unmonitored_siblings=["trk-other"],
+    )
+
+
+def test_track_request_matches_ft_vs_feat(test_db: Database, mock_discovery, mock_enricher) -> None:
+    _seed_album_catalog(
+        test_db,
+        artist_id="art-ft",
+        artist_name="Night Artist",
+        album_id="alb-ft",
+        album_title="Night Album",
+        track_titles=[("trk-dance", "Dance All Night (ft. Lily Fangz)"), ("trk-other", "Intro")],
+    )
+    req = _create_req(
+        test_db,
+        req_id="req-ft",
+        artist="Night Artist",
+        title="Dance All Night (feat. Lily Fangz)",
+        album="Night Album",
+    )
+    assert seed_request_catalog(test_db, req, discovery_client=mock_discovery, enricher=mock_enricher) == "seeded"
+    _assert_seeded_track(
+        test_db,
+        "req-ft",
+        expected_track_id="trk-dance",
+        expected_album_id="alb-ft",
+        expected_artist_id="art-ft",
+        unmonitored_siblings=["trk-other"],
+    )
+
+
+def test_track_request_matches_edit_suffix(test_db: Database, mock_discovery, mock_enricher) -> None:
+    _seed_album_catalog(
+        test_db,
+        artist_id="art-edit",
+        artist_name="Edit Artist",
+        album_id="alb-edit",
+        album_title="Edit Album",
+        track_titles=[("trk-39", "39 Times (Confrontation)"), ("trk-other", "40 Times")],
+    )
+    req = _create_req(
+        test_db,
+        req_id="req-edit",
+        artist="Edit Artist",
+        title="39 Times (Confrontation) (Edit)",
+        album="Edit Album",
+    )
+    assert seed_request_catalog(test_db, req, discovery_client=mock_discovery, enricher=mock_enricher) == "seeded"
+    _assert_seeded_track(
+        test_db,
+        "req-edit",
+        expected_track_id="trk-39",
+        expected_album_id="alb-edit",
+        expected_artist_id="art-edit",
+        unmonitored_siblings=["trk-other"],
+    )
+
+
+def test_track_request_prefers_original_mix(test_db: Database, mock_discovery, mock_enricher) -> None:
+    _seed_album_catalog(
+        test_db,
+        artist_id="art-orig",
+        artist_name="Chaka Artist",
+        album_id="alb-orig",
+        album_title="Nobody Album",
+        track_titles=[
+            ("trk-orig", "Ain't Nobody (original mix)"),
+            ("trk-ext", "Ain't Nobody (extended mix)"),
+            ("trk-inst", "Ain't Nobody (extended instrumental mix)"),
+        ],
+    )
+    req = _create_req(
+        test_db,
+        req_id="req-orig",
+        artist="Chaka Artist",
+        title="AIN'T NOBODY",
+        album="Nobody Album",
+    )
+    assert seed_request_catalog(test_db, req, discovery_client=mock_discovery, enricher=mock_enricher) == "seeded"
+    _assert_seeded_track(
+        test_db,
+        "req-orig",
+        expected_track_id="trk-orig",
+        expected_album_id="alb-orig",
+        expected_artist_id="art-orig",
+        unmonitored_siblings=["trk-ext", "trk-inst"],
+    )
+
+
+def test_track_request_single_version_accepted(test_db: Database, mock_discovery, mock_enricher) -> None:
+    _seed_album_catalog(
+        test_db,
+        artist_id="art-single",
+        artist_name="Love Artist",
+        album_id="alb-single",
+        album_title="Love Album",
+        track_titles=[
+            ("trk-ext", "I Don't Wanna Fall in Love (extended mix)"),
+            ("trk-other", "Completely Different Song"),
+        ],
+    )
+    req = _create_req(
+        test_db,
+        req_id="req-single",
+        artist="Love Artist",
+        title="I Don't Wanna Fall in Love",
+        album="Love Album",
+    )
+    assert seed_request_catalog(test_db, req, discovery_client=mock_discovery, enricher=mock_enricher) == "seeded"
+    _assert_seeded_track(
+        test_db,
+        "req-single",
+        expected_track_id="trk-ext",
+        expected_album_id="alb-single",
+        expected_artist_id="art-single",
+        unmonitored_siblings=["trk-other"],
+    )
+
+
+def test_track_request_ambiguous_mix_not_matched(test_db: Database, mock_discovery, mock_enricher) -> None:
+    _seed_album_catalog(
+        test_db,
+        artist_id="art-ambig",
+        artist_name="Kristine Artist",
+        album_id="alb-ambig",
+        album_title="Love Shy Album",
+        track_titles=[
+            ("trk-tuff", "Love Shy (Tuff Jam Classic vocal)"),
+            ("trk-cut", "Love Shy (Cutfather & Joe 7)"),
+        ],
+    )
+    req = _create_req(
+        test_db,
+        req_id="req-ambig",
+        artist="Kristine Artist",
+        title="Love Shy - Tuff Jam Vocal Mix",
+        album="Love Shy Album",
+    )
+    assert seed_request_catalog(test_db, req, discovery_client=mock_discovery, enricher=mock_enricher) == "unmatched"
+    row = test_db.conn.execute(
+        "SELECT catalog_seed_status, catalog_track_id FROM music_requests WHERE id = ?",
+        ("req-ambig",),
+    ).fetchone()
+    assert row[0] == "unmatched"
+    assert row[1] is None
+    assert test_db.get_library_track("trk-tuff")["monitored"] is False
+    assert test_db.get_library_track("trk-cut")["monitored"] is False
+
+
+def test_unmatched_request_retried_after_a_day(test_db: Database) -> None:
+    _create_req(test_db, req_id="req-old-unmatched", artist="A", title="Song 1")
+    _create_req(test_db, req_id="req-never-seeded", artist="A", title="Song 2")
+    _create_req(test_db, req_id="req-old-seeded", artist="A", title="Song 3")
+
+    stale_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+    test_db.set_request_catalog("req-old-unmatched", status="unmatched")
+    test_db.set_request_catalog("req-old-seeded", status="seeded", track_id="trk-1")
+    test_db.conn.execute(
+        "UPDATE music_requests SET catalog_seeded_at = ? WHERE id IN ('req-old-unmatched', 'req-old-seeded')",
+        (stale_ts,),
+    )
+    test_db.conn.commit()
+
+    due = test_db.list_requests_needing_catalog()
+    due_ids = [r["id"] for r in due]
+    assert due_ids == ["req-never-seeded", "req-old-unmatched"]
+
+
+def test_unmatched_request_not_retried_within_a_day(test_db: Database) -> None:
+    _create_req(test_db, req_id="req-recent-unmatched", artist="A", title="Song 1")
+    test_db.set_request_catalog("req-recent-unmatched", status="unmatched")
+
+    due = test_db.list_requests_needing_catalog()
+    assert [r["id"] for r in due] == []
