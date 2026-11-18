@@ -153,6 +153,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Playlist sync pushes your playlists to your own Plex account again. Since this morning's update it could fail with "Unable to find user" when your Plex server reported your account under a different name than plex.tv.
 - Requested songs whose title differs slightly from the album's track list, such as "(feat. …)" versus "(ft. …)" or an added "Edit" or "Original Mix", now link to that song. They are monitored and show on Wanted → Missing. Requests that couldn't be linked are tried again every day.
 - In an artist's album list, a song's status badge and its Monitored label now change as soon as you flip its switch. On phones the song rows fit the screen and the title stays readable.
 - A manual grab of an album torrent for one song downloads only that song when the torrent client can download part of a torrent, as automatic grabs already did.
