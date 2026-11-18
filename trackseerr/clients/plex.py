@@ -265,9 +265,14 @@ class PlexClient:
                 return cached_val
         try:
             el = self.server.query("/myplex/account")
+            attrib = getattr(el, "attrib", None)
+            def _str_attr(key: str) -> str:
+                val = attrib.get(key) if isinstance(attrib, dict) else None
+                return val if isinstance(val, str) else ""
+
             result = {
-                "username": str(el.attrib.get("username", "") or ""),
-                "auth_token": str(el.attrib.get("authToken", "") or ""),
+                "username": _str_attr("username"),
+                "auth_token": _str_attr("authToken"),
             }
         except (PlexApiException, requests.RequestException, AttributeError) as e:
             logger.warning("Could not query local /myplex/account: %s", safe_exc(e))
