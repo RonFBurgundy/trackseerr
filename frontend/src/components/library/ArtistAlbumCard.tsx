@@ -69,6 +69,7 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
   const { tracks, loading, error, patchMonitored, patchAllMonitored, reload } = useAlbumTracks(expanded ? album.id : null);
 
   const prevAlbumMonitoredRef = useRef<boolean | undefined | null>(null);
+  const trackDrivenAlbumChangeRef = useRef<boolean>(false);
   useEffect(() => {
     if (prevAlbumMonitoredRef.current === null) {
       prevAlbumMonitoredRef.current = album.monitored;
@@ -76,6 +77,10 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
     }
     if (prevAlbumMonitoredRef.current !== album.monitored) {
       prevAlbumMonitoredRef.current = album.monitored;
+      if (trackDrivenAlbumChangeRef.current) {
+        trackDrivenAlbumChangeRef.current = false;
+        return;
+      }
       if (expanded && typeof album.monitored === 'boolean') {
         patchAllMonitored(album.monitored);
         void reload();
@@ -96,11 +101,15 @@ export const ArtistAlbumCard: React.FC<ArtistAlbumCardProps> = ({
       try {
         await onToggleTrackMonitored(trackId, !current);
         patchMonitored(trackId, !current);
+        if (!current && album.monitored !== true && onRefresh) {
+          trackDrivenAlbumChangeRef.current = true;
+          onRefresh();
+        }
       } catch (err: unknown) {
         onToast(errorMessage(err, 'Failed to update track monitoring'), 'error');
       }
     },
-    [onToggleTrackMonitored, patchMonitored, onToast]
+    [onToggleTrackMonitored, patchMonitored, album.monitored, onRefresh, onToast]
   );
 
   const [historyOpen, setHistoryOpen] = useState<boolean>(false);
