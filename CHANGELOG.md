@@ -150,6 +150,7 @@ heading becomes the version and date.
 ### Fixed
 
 - MusicBrainz matching ignores edition words such as "Deluxe Edition", "25th Anniversary", "Remastered" or "Hi-Res Version", so a remastered album now matches the original release and links on its own.
+- Deluxe and remastered albums with bonus tracks now link to MusicBrainz on their own: matching checks every edition of the album, not just the first one, so bonus tracks are found.
 - Suggested matches prefer the artist's own album or single over a Various Artists compilation, and guesses with no matching tracks are no longer listed.
 - Duplicates no longer lists an album several times when singles or live albums share its title: the studio album is picked.
 - **Keep better quality** no longer throws away a file just because its sample rate or bitrate was never read. It compares only what both files report, then their size.
