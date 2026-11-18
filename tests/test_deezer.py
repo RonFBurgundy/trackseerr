@@ -58,3 +58,22 @@ def test_deezer_playlist_tracks(mock_client_class):
     assert tracks[0].artist == "Tame Impala"
     assert tracks[0].album == "Dracula Single"
     assert tracks[0].url == "https://deezer.com/t1"
+
+
+@patch("trackseerr.clients.deezer.deezer.Client")
+def test_deezer_playlist_tracks_isrc_extraction(mock_client_class):
+    mock_dz = MagicMock()
+    mock_client_class.return_value = mock_dz
+
+    t_with = MockDeezerTrack("With ISRC", "Artist A", "Album A", "https://deezer.com/t1")
+    t_with.isrc = " usabc1234567 "
+    t_without = MockDeezerTrack("Without ISRC", "Artist B", "Album B", "https://deezer.com/t2")
+    pl = MockDeezerPlaylist(12345, "Indie", "", "", tracks=[t_with, t_without])
+    mock_dz.get_playlist.return_value = pl
+
+    client = DeezerClient()
+    tracks = client.get_playlist_tracks("12345")
+
+    assert len(tracks) == 2
+    assert tracks[0].isrc == "USABC1234567"
+    assert tracks[1].isrc is None

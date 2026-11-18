@@ -173,6 +173,7 @@ class Track:
     album: str
     url: str = ""
     duration_seconds: Optional[float] = None  # source length when the provider reports it; used to confirm matches
+    isrc: Optional[str] = None
 
     def __repr__(self) -> str:
         return f"<Track: {self.artist} - {self.title}>"

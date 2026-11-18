@@ -146,7 +146,18 @@ class SpotifyClient:
 
                     duration_ms = track_data.get("duration_ms")
                     duration = float(duration_ms) / 1000.0 if isinstance(duration_ms, (int, float)) else None
-                    tracks.append(Track(title=title, artist=artist, album=album, url=url, duration_seconds=duration))
+                    raw_isrc = (track_data.get("external_ids") or {}).get("isrc")
+                    isrc = raw_isrc.strip().upper() if isinstance(raw_isrc, str) and raw_isrc.strip() else None
+                    tracks.append(
+                        Track(
+                            title=title,
+                            artist=artist,
+                            album=album,
+                            url=url,
+                            duration_seconds=duration,
+                            isrc=isrc,
+                        )
+                    )
 
                 if results.get("next"):
                     try:

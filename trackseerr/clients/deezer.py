@@ -100,7 +100,20 @@ class DeezerClient:
                     if title:
                         raw_duration = getattr(item, "duration", None)
                         duration = float(raw_duration) if isinstance(raw_duration, (int, float)) else None
-                        tracks.append(Track(title=title, artist=artist, album=album, url=url or "", duration_seconds=duration))
+                        raw_isrc = getattr(item, "isrc", None)
+                        if not raw_isrc and hasattr(item, "as_dict"):
+                            raw_isrc = item.as_dict().get("isrc")
+                        isrc = raw_isrc.strip().upper() if isinstance(raw_isrc, str) and raw_isrc.strip() else None
+                        tracks.append(
+                            Track(
+                                title=title,
+                                artist=artist,
+                                album=album,
+                                url=url or "",
+                                duration_seconds=duration,
+                                isrc=isrc,
+                            )
+                        )
 
             logger.debug("Fetched %d tracks for Deezer playlist '%s'", len(tracks), playlist_id)
         except Exception as e:
