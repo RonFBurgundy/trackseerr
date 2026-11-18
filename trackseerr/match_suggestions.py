@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 import requests
 
-from trackseerr.album_titles import album_titles_match, strip_album_junk
+from trackseerr.album_titles import album_titles_match, strip_edition
 from trackseerr.compilation_filing import (
     ensure_release_group_album,
     file_album_under_various,
@@ -33,6 +33,7 @@ from trackseerr.release_matching import _album_artist_name, _match_one_album, _m
 logger = logging.getLogger(__name__)
 
 LOOSE_SCORE = 70
+COMPILATION_PENALTY = 20
 VARIOUS_NAME = "Various Artists"
 
 
@@ -201,6 +202,9 @@ def _build_candidate(
     various = bool(group.get("is_various"))
     if various:
         reasons.append("Released as a compilation by Various Artists")
+        if not title_match:
+            confidence = max(0, confidence - COMPILATION_PENALTY)
+            reasons.append("Found only on a Various Artists compilation")
     mapped = sum(1 for r in rows if r["release_track_title"] is not None)
     for row in rows:
         row.pop("_duration_ok", None)
@@ -214,6 +218,25 @@ def _build_candidate(
         reasons=reasons,
     )
     return candidate
+
+
+def _sort_key(candidate: dict[str, Any]) -> tuple[int, int, int, str, str]:
+    secondary = candidate.get("secondary_types") or []
+    own_rank = 0 if (not candidate.get("is_various") and "Compilation" not in secondary) else 1
+    primary = candidate.get("primary_type")
+    if not secondary and primary == "Album":
+        type_rank = 0
+    elif not secondary and primary in ("Single", "EP"):
+        type_rank = 1
+    else:
+        type_rank = 2
+    return (
+        -int(candidate["confidence"]),
+        own_rank,
+        type_rank,
+        str(candidate.get("first_release_date") or "9999"),
+        str(candidate["id"]),
+    )
 
 
 def suggest_matches(db: Any, enricher: Any, album_id: str, limit: int = 5) -> dict[str, Any]:
@@ -230,7 +253,8 @@ def suggest_matches(db: Any, enricher: Any, album_id: str, limit: int = 5) -> di
         "artist_name": artist,
         "track_count": len(tracks),
     }
-    clean_title = strip_album_junk(str(album.get("title") or "")) or str(album.get("title") or "")
+    raw_title = str(album.get("title") or "")
+    clean_title = strip_edition(raw_title) or raw_title
     track_artists = {str(t["id"]): _track_artist_name(db, t, artist or None) for t in tracks}
     try:
         groups, known = _collect_groups(enricher, files, artist or None, clean_title, track_artists)
@@ -241,7 +265,7 @@ def suggest_matches(db: Any, enricher: Any, album_id: str, limit: int = 5) -> di
         _build_candidate(enricher, group, tracks, len(files), artist, clean_title, gid in known)
         for gid, group in groups.items()
     ]
-    candidates.sort(key=lambda c: (-c["confidence"], str(c["first_release_date"] or "9999"), c["id"]))
+    candidates.sort(key=_sort_key)
     return {"album": summary, "candidates": candidates[: max(1, limit)], "unavailable": False}
 
 
@@ -292,6 +316,7 @@ def apply_match(
 
 SURE_CONFIDENCE = 90
 SURE_MARGIN = 10
+MIN_SUGGEST_CONFIDENCE = 30
 MAX_CONSECUTIVE_UNAVAILABLE = 3
 _AUTO_KEYS = ("albums", "applied", "suggested", "no_candidates", "unavailable", "conflicts", "errors")
 
@@ -325,7 +350,11 @@ def _auto_one(db: Any, enricher: Any, album_id: str, counts: dict[str, int]) -> 
         counts["unavailable"] += 1
         return True
     candidates = result["candidates"]
-    if not candidates:
+    if (
+        not candidates
+        or int(candidates[0]["confidence"]) < MIN_SUGGEST_CONFIDENCE
+        or int(candidates[0]["mapped"]) == 0
+    ):
         db.delete_match_suggestion(album_id)
         counts["no_candidates"] += 1
         return False
