@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 import pytest
@@ -564,7 +565,7 @@ def test_import_uses_only_selected_files(tmp_path: Path, db: Database) -> None:
     pack_dir = staging / "BigPack"
     pack_dir.mkdir()
     wanted_file = pack_dir / "wanted_song.flac"
-    wanted_file.write_bytes(b"fLaC" + b"\x00" * 100)
+    wanted_file.write_bytes(b"fLaC" + b"\x00" * (64 * 1024))
     neighbour_file = pack_dir / "neighbour_partial.flac"
     neighbour_file.write_bytes(b"fLaC" + b"\x00" * 50)
 
@@ -635,7 +636,7 @@ def test_pack_import_names_song_without_bpm_and_with_album_fallback(
     pack_dir.mkdir()
     wanted_file = pack_dir / "Rafael - Gotta Be Cool 124.mp3"
     frame = b"\xff\xfb\x90\x00" + b"\x00" * 413
-    wanted_file.write_bytes(frame * 2)
+    wanted_file.write_bytes(frame * 200)
 
     db.create_download_client(
         DownloadClientConfig(
@@ -757,8 +758,170 @@ def test_selected_file_missing_warns(tmp_path: Path, db: Database) -> None:
 
     updated_dl = db.get_active_download("dl-missing-1")
     assert updated_dl is not None
+    assert updated_dl["status"] == DownloadStatus.COMPLETED.value
+    assert updated_dl["error_message"].startswith("Waiting for files to finish syncing")
+
+
+def _setup_selected_job(
+    tmp_path: Path,
+    db: Database,
+    download_id: str,
+    rel_path: str,
+    *,
+    source_path: str,
+    remote_path: str = "",
+    size_bytes: int = 0,
+    extra_settings: dict | None = None,
+) -> tuple[ImportPipelineMixin, _ImportJob, _PollContext]:
+    staging = tmp_path / "staging"
+    staging.mkdir(exist_ok=True)
+    db.create_download_client(
+        DownloadClientConfig(
+            id="c-qbit",
+            name="qBit",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qbit:8080",
+            extra_settings_json=json.dumps(extra_settings) if extra_settings else None,
+        )
+    )
+    dl = db.create_active_download(
+        ActiveDownload(
+            id=download_id,
+            client_id="c-qbit",
+            title="Artist - Song [FLAC] (in pack: BigPack)",
+            artist="Artist",
+            item_type="track",
+            status=DownloadStatus.COMPLETED.value,
+            source_path=remote_path or source_path,
+            size_bytes=size_bytes,
+            selected_files=[{"file_index": 1, "path": rel_path}],
+        )
+    )
+    mixin = ImportPipelineMixin()
+    mixin.allowed_roots = MagicMock()
+    mixin.allowed_roots.roots = [staging]
+    mixin.allowed_roots.check.return_value = (True, "")
+    client_cfg: dict = {"name": "qBit", "driver_type": "qbittorrent"}
+    if extra_settings:
+        client_cfg["extra_settings_json"] = json.dumps(extra_settings)
+    job = _ImportJob(
+        item=dl,
+        download_id=dl["id"],
+        client_id="c-qbit",
+        client_config=client_cfg,
+        driver=MagicMock(),
+        driver_type="qbittorrent",
+        import_mode="auto",
+        status_dict={"source_path": remote_path or source_path},
+        target_lookup=dl["id"],
+        db=db,
+    )
+    ctx = _PollContext(
+        media_settings={"staging_folder_path": str(staging)},
+        write_tags=False,
+        embed_art=False,
+        save_cover=False,
+        plex_client=None,
+        lidarr_mode=False,
+    )
+    return mixin, job, ctx
+
+
+def test_selected_file_missing_warns_after_timeout(tmp_path: Path, db: Database) -> None:
+    pack_dir = tmp_path / "staging" / "BigPack"
+    pack_dir.mkdir(parents=True)
+    mixin, job, ctx = _setup_selected_job(
+        tmp_path, db, "dl-missing-timeout", "BigPack/ghost_song.flac", source_path=str(pack_dir)
+    )
+    mixin._sync_wait_started = {"dl-missing-timeout": time.time() - 7 * 3600}
+
+    ok = mixin._locate_audio_files(db, ctx, job, {"completed": 0, "failed": 0, "imported": 0})
+    assert ok is False
+
+    updated_dl = db.get_active_download("dl-missing-timeout")
+    assert updated_dl is not None
     assert updated_dl["status"] == DownloadStatus.WARNING.value
-    assert "Selected file not found: ghost_song.flac" in updated_dl["error_message"]
+    assert "Selected file still missing after 6 hours: ghost_song.flac" in updated_dl["error_message"]
+
+
+def test_selected_file_placeholder_waits(tmp_path: Path, db: Database) -> None:
+    pack_dir = tmp_path / "staging" / "BigPack"
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "stub_song.flac").write_bytes(b"fLaC")
+    mixin, job, ctx = _setup_selected_job(
+        tmp_path, db, "dl-stub-1", "BigPack/stub_song.flac", source_path=str(pack_dir)
+    )
+
+    ok = mixin._locate_audio_files(db, ctx, job, {"completed": 0, "failed": 0, "imported": 0})
+    assert ok is False
+
+    updated_dl = db.get_active_download("dl-stub-1")
+    assert updated_dl is not None
+    assert updated_dl["status"] == DownloadStatus.COMPLETED.value
+    assert updated_dl["error_message"].startswith("Waiting for files to finish syncing")
+
+
+def test_selected_file_mapped_waits_until_settled(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pack_dir = tmp_path / "staging" / "BigPack"
+    pack_dir.mkdir(parents=True)
+    song = pack_dir / "real_song.flac"
+    song.write_bytes(b"fLaC" + b"\x00" * (64 * 1024))
+    file_size = song.stat().st_size
+
+    extra = {"remote_path_mappings": [{"remote_path": "/seedbox/downloads", "local_path": str(tmp_path / "staging")}]}
+    mixin, job, ctx = _setup_selected_job(
+        tmp_path,
+        db,
+        "dl-mapped-settle",
+        "BigPack/real_song.flac",
+        source_path=str(pack_dir),
+        remote_path="/seedbox/downloads/BigPack",
+        size_bytes=file_size * 20,
+        extra_settings=extra,
+    )
+
+    now = [1000.0]
+    monkeypatch.setattr("trackseerr.acquisition_import.time.time", lambda: now[0])
+
+    with patch("trackseerr.acquisition_import.allowed_roots_for_client", return_value=mixin.allowed_roots):
+        assert mixin._locate_audio_files(db, ctx, job, {"completed": 0, "failed": 0, "imported": 0}) is False
+        waiting_dl = db.get_active_download("dl-mapped-settle")
+        assert waiting_dl is not None
+        assert waiting_dl["status"] == DownloadStatus.COMPLETED.value
+        assert waiting_dl["error_message"].startswith("Waiting for files to finish syncing")
+
+        now[0] += 61.0
+        job.item = db.get_active_download("dl-mapped-settle") or job.item
+        assert mixin._locate_audio_files(db, ctx, job, {"completed": 0, "failed": 0, "imported": 0}) is True
+        assert [p.name for p in job.audio_files] == ["real_song.flac"]
+        cleared_dl = db.get_active_download("dl-mapped-settle")
+        assert cleared_dl is not None
+        assert cleared_dl["error_message"] == ""
+
+
+def test_selected_missing_source_folder_waits(tmp_path: Path, db: Database) -> None:
+    missing_pack_dir = tmp_path / "staging" / "MissingPack"
+    extra = {"remote_path_mappings": [{"remote_path": "/seedbox/downloads", "local_path": str(tmp_path / "staging")}]}
+    mixin, job, ctx = _setup_selected_job(
+        tmp_path,
+        db,
+        "dl-missing-folder",
+        "MissingPack/song.flac",
+        source_path=str(missing_pack_dir),
+        remote_path="/seedbox/downloads/MissingPack",
+        extra_settings=extra,
+    )
+
+    with patch("trackseerr.acquisition_import.allowed_roots_for_client", return_value=mixin.allowed_roots):
+        ok = mixin._locate_audio_files(db, ctx, job, {"completed": 0, "failed": 0, "imported": 0})
+    assert ok is False
+
+    updated_dl = db.get_active_download("dl-missing-folder")
+    assert updated_dl is not None
+    assert updated_dl["status"] == DownloadStatus.COMPLETED.value
+    assert updated_dl["error_message"].startswith("Waiting for files to appear")
 
 
 def test_qbit4_resume_fallback() -> None:

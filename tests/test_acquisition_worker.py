@@ -718,6 +718,104 @@ def test_worker_fails_after_sync_wait_timeout(test_db, workspace_dirs):
     assert len(test_db.list_blocklist()) == 1
 
 
+def test_parked_selected_file_warning_is_requeued(test_db: Database) -> None:
+    from trackseerr.acquisition_import import _PollContext
+
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="c-qbit",
+            name="qBit",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qbit:8080",
+        )
+    )
+    test_db.create_active_download(
+        ActiveDownload(
+            id="dl-parked-selected",
+            client_id="c-qbit",
+            title="Artist - Song [FLAC]",
+            artist="Artist",
+            item_type="track",
+            status=DownloadStatus.WARNING.value,
+            error_message="Selected file not found: x.flac",
+            selected_files=[{"file_index": 1, "path": "BigPack/x.flac"}],
+        )
+    )
+    test_db.create_active_download(
+        ActiveDownload(
+            id="dl-parked-other",
+            client_id="c-qbit",
+            title="Artist - Album [FLAC]",
+            artist="Artist",
+            item_type="album",
+            status=DownloadStatus.WARNING.value,
+            error_message="Selected file not found: y.flac",
+        )
+    )
+
+    worker = AcquisitionWorker()
+    ctx = _PollContext(
+        media_settings={},
+        write_tags=False,
+        embed_art=False,
+        save_cover=False,
+        plex_client=None,
+        lidarr_mode=False,
+    )
+    worker._resolve_parked_duplicates(test_db, ctx)
+
+    requeued = test_db.get_active_download("dl-parked-selected")
+    assert requeued is not None
+    assert requeued["status"] == DownloadStatus.COMPLETED.value
+    assert requeued["error_message"] == ""
+
+    untouched = test_db.get_active_download("dl-parked-other")
+    assert untouched is not None
+    assert untouched["status"] == DownloadStatus.WARNING.value
+    assert untouched["error_message"] == "Selected file not found: y.flac"
+
+
+def test_parked_gave_up_selected_file_not_requeued(test_db: Database) -> None:
+    from trackseerr.acquisition_import import _PollContext
+
+    test_db.create_download_client(
+        DownloadClientConfig(
+            id="c-qbit",
+            name="qBit",
+            driver_type=DownloadDriverType.QBITTORRENT,
+            host_url="http://qbit:8080",
+        )
+    )
+    test_db.create_active_download(
+        ActiveDownload(
+            id="dl-parked-gave-up",
+            client_id="c-qbit",
+            title="Artist - Pack [FLAC]",
+            artist="Artist",
+            item_type="album",
+            status=DownloadStatus.WARNING.value,
+            error_message="Selected file still missing after 6 hours: x.flac",
+            selected_files=["Pack/x.flac"],
+        )
+    )
+
+    worker = AcquisitionWorker()
+    ctx = _PollContext(
+        media_settings={},
+        write_tags=False,
+        embed_art=False,
+        save_cover=False,
+        plex_client=None,
+        lidarr_mode=False,
+    )
+    worker._resolve_parked_duplicates(test_db, ctx)
+
+    gave_up = test_db.get_active_download("dl-parked-gave-up")
+    assert gave_up is not None
+    assert gave_up["status"] == DownloadStatus.WARNING.value
+    assert gave_up["error_message"] == "Selected file still missing after 6 hours: x.flac"
+
+
 def test_mapped_source_waits_for_settle(test_db, workspace_dirs):
     downloads_dir, music_dir = workspace_dirs
     driver, local_dir = _seed_sync_download(test_db, "settle", downloads_dir, mapped=True)
