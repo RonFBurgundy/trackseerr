@@ -2,7 +2,7 @@ import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from plexapi.exceptions import NotFound
+from plexapi.exceptions import BadRequest, NotFound
 
 from trackseerr.clients.plex import PlexClient, _WARNED_MISSING_SECTIONS, clean_title, music_sections
 from trackseerr.config import Config
@@ -78,6 +78,48 @@ def test_match_track_fallback_cleaned_title(mock_server):
     matched = client.match_track(t)
     assert matched is mock_track
     assert client.server.search.call_count == 2
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_artist_scoped_retry(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    client.server.search.return_value = [
+        MockPlexTrack("Harvest", f"Other Artist {i}", "Other Album") for i in range(10)
+    ]
+    neil_track = MockPlexTrack("Harvest", "Neil Young", "Harvest")
+    section = MagicMock(title="Music", type="artist")
+    section.searchTracks.return_value = [neil_track]
+    client.server.library.sections.return_value = [section]
+
+    t = Track(title="Harvest (2009 Remaster)", artist="Neil Young", album="Harvest")
+    matched = client.match_track(t)
+    assert matched is neil_track
+    section.searchTracks.assert_called_once_with(
+        title="Harvest",
+        filters={"artist.title": "Neil Young"},
+        maxresults=25,
+    )
+
+
+@patch("trackseerr.clients.plex.PlexServer")
+def test_match_track_artist_filter_unsupported_falls_back(mock_server):
+    client = PlexClient("http://localhost:32400", "token")
+    client.server.search.return_value = []
+    neil_track = MockPlexTrack("Harvest", "Neil Young", "Harvest")
+    section = MagicMock(title="Music", type="artist")
+    section.searchTracks.side_effect = [BadRequest("unsupported filter"), [neil_track]]
+    client.server.library.sections.return_value = [section]
+
+    t = Track(title="Harvest", artist="Neil Young", album="Harvest")
+    matched = client.match_track(t)
+    assert matched is neil_track
+    assert section.searchTracks.call_count == 2
+    section.searchTracks.assert_any_call(
+        title="Harvest",
+        filters={"artist.title": "Neil Young"},
+        maxresults=25,
+    )
+    section.searchTracks.assert_any_call(title="Harvest", maxresults=50)
 
 
 @patch("trackseerr.clients.plex.PlexServer")
