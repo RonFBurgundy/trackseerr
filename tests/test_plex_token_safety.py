@@ -107,3 +107,12 @@ def test_test_connection_reports_server_token_warning():
 
     assert result.ok is True
     assert "own token" in result.message
+
+
+def test_local_account_ignores_non_string_attributes():
+    client, mock_server = _make_client(token="tok")
+    mock_server.myPlexAccount.return_value = SimpleNamespace(username="admin_user")
+
+    assert client._local_account() == {"username": "", "auth_token": ""}
+    assert client._get_admin_username() == "admin_user"
+    mock_server.myPlexAccount.assert_called_once()
