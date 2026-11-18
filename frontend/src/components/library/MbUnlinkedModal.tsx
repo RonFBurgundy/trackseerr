@@ -158,8 +158,8 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
         mobile: 'title',
         render: (r) => (
           <div className="flex flex-col min-w-0">
-            <span className="text-white font-medium truncate">{r.album_title}</span>
-            <span className="text-xs text-neutral-400 truncate">{r.artist_name || 'Unknown Artist'}</span>
+            <span className="text-white font-medium block truncate">{r.album_title}</span>
+            <span className="text-xs text-neutral-400 block truncate">{r.artist_name || 'Unknown Artist'}</span>
           </div>
         ),
       },
@@ -175,7 +175,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
             .filter(Boolean)
             .join(', ');
           return (
-            <span className="text-xs text-neutral-300 truncate">
+            <span className="text-xs text-neutral-300 block truncate">
               &rarr; {r.candidate.title}
               {detail ? ` (${detail})` : ''}
             </span>
@@ -280,21 +280,21 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
         mobile: 'title',
         render: (r) => (
           <div className="flex flex-col min-w-0">
-            <div className="flex items-center gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
               <button
                 type="button"
                 onClick={() => {
                   onClose();
                   onOpenAlbum(r.id);
                 }}
-                className="text-white hover:text-[var(--accent-amber)] font-medium text-left truncate transition-colors underline-offset-2 hover:underline"
+                className="text-white hover:text-[var(--accent-amber)] font-medium text-left block truncate max-w-full transition-colors underline-offset-2 hover:underline"
                 title="Open album details"
               >
                 {r.title}
               </button>
               {r.year ? <span className="text-xs text-neutral-400 font-mono">({r.year})</span> : null}
             </div>
-            <span className="text-xs text-neutral-400 truncate">{r.artist_name || 'Unknown Artist'}</span>
+            <span className="text-xs text-neutral-400 block truncate">{r.artist_name || 'Unknown Artist'}</span>
           </div>
         ),
       },
@@ -544,6 +544,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
               sortDir="asc"
               onSortChange={() => {}}
               hideMobileSortBar
+              mobileLayout="compact"
               maxHeight="50dvh"
               selectedKeys={suggestions.selected}
               onSelectedKeysChange={(next) => suggestions.setSelected(new Set([...next].map(String)))}
@@ -564,6 +565,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
             sortDir="asc"
             onSortChange={() => {}}
             hideMobileSortBar
+            mobileLayout="compact"
             maxHeight="55dvh"
             rowActions={rowActions}
             actionsLabel="Actions"
