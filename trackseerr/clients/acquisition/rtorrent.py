@@ -42,7 +42,6 @@ _STATUS_FIELDS = (
     "d.timestamp.finished",
     "d.is_partially_done",
     "d.left_bytes",
-    "d.custom=tsr_done",
 )
 
 _LIST_FIELDS = (
@@ -396,12 +395,13 @@ class RtorrentDriver(AcquisitionDriver):
         thash = download_id.upper()
         try:
             with httpx.Client(timeout=self.timeout, auth=self._auth) as client:
-                values = self._multicall(client, [(m, [thash]) for m in _STATUS_FIELDS])
+                calls = [(m, [thash]) for m in _STATUS_FIELDS] + [("d.custom", [thash, "tsr_done"])]
+                values = self._multicall(client, calls)
                 fields = dict(zip(_STATUS_FIELDS, values))
                 if fields.get("d.name") is None:
                     return _queued_status()
                 complete = _int(fields.get("d.complete")) == 1 or _int(fields.get("d.is_partially_done")) == 1
-                marked = _int(fields.get("d.custom=tsr_done"))
+                marked = _int(values[-1])
                 if complete and _int(fields.get("d.timestamp.finished")) == 0 and marked == 0:
                     try:
                         self._call(client, "d.custom.set", thash, "tsr_done", str(int(time.time())))
