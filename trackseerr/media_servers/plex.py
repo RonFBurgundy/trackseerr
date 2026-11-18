@@ -15,6 +15,7 @@ import requests
 from plexapi.exceptions import NotFound, PlexApiException, Unauthorized
 
 from trackseerr.clients.plex import PlexClient, music_sections
+from trackseerr.mb_metadata_store import get_shared_enricher
 from trackseerr.media_servers.base import (
     ConnectionTest,
     MediaServer,
@@ -134,8 +135,18 @@ class PlexMediaServer(MediaServer):
     def sync_playlist(
         self, playlist: Playlist, targets: Sequence[str], options: PlaylistSyncOptions
     ) -> list[SyncResult]:
+        enricher = (
+            get_shared_enricher(options.db)
+            if options.db is not None and hasattr(options.db, "get_media_management_settings")
+            else None
+        )
         with _translated():
             if not targets:
+                extra: dict[str, Any] = {}
+                if options.db is not None:
+                    extra["db"] = options.db
+                if enricher is not None:
+                    extra["enricher"] = enricher
                 return [
                     self._client.sync_playlist(
                         playlist=playlist,
@@ -145,8 +156,12 @@ class PlexMediaServer(MediaServer):
                         write_missing_as_csv=options.write_missing_as_csv,
                         data_dir=options.data_dir,
                         threshold=options.threshold,
+                        **extra,
                     )
                 ]
+            user_extra: dict[str, Any] = {}
+            if enricher is not None:
+                user_extra["enricher"] = enricher
             return list(
                 self._client.sync_playlist_to_users(
                     playlist=playlist,
@@ -159,6 +174,7 @@ class PlexMediaServer(MediaServer):
                     threshold=options.threshold,
                     db=options.db,
                     skip_rating_keys=options.skip_item_ids,
+                    **user_extra,
                 )
             )
 
