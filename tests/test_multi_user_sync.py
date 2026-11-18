@@ -4,10 +4,17 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock, patch
 
+import pytest
 from plexapi.exceptions import NotFound
 
 from trackseerr.clients.plex import PlexClient
 from trackseerr.models import Playlist, Track
+
+
+@pytest.fixture(autouse=True)
+def _confirmed_plex_token(monkeypatch):
+    # These tests cover the plex.tv path, which needs a confirmed token.
+    monkeypatch.setenv("PLEX_TOKEN_CONFIRMED", "1")
 
 
 class MockArtist:

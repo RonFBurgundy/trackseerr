@@ -127,7 +127,8 @@ def _server() -> MagicMock:
 
 
 @pytest.mark.parametrize("exc_factory", [lambda: RuntimeError(LEAKY_URL), lambda: BadRequest(LEAKY_URL)])
-def test_sync_playlist_to_users_error_has_no_token(redacted_caplog, exc_factory):
+def test_sync_playlist_to_users_error_has_no_token(redacted_caplog, monkeypatch, exc_factory):
+    monkeypatch.setenv("PLEX_TOKEN_CONFIRMED", "1")
     server = _server()
     server.switchUser.side_effect = exc_factory()
     results = _client(server).sync_playlist_to_users(playlist=_playlist(), target_usernames=["alice"])
@@ -137,7 +138,8 @@ def test_sync_playlist_to_users_error_has_no_token(redacted_caplog, exc_factory)
     _assert_clean(redacted_caplog)
 
 
-def test_sync_playlist_to_users_admin_path_connection_error(redacted_caplog):
+def test_sync_playlist_to_users_admin_path_connection_error(redacted_caplog, monkeypatch):
+    monkeypatch.setenv("PLEX_TOKEN_CONFIRMED", "1")
     server = _server()
     server.playlist.side_effect = requests.exceptions.ConnectionError(LEAKY_URL)
     results = _client(server).sync_playlist_to_users(playlist=_playlist(), target_usernames=["admin_user"])
