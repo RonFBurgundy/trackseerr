@@ -65,6 +65,23 @@ def get_media_server_overlay() -> dict[str, str]:
         return dict(_media_server_overlay)
 
 
+_plex_account_token: str = ""
+_plex_account_token_lock = threading.Lock()
+
+
+def set_plex_account_token(token: str) -> None:
+    """Install (or clear with ``""``) the signed-in Plex owner account token used for plex.tv calls."""
+    global _plex_account_token
+    with _plex_account_token_lock:
+        _plex_account_token = str(token or "")
+
+
+def get_plex_account_token() -> str:
+    """Return the active Plex owner account token, or ``""`` when none is connected."""
+    with _plex_account_token_lock:
+        return _plex_account_token
+
+
 @dataclass(frozen=True)
 class MediaServerView:
     """An immutable, internally consistent copy of every media-server field of a :class:`Config`.

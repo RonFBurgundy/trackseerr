@@ -14,10 +14,12 @@ import requests
 import urllib.parse
 import urllib3
 from plexapi.exceptions import BadRequest, NotFound, PlexApiException, Unauthorized
+from plexapi.myplex import MyPlexAccount
 from plexapi.server import PlexServer
 
 import trackseerr
 import trackseerr.auth
+import trackseerr.config
 
 from ..censored import censored_pattern, search_text
 from ..models import Playlist, SyncResult, Track
@@ -208,13 +210,17 @@ _SERVER_TOKEN_WARNING = (
 )
 _UNCONFIRMED_TOKEN_WARNING = (
     "TrackSeerr can't confirm PLEX_TOKEN is your own Plex sign-in token, so it won't contact plex.tv with it. "
-    "Home users come from your Plex server only. If it is your own sign-in token, set PLEX_TOKEN_CONFIRMED=1. "
-    "See docs/CONFIGURATION.md"
+    "Home users come from your Plex server only. To fix this, use Sign in with Plex under "
+    "Settings → Media Management → Media Server."
 )
 
 
 class PlexCloudCallsBlocked(PlexApiException):
     """Raised when a plex.tv call is blocked because PLEX_TOKEN is not confirmed as an account token."""
+
+
+class PlexAccountNotOwner(PlexApiException):
+    """Raised when a signed-in Plex account does not own the Plex server TrackSeerr uses."""
 
 
 def _set_plexapi_identity() -> None:
@@ -241,11 +247,14 @@ class PlexClient:
         verify_ssl: bool = True,
         timeout: int = 30,
         music_section: Optional[str] = None,
+        account_token: Optional[str] = None,
     ):
         self.base_url = base_url
         self.token = token
         self.verify_ssl = verify_ssl
+        self.timeout = timeout
         self.music_section = music_section
+        self._account_token_override = account_token
         self._local_account_cache: Optional[tuple[float, dict[str, str]]] = None
         self._sections_cache: Optional[list[Any]] = None
         self._server_token_warned = False
@@ -260,6 +269,7 @@ class PlexClient:
             session.verify = False
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             logger.warning("Plex SSL verification disabled (verify=False)")
+        self._session = session
 
         try:
             self.server = PlexServer(base_url, token, session=session, timeout=timeout)
@@ -267,6 +277,13 @@ class PlexClient:
         except Exception as e:
             logger.error("Failed to connect to Plex Server at %s: %s", redact_text(base_url), safe_exc(e))
             raise
+
+    @property
+    def account_token(self) -> str:
+        """Signed-in Plex owner account token for plex.tv calls (empty when none is connected)."""
+        if self._account_token_override is not None:
+            return self._account_token_override
+        return trackseerr.config.get_plex_account_token()
 
     @property
     def machine_identifier(self) -> str:
@@ -311,8 +328,8 @@ class PlexClient:
 
     @property
     def cloud_calls_allowed(self) -> bool:
-        """True only when PLEX_TOKEN is known (or confirmed) not to be the server's own token."""
-        return self.token_kind == "account"
+        """True when an account token is connected or PLEX_TOKEN is known (or confirmed) not to be the server's own token."""
+        return bool(self.account_token) or self.token_kind == "account"
 
     @property
     def uses_server_token(self) -> bool:
@@ -323,10 +340,50 @@ class PlexClient:
         """Return a warning message if PLEX_TOKEN is the server's own token or unconfirmed, else None."""
         kind = self.token_kind
         if kind == "server":
+            if self.account_token:
+                return (
+                    "PLEX_TOKEN is the Plex server's own token. "
+                    "Local server calls with it are fine and plex.tv calls use your signed-in Plex account, "
+                    "but replacing PLEX_TOKEN with a sign-in token is still recommended; see docs/CONFIGURATION.md"
+                )
             return _SERVER_TOKEN_WARNING
+        if self.account_token:
+            return None
         if kind == "unknown":
             return _UNCONFIRMED_TOKEN_WARNING
         return None
+
+    def _cloud_account(self) -> MyPlexAccount:
+        """Return a MyPlexAccount built with the connected account token, or the server's token when allowed."""
+        if not self.cloud_calls_allowed:
+            raise PlexCloudCallsBlocked(
+                "plex.tv calls are blocked because no Plex account is connected and PLEX_TOKEN is unconfirmed."
+            )
+        token = self.account_token
+        if token:
+            return MyPlexAccount(token=token, session=self._session, timeout=self.timeout)
+        return self.server.myPlexAccount()
+
+    def verify_account_owns_server(self, token: str) -> str:
+        """Verify ``token`` belongs to the Plex account owning this Plex server. Returns ``account.username``."""
+        account = MyPlexAccount(token=token, session=self._session, timeout=self.timeout)
+        target_id = str(getattr(self.server, "machineIdentifier", "") or "").strip()
+        resources = account.resources() or []
+        match = next(
+            (r for r in resources if str(getattr(r, "clientIdentifier", "") or "").strip() == target_id),
+            None,
+        )
+        owned_val = getattr(match, "owned", False) if match is not None else False
+        is_owner = (
+            owned_val.strip().lower() in ("1", "true")
+            if isinstance(owned_val, str)
+            else bool(owned_val)
+        )
+        if not target_id or match is None or not is_owner:
+            raise PlexAccountNotOwner(
+                "This Plex account doesn't own the Plex server TrackSeerr uses. Sign in as the server owner."
+            )
+        return str(getattr(account, "username", "") or "")
 
     def _get_home_users_local(self) -> List[dict]:
         """Build home users list from local PMS endpoints without contacting plex.tv."""
@@ -385,7 +442,7 @@ class PlexClient:
 
         home_users: List[dict] = []
         try:
-            account = self.server.myPlexAccount()
+            account = self._cloud_account()
         except Exception as e:
             logger.warning("Could not access myPlexAccount (non-PlexPass or offline): %s", safe_exc(e))
             admin_name = str(getattr(self.server, "friendlyName", "Admin") or "Admin")
@@ -1060,7 +1117,7 @@ class PlexClient:
         if not self.cloud_calls_allowed:
             return ""
         try:
-            account = self.server.myPlexAccount()
+            account = self._cloud_account()
             return str(getattr(account, "username", "") or "")
         except Exception as e:  # myPlexAccount raises assorted plexapi/requests/Unauthorized errors
             logger.warning("Could not determine admin username from myPlexAccount: %s", safe_exc(e))
@@ -1079,7 +1136,7 @@ class PlexClient:
         return False
 
     def get_user_server(self, username: str, admin_username: Optional[str] = None) -> Any:
-        """Resolve a Plex username to a server handle: admin -> self.server, else switchUser."""
+        """Resolve a Plex username to a server handle: admin -> self.server, else switchUser / account token."""
         if self.is_admin_username(username, admin_username):
             return self.server
         if not self.cloud_calls_allowed:
@@ -1088,6 +1145,9 @@ class PlexClient:
                 "TrackSeerr can't confirm PLEX_TOKEN is your own sign-in token, so it won't contact plex.tv with it. "
                 "See docs/CONFIGURATION.md."
             )
+        if self.account_token:
+            user_token = self._cloud_account().user(username).get_token(self.server.machineIdentifier)
+            return PlexServer(self.base_url, token=user_token, session=self._session, timeout=self.timeout)
         return self.server.switchUser(username)
 
     # -------------------------------------------------------------------------

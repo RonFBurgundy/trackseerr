@@ -772,6 +772,43 @@ class SettingsStoreMixin:
             self.conn.commit()
         return self.get_media_server_settings()
 
+    def get_plex_account(self) -> dict[str, str]:
+        """Return the stored Plex owner account credentials (``{"token", "username"}``), empty when unset."""
+        with self.reader() as conn:
+            row = conn.execute(
+                "SELECT plex_account_token, plex_account_username FROM media_server_settings WHERE id = 1"
+            ).fetchone()
+        if not row:
+            return {"token": "", "username": ""}
+        return {
+            "token": str(row["plex_account_token"] or ""),
+            "username": str(row["plex_account_username"] or ""),
+        }
+
+    def set_plex_account(self, token: str, username: str) -> None:
+        """Persist the signed-in Plex owner account token and username without disturbing other columns."""
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO media_server_settings (id, plex_account_token, plex_account_username) "
+                "VALUES (1, ?, ?) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "plex_account_token = excluded.plex_account_token, "
+                "plex_account_username = excluded.plex_account_username, "
+                "updated_at = CURRENT_TIMESTAMP",
+                (str(token or ""), str(username or "")),
+            )
+            self.conn.commit()
+
+    def clear_plex_account(self) -> None:
+        """Clear the stored Plex owner account token and username."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE media_server_settings "
+                "SET plex_account_token = '', plex_account_username = '', updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = 1"
+            )
+            self.conn.commit()
+
     # -------------------------------------------------------------------------
     # Quality Profiles CRUD
     # -------------------------------------------------------------------------

@@ -223,7 +223,7 @@ CREATE TABLE media_server_settings (
                 password TEXT NOT NULL DEFAULT '',
                 api_key TEXT NOT NULL DEFAULT '',
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            , credentials_type TEXT NOT NULL DEFAULT '', path_mapping_json TEXT NOT NULL DEFAULT '');
+            , credentials_type TEXT NOT NULL DEFAULT '', path_mapping_json TEXT NOT NULL DEFAULT '', plex_account_token TEXT NOT NULL DEFAULT '', plex_account_username TEXT NOT NULL DEFAULT '');
 CREATE TABLE "native_metadata_profiles" (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
