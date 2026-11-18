@@ -1,6 +1,7 @@
 """Comprehensive tests for multi-user Plex playlist synchronization."""
 
 import urllib.parse
+import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock, patch
 
 from plexapi.exceptions import NotFound
@@ -51,6 +52,7 @@ class TestPlexGetHomeUsers:
     @patch("trackseerr.clients.plex.PlexServer")
     def test_get_home_users_with_managed_users(self, mock_server_cls):
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         mock_account = MagicMock()
         mock_account.username = "plex_admin"
         mock_account.id = "admin-id-1"
@@ -100,6 +102,7 @@ class TestPlexGetHomeUsers:
     @patch("trackseerr.clients.plex.PlexServer")
     def test_get_home_users_deduplicates_admin_in_users(self, mock_server_cls):
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         mock_account = MagicMock()
         mock_account.username = "plex_admin"
         mock_account.id = "admin-1"
@@ -147,6 +150,7 @@ class TestMultiUserSync:
     def test_track_match_caching_across_users(self, mock_server_cls):
         """Verify that track search/matching occurs ONCE regardless of how many users are synced."""
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         mock_account = MagicMock()
         mock_account.username = "admin_user"
         mock_server.myPlexAccount.return_value = mock_account
@@ -202,6 +206,7 @@ class TestMultiUserSync:
     def test_admin_poster_injection_fallback_on_managed_user_401(self, mock_server_cls):
         """Verify managed user 401 uploadPoster failure triggers admin session poster injection."""
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         mock_account = MagicMock()
         mock_account.username = "admin_user"
         mock_server.myPlexAccount.return_value = mock_account
@@ -245,8 +250,9 @@ class TestMultiUserSync:
         # Verify admin server session executed fallback query via /library/metadata/<ratingKey>/posters?url=...
         encoded_poster = urllib.parse.quote_plus(poster_url)
         expected_key = f"/library/metadata/98765/posters?url={encoded_poster}"
-        mock_server.query.assert_called_once()
-        actual_key = mock_server.query.call_args[0][0]
+        poster_calls = [c for c in mock_server.query.call_args_list if c.args and c.args[0] != "/myplex/account"]
+        assert len(poster_calls) == 1
+        actual_key = poster_calls[0][0][0]
         assert actual_key == expected_key
 
     @patch("trackseerr.clients.plex.PlexServer")
@@ -282,6 +288,7 @@ class TestMultiUserSync:
     @patch("trackseerr.clients.plex.PlexServer")
     def test_sync_playlist_to_users_partial_user_failure(self, mock_server_cls):
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         mock_account = MagicMock()
         mock_account.username = "admin"
         mock_server.myPlexAccount.return_value = mock_account
@@ -329,6 +336,7 @@ class TestMultiUserSync:
     @patch("trackseerr.clients.plex.PlexServer")
     def test_get_home_users_users_call_fails(self, mock_server_cls):
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         mock_account = MagicMock()
         mock_account.username = "plex_admin"
         mock_account.id = "admin-1"
@@ -345,6 +353,7 @@ class TestMultiUserSync:
     @patch("trackseerr.clients.plex.PlexServer")
     def test_admin_poster_injection_fallback_failure_does_not_crash(self, mock_server_cls):
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         mock_account = MagicMock()
         mock_account.username = "admin"
         mock_server.myPlexAccount.return_value = mock_account
@@ -360,7 +369,7 @@ class TestMultiUserSync:
 
         # Both user upload and admin fallback fail
         mock_server.switchUser.return_value = managed_server
-        mock_server.query.side_effect = Exception("Admin query failed")
+        mock_server.query.side_effect = [ET.Element("MyPlex"), Exception("Admin query failed")]
         mock_server_cls.return_value = mock_server
 
         client = PlexClient("http://localhost:32400", "token")
@@ -382,6 +391,7 @@ class TestMultiUserSync:
     @patch("trackseerr.clients.plex.PlexServer")
     def test_sync_playlist_to_users_cleans_obsolete_missing_csv(self, mock_server_cls, tmp_path):
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         mock_account = MagicMock()
         mock_account.username = "admin"
         mock_server.myPlexAccount.return_value = mock_account
@@ -415,6 +425,7 @@ class TestMultiUserSync:
     @patch("trackseerr.clients.plex.PlexServer")
     def test_sync_playlist_to_users_fallback_admin_friendly_name(self, mock_server_cls):
         mock_server = MagicMock()
+        mock_server.query.return_value = ET.Element("MyPlex")
         # myPlexAccount raises
         mock_server.myPlexAccount.side_effect = Exception("Not available")
         mock_server.friendlyName = "HomePlex"

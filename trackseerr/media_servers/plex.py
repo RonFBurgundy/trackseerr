@@ -95,16 +95,29 @@ class PlexMediaServer(MediaServer):
     def test_connection(self) -> ConnectionTest:
         fn = getattr(self._client, "test_connection", None)
         if fn is None:
-            return ConnectionTest(True, "Connected to Plex")
-        res = fn()
-        if isinstance(res, tuple):
-            return ConnectionTest(bool(res[0]), redact_text(str(res[1])))
-        if isinstance(res, dict):
-            online = bool(res.get("online", False))
-            msg = str(res.get("message") or res.get("error") or ("Connected to Plex" if online else "Plex unreachable"))
-            return ConnectionTest(online, msg)
-        online = bool(res)
-        return ConnectionTest(online, "Connected to Plex" if online else "Plex unreachable")
+            result = ConnectionTest(True, "Connected to Plex")
+        else:
+            res = fn()
+            if isinstance(res, tuple):
+                result = ConnectionTest(bool(res[0]), redact_text(str(res[1])))
+            elif isinstance(res, dict):
+                online = bool(res.get("online", False))
+                msg = str(
+                    res.get("message")
+                    or res.get("error")
+                    or ("Connected to Plex" if online else "Plex unreachable")
+                )
+                result = ConnectionTest(online, msg)
+            else:
+                online = bool(res)
+                result = ConnectionTest(online, "Connected to Plex" if online else "Plex unreachable")
+
+        if result.ok:
+            warn_fn = getattr(self._client, "token_warning", None)
+            warning = warn_fn() if callable(warn_fn) else None
+            if isinstance(warning, str) and warning:
+                return ConnectionTest(True, f"Connected. {warning}")
+        return result
 
     def match_track(self, track: Track, threshold: float = 0.9, db: Optional[Any] = None) -> Optional[ServerTrackRef]:
         with _translated():
