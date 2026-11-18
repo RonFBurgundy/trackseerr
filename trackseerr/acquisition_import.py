@@ -241,6 +241,7 @@ _SOURCE_WAIT_PREFIX = "Waiting for files to appear"
 _SYNC_WAIT_PREFIX = "Waiting for files to finish syncing"
 _SYNC_WAIT_TIMEOUT = timedelta(hours=6)
 _SYNC_SETTLE_SECONDS = 60.0
+_MIN_SELECTED_AUDIO_BYTES = 64 * 1024
 # In-progress sync/download file names (matched lowercased); a folder holding any of these is still arriving.
 _SYNC_TEMP_PATTERNS = (
     ".syncthing.*.tmp",
@@ -807,6 +808,40 @@ class ImportPipelineMixin(ImportCatalogMixin):
         self._complete_request(db, ctx, job)
         self._settle_download(db, ctx, job, stats)
 
+    def _ensure_sync_state(self) -> None:
+        if not hasattr(self, "_sync_wait_started"):
+            self._sync_wait_started: dict[str, float] = {}
+        if not hasattr(self, "_sync_snapshots"):
+            self._sync_snapshots: dict[str, tuple[tuple[int, int, float], float]] = {}
+
+    def _handle_missing_selected_file(
+        self,
+        db: Database,
+        job: _ImportJob,
+        base_dir: Path,
+        filename: str,
+    ) -> None:
+        """Keep a missing selected file in COMPLETED while waiting for sync; warn after _SYNC_WAIT_TIMEOUT."""
+        self._ensure_sync_state()
+        key = str(job.download_id)
+        now = time.time()
+        started = self._sync_wait_started.setdefault(key, now)
+        if now - started >= _SYNC_WAIT_TIMEOUT.total_seconds():
+            self._sync_wait_started.pop(key, None)
+            self._sync_snapshots.pop(key, None)
+            self._set_request_wait_message(db, job, None)
+            logger.warning("Download %s selected file not found: %s", job.download_id, filename)
+            db.update_download_status(
+                job.download_id,
+                status=DownloadStatus.WARNING.value,
+                error_message=f"Selected file not found: {filename}",
+            )
+            return
+        msg = f"{_SYNC_WAIT_PREFIX} at {base_dir} (check the remote path mapping or your sync)"
+        logger.info("Download %s selected file %s not on disk yet at %s; will retry", job.download_id, filename, base_dir)
+        db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message=msg)
+        self._set_request_wait_message(db, job, msg)
+
     def _locate_selected_files(
         self,
         db: Database,
@@ -841,23 +876,16 @@ class ImportPipelineMixin(ImportCatalogMixin):
             if len(parts) > 1 and base_dir.name == parts[0]:
                 candidate_paths.append(base_dir / "/".join(parts[1:]))
 
-            matched = None
-            for cp in candidate_paths:
-                if cp.is_file():
-                    matched = cp.resolve()
-                    break
-
+            matched = next((cp.resolve() for cp in candidate_paths if cp.is_file()), None)
             if not matched:
-                logger.warning("Download %s selected file not found: %s", job.download_id, filename)
-                db.update_download_status(
-                    job.download_id,
-                    status=DownloadStatus.WARNING.value,
-                    error_message=f"Selected file not found: {filename}",
-                )
+                self._handle_missing_selected_file(db, job, base_dir, filename)
                 return False
             found.append(matched)
 
-        job.audio_files = sorted(dict.fromkeys(found))
+        files = sorted(dict.fromkeys(found))
+        if self._selected_not_ready(db, job, files):
+            return False
+        job.audio_files = files
         return True
 
     def _resolve_candidate_source(
@@ -963,8 +991,16 @@ class ImportPipelineMixin(ImportCatalogMixin):
             return (True, 0, 0, 0.0)
         return (has_temp, count, total, newest)
 
-    def _settled(self, job: _ImportJob, snapshot: tuple[int, int, float], now: float) -> bool:
+    def _settled(
+        self,
+        job: _ImportJob,
+        snapshot: tuple[int, int, float],
+        now: float,
+        *,
+        check_expected: bool = True,
+    ) -> bool:
         """True once a mapped source has looked identical for _SYNC_SETTLE_SECONDS and matches the client's size."""
+        self._ensure_sync_state()
         key = str(job.download_id)
         prev = self._sync_snapshots.get(key)
         if prev is None or prev[0] != snapshot:
@@ -972,27 +1008,31 @@ class ImportPipelineMixin(ImportCatalogMixin):
             return False
         if now - prev[1] < _SYNC_SETTLE_SECONDS:
             return False
+        if not check_expected:
+            return True
         expected = int(job.item.get("size_bytes") or 0)
         return not (expected > 0 and snapshot[1] < 0.98 * expected)
 
-    def _payload_not_ready(self, db: Database, job: _ImportJob, candidate_src: str) -> bool:
-        """Return True and keep the download COMPLETED while a synced payload is still arriving."""
+    def _finish_sync_wait(
+        self,
+        db: Database,
+        job: _ImportJob,
+        location: str,
+        waiting: bool,
+        started: float,
+        now: float,
+    ) -> bool:
+        """Apply timeout, set wait message when waiting, or clear wait state when ready."""
         key = str(job.download_id)
-        now = time.time()
-        started = self._sync_wait_started.setdefault(key, now)
-        has_temp, count, total, newest = self._scan_source_tree(candidate_src)
-        waiting = has_temp or count == 0
-        if not waiting and job.source_mapped:
-            waiting = not self._settled(job, (count, total, newest), now)
         if waiting and now - started >= _SYNC_WAIT_TIMEOUT.total_seconds():
             logger.warning(
                 "Download %s still not fully synced at %s after %s; importing what is there",
-                job.download_id, candidate_src, _SYNC_WAIT_TIMEOUT,
+                job.download_id, location, _SYNC_WAIT_TIMEOUT,
             )
             waiting = False
         if waiting:
-            msg = f"{_SYNC_WAIT_PREFIX} at {candidate_src} (check your sync if this does not clear)"
-            logger.info("Download %s is waiting for files to finish syncing at %s", job.download_id, candidate_src)
+            msg = f"{_SYNC_WAIT_PREFIX} at {location} (check your sync if this does not clear)"
+            logger.info("Download %s is waiting for files to finish syncing at %s", job.download_id, location)
             db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message=msg)
             self._set_request_wait_message(db, job, msg)
             return True
@@ -1003,6 +1043,41 @@ class ImportPipelineMixin(ImportCatalogMixin):
             db.update_download_status(job.download_id, status=DownloadStatus.COMPLETED.value, error_message="")
             self._set_request_wait_message(db, job, None)
         return False
+
+    def _payload_not_ready(self, db: Database, job: _ImportJob, candidate_src: str) -> bool:
+        """Return True and keep the download COMPLETED while a synced payload is still arriving."""
+        self._ensure_sync_state()
+        now = time.time()
+        started = self._sync_wait_started.setdefault(str(job.download_id), now)
+        has_temp, count, total, newest = self._scan_source_tree(candidate_src)
+        waiting = has_temp or count == 0
+        if not waiting and job.source_mapped:
+            waiting = not self._settled(job, (count, total, newest), now)
+        return self._finish_sync_wait(db, job, candidate_src, waiting, started, now)
+
+    def _selected_not_ready(self, db: Database, job: _ImportJob, files: list[Path]) -> bool:
+        """Return True and keep the download COMPLETED while selected files are still arriving or tiny stubs."""
+        self._ensure_sync_state()
+        now = time.time()
+        started = self._sync_wait_started.setdefault(str(job.download_id), now)
+        total = 0
+        newest = 0.0
+        waiting = False
+        for path in files:
+            try:
+                st = path.stat()
+            except OSError:
+                waiting = True
+                break
+            if st.st_size < _MIN_SELECTED_AUDIO_BYTES:
+                waiting = True
+                break
+            total += st.st_size
+            newest = max(newest, st.st_mtime)
+        if not waiting and job.source_mapped:
+            waiting = not self._settled(job, (len(files), total, newest), now, check_expected=False)
+        location = str(files[0].parent) if files else str(job.item.get("source_path") or "")
+        return self._finish_sync_wait(db, job, location, waiting, started, now)
 
     def _locate_audio_files(
         self,
@@ -1018,6 +1093,8 @@ class ImportPipelineMixin(ImportCatalogMixin):
 
         selected_files = _parse_job_selected_files(job.item)
         if selected_files:
+            if candidate_src and self._source_not_arrived(db, job, candidate_src):
+                return False
             return self._locate_selected_files(db, job, candidate_src, selected_files)
 
         err_msg_orig = str(job.item.get("error_message") or "")

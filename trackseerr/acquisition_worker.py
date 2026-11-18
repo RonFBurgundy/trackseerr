@@ -83,6 +83,7 @@ from trackseerr.acquisition_import import (
     ImportPipelineMixin,
     _PollContext,
     _download_artist_id,
+    _parse_job_selected_files,
 )
 
 
@@ -1052,8 +1053,20 @@ class AcquisitionWorker(ImportPipelineMixin):
     def _resolve_parked_duplicates(self, db: Database, ctx: _PollContext) -> None:
         """Sweeps parked WARNING downloads to auto-clear files already owned in library."""
         warning_items = db.list_active_downloads(statuses=[DownloadStatus.WARNING.value])
-        requeued_paths: set[str] = set()
+        remaining: list[dict[str, Any]] = []
         for item in warning_items:
+            err = str(item.get("error_message") or "")
+            if _parse_job_selected_files(item) and err.startswith("Selected file not found"):
+                logger.info("Requeuing parked selected-file download %s for sync retry", item["id"])
+                db.update_download_status(
+                    item["id"],
+                    status=DownloadStatus.COMPLETED.value,
+                    error_message="",
+                )
+            else:
+                remaining.append(item)
+        requeued_paths: set[str] = set()
+        for item in remaining:
             self._resolve_parked_item(db, ctx, item, requeued_paths=requeued_paths)
 
     def _notify_download_failed(
