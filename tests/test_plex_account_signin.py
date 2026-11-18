@@ -103,7 +103,7 @@ def test_home_users_use_account_token_not_server_token() -> None:
     with patch("trackseerr.clients.plex.MyPlexAccount", return_value=mock_account) as account_cls:
         users = client.get_home_users()
 
-    account_cls.assert_called_once_with(token="acct-tok-123", session=client._session, timeout=client.timeout)
+    account_cls.assert_called_with(token="acct-tok-123", session=client._session, timeout=client.timeout)
     mock_server.myPlexAccount.assert_not_called()
     assert [u["username"] for u in users] == ["admin_user", "alice"]
 
@@ -128,7 +128,7 @@ def test_get_user_server_uses_account_user_token() -> None:
     ):
         resolved = client.get_user_server("alice")
 
-    account_cls.assert_called_once_with(token="acct-tok-123", session=client._session, timeout=client.timeout)
+    account_cls.assert_called_with(token="acct-tok-123", session=client._session, timeout=client.timeout)
     mock_account.user.assert_called_once_with("alice")
     mock_user.get_token.assert_called_once_with("machine-xyz")
     server_cls.assert_called_once_with(
@@ -300,3 +300,95 @@ def test_role_guard_flags_plex_account_token() -> None:
         assert "a Plex account token" in core_like_reasons(db.conn)
     finally:
         db.close()
+
+
+def test_owner_recognised_when_local_username_differs() -> None:
+    el = ET.Element("MyPlex", {"username": "ron@example.com"})
+    client, _ = _make_client(token="local-tok", query_el=el, account_token="acct-tok-123")
+    mock_account = MagicMock()
+    mock_account.username = "RonTube"
+    mock_account.email = "ron@example.com"
+    mock_account.title = "Ron"
+
+    with patch("trackseerr.clients.plex.MyPlexAccount", return_value=mock_account):
+        assert client.is_admin_username("RonTube") is True
+        assert client.is_admin_username("rontube") is True
+        assert client._get_admin_username() == "RonTube"
+        server = client.get_user_server("RonTube")
+
+    assert server is client.server
+    mock_account.user.assert_not_called()
+
+
+def test_owner_recognised_by_email_or_title() -> None:
+    el = ET.Element("MyPlex", {"username": "ron_local", "email": "ron@example.com", "title": "Ron Title"})
+    client, _ = _make_client(token="local-tok", query_el=el)
+    assert client.is_admin_username("ron@example.com") is True
+    assert client.is_admin_username("Ron Title") is True
+    assert client.is_admin_username("ron_local") is True
+
+
+def test_home_user_still_switches() -> None:
+    el = ET.Element("MyPlex", {"username": "ron@example.com"})
+    client, _ = _make_client(token="local-tok", query_el=el, machine_id="machine-xyz", account_token="acct-tok-123")
+    mock_user = MagicMock()
+    mock_user.get_token.return_value = "alice-server-tok"
+    mock_account = MagicMock()
+    mock_account.username = "RonTube"
+    mock_account.email = "ron@example.com"
+    mock_account.title = "Ron"
+    mock_account.user.return_value = mock_user
+    user_server = MagicMock()
+
+    with patch("trackseerr.clients.plex.MyPlexAccount", return_value=mock_account), patch(
+        "trackseerr.clients.plex.PlexServer", return_value=user_server
+    ) as server_cls:
+        resolved = client.get_user_server("alice")
+
+    assert resolved is user_server
+    mock_account.user.assert_called_once_with("alice")
+    server_cls.assert_called_once_with("http://localhost:32400", token="alice-server-tok", session=client._session, timeout=client.timeout)
+
+
+def test_cloud_name_lookup_error_falls_back_to_local() -> None:
+    import requests
+
+    el = ET.Element("MyPlex", {"username": "ron_local", "email": "ron@example.com"})
+    client, _ = _make_client(token="local-tok", query_el=el, account_token="acct-tok-123")
+
+    with patch("trackseerr.clients.plex.MyPlexAccount", side_effect=requests.RequestException("network down")):
+        assert client.is_admin_username("ron_local") is True
+        assert client.is_admin_username("ron@example.com") is True
+        assert client.is_admin_username("someone_else") is False
+        assert client._get_admin_username() == "ron_local"
+
+
+def test_sync_playlist_to_owner_uses_admin_server() -> None:
+    from trackseerr.models import Playlist, Track
+
+    el = ET.Element("MyPlex", {"username": "ron@example.com"})
+    client, mock_server = _make_client(token="local-tok", query_el=el, account_token="acct-tok-123")
+    mock_account = MagicMock()
+    mock_account.username = "RonTube"
+    mock_account.email = "ron@example.com"
+    mock_account.title = "Ron"
+
+    track = MagicMock()
+    track.ratingKey = "101"
+    mock_server.playlists.return_value = []
+    mock_playlist = MagicMock()
+    mock_playlist.ratingKey = "pl-1"
+    mock_server.createPlaylist.return_value = mock_playlist
+
+    playlist = Playlist(id="p1", name="My Mix", tracks=[Track("Song", "Artist", "Album")])
+    with patch("trackseerr.clients.plex.MyPlexAccount", return_value=mock_account), patch.object(
+        client, "match_playlist_tracks", return_value=([track], [])
+    ):
+        results = client.sync_playlist_to_users(
+            playlist=playlist,
+            target_usernames=["RonTube"],
+        )
+
+    assert len(results) == 1
+    assert results[0].success is True
+    mock_account.user.assert_not_called()
