@@ -156,6 +156,7 @@ heading becomes the version and date.
 - Duplicates no longer lists an album several times when singles or live albums share its title: the studio album is picked.
 - **Keep better quality** no longer throws away a file just because its sample rate or bitrate was never read. It compares only what both files report, then their size.
 - On phones, long names in the Suggested list and in Duplicates stay inside the screen. Duplicates shows its buttons first and folds the track list behind **Show tracks**.
+- Plex playlist sync finds songs with common titles ("Harvest", "Songbird") that it used to list as missing: when the first search misses, it searches within that artist in your Plex music library.
 - Plex: TrackSeerr no longer makes your Plex server disappear from Plex apps when `PLEX_TOKEN` is the server's own token. It reads the admin's name from your Plex server instead of plex.tv, warns under **Settings > System > Status** when it sees the server's own token, and shows up in your Plex devices as TrackSeerr.
 - Song downloads from a remote client (for example a seedbox with Syncthing) now wait for the song to arrive, like whole albums do, instead of stopping at "Selected file not found". Downloads already stuck on that message are retried.
 - rTorrent: seeding time now counts for torrents where only some files were downloaded, so time-based seed rules can finish them.
