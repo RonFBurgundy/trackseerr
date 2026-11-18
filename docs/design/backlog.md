@@ -264,3 +264,15 @@ contributions. Priority: P1 = user-facing bug or data risk, P2 = noticeable fric
     the library count for requests as usual, wherever they came from. A Discogs copy with **no files** is "owned on
     vinyl/CD, not ripped": it does not count as in the library, so requests and playlists still want a digital copy;
     the item shows the physical copy so the admin can choose to rip it. Store links live in the existing tools menu.
+
+36. **P2 · Match playlist songs to the library by ID, not only by fuzzy title** (backlogged 2026-11-18, pick up when
+    convenient). Playlist → Plex sync and Missing detection search by title/artist/album today
+    (`trackseerr/clients/plex.py` `match_track` ~L421, after match-memory overrides). Add an ID step before the fuzzy
+    one: playlist song ISRC → MusicBrainz recording (MB recordings carry ISRCs) → library track with that
+    `mb_recording_id` → its file path → the Plex item with that file. ID sources per service: **Spotify** gives
+    `external_ids.isrc` on every playlist track; **Deezer** gives `isrc` on the full track lookup (`/track/{id}`, not
+    always in playlist listings — batch and cache); **YouTube Music** and pasted/iTunes lists have no ISRC, so use the
+    existing MusicBrainz recording text search (`trackseerr/recording_search.py`) to get a recording ID, accepting it
+    only on a confident artist + title + duration match. Fall back to today's fuzzy match when no ID resolves. Cache
+    ISRC → recording lookups. Also feeds Missing detection (a song already owned under a different title stops
+    showing as missing) and the same path works for Jellyfin/Subsonic once the media-server match is by file path.
