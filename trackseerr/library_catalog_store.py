@@ -605,6 +605,24 @@ class LibraryCatalogStoreMixin:
             row = cur.fetchone()
             return self._map_library_track(row) if row else None
 
+    def find_library_track_by_isrc(self, isrc: str) -> Optional[dict[str, Any]]:
+        """Retrieves a filed library track matching ``isrc`` (case-insensitive), or None."""
+        clean_isrc = (isrc or "").strip().upper()
+        if not clean_isrc:
+            return None
+        with self.reader() as conn:
+            cur = conn.execute(
+                """
+                SELECT * FROM library_tracks
+                WHERE UPPER(isrc) = ?
+                  AND (has_file = 1 OR EXISTS (SELECT 1 FROM library_files f WHERE f.track_id = library_tracks.id))
+                LIMIT 1
+                """,
+                (clean_isrc,),
+            )
+            row = cur.fetchone()
+            return self._map_library_track(row) if row else None
+
     def get_library_track_by_foreign_id(
         self, foreign_id: str, album_id: Optional[str] = None
     ) -> Optional[dict[str, Any]]:

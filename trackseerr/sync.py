@@ -39,7 +39,7 @@ class SyncCoordinator:
     def _sync_one(self, pl: Playlist) -> SyncResult:
         server = as_media_server(self.plex)
         if server is not None:
-            return server.sync_playlist(pl, [], PlaylistSyncOptions.from_config(self.config))[0]
+            return server.sync_playlist(pl, [], PlaylistSyncOptions.from_config(self.config, db=self.db))[0]
         return self._match_without_media_server(pl)
 
     def _match_without_media_server(self, pl: Playlist) -> SyncResult:

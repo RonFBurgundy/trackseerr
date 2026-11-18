@@ -186,3 +186,39 @@ def test_scraper_created_once(mock_scraper_class, mock_sp_class, mock_creds):
 
     assert mock_scraper_class.call_count == 1
 
+
+@patch("trackseerr.clients.spotify.SpotifyClientCredentials")
+@patch("trackseerr.clients.spotify.spotipy.Spotify")
+def test_spotify_playlist_tracks_isrc_extraction(mock_sp_class, mock_creds):
+    mock_sp = MagicMock()
+    mock_sp_class.return_value = mock_sp
+    mock_sp.playlist_items.return_value = {
+        "items": [
+            {
+                "track": {
+                    "name": "Track With ISRC",
+                    "artists": [{"name": "Artist A"}],
+                    "album": {"name": "Album A"},
+                    "external_urls": {"spotify": "http://spotify.com/a"},
+                    "external_ids": {"isrc": " usabc1234567 "},
+                }
+            },
+            {
+                "track": {
+                    "name": "Track Without ISRC",
+                    "artists": [{"name": "Artist B"}],
+                    "album": {"name": "Album B"},
+                    "external_urls": {"spotify": "http://spotify.com/b"},
+                }
+            },
+        ],
+        "next": None,
+    }
+
+    client = SpotifyClient("cid", "csecret")
+    tracks = client.get_playlist_tracks("pl_isrc")
+
+    assert len(tracks) == 2
+    assert tracks[0].isrc == "USABC1234567"
+    assert tracks[1].isrc is None
+
