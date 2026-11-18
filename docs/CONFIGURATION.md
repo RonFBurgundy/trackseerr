@@ -60,7 +60,7 @@ See [Media servers](MEDIA_SERVERS.md) for what each server supports.
 |---|---|---|
 | `MEDIA_SERVER` | automatic | `plex`, `jellyfin`, `subsonic`, or `none`. If unset: `plex` when `PLEX_URL` and `PLEX_TOKEN` are set, otherwise whatever you choose in **Settings > Media Management > Media Server**. When any media server variable is set, the environment wins and the page is read-only. |
 | `PLEX_URL` | unset | Plex address, for example `http://192.168.1.100:32400`. |
-| `PLEX_TOKEN` | unset | Plex token of the server owner. |
+| `PLEX_TOKEN` | unset | A Plex token from the server owner's own sign-in (see below). Don't use the token stored in the Plex server's own settings file. |
 | `PLEX_MACHINE_IDENTIFIER` | automatic | Plex server ID. Only needed if your account can reach more than one server and the wrong one is picked. |
 | `PLEX_MUSIC_SECTION` | first music library | Name of the Plex music library to use, for example `Music`. Not case-sensitive. If no music library has that name, TrackSeerr logs a warning and uses the first one. |
 | `PLEX_VERIFY_SSL` | `1` | `0` turns off certificate checks for a self-signed Plex certificate. `IGNORE_SSL=1` does the same. |
@@ -71,6 +71,8 @@ See [Media servers](MEDIA_SERVERS.md) for what each server supports.
 | `SUBSONIC_URL` | unset | Subsonic server address, for example `http://navidrome:4533`. |
 | `SUBSONIC_USER` / `SUBSONIC_PASSWORD` | unset | Account TrackSeerr signs in as. The password is never sent; TrackSeerr uses salted tokens. |
 | `SUBSONIC_API_KEY` | unset | OpenSubsonic API key, used instead of user and password if the server supports it. |
+
+**Which Plex token to use.** Get it the way Plex's guide [Finding an authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/) shows: sign in to Plex Web as the server owner and copy the token from there. Don't copy `PlexOnlineToken` out of the Plex server's `Preferences.xml`. That token belongs to the server itself, and asking plex.tv for account details with it can make your server drop out of Plex apps. If TrackSeerr sees that token, the media server check under **Settings > System > Status** warns you, and TrackSeerr stops asking plex.tv for anything with it.
 
 Set both `PLEX_URL` and `PLEX_TOKEN`, or neither. With only one set, TrackSeerr stops at startup and logs which one is missing. The same goes for `JELLYFIN_*` or `SUBSONIC_*` variables without `MEDIA_SERVER`.
 

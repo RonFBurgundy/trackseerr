@@ -196,7 +196,7 @@ TrackSeerr needs one admin account. How you get it depends on your media server.
 
 The password must also not be a common password, and must not contain the username. If TrackSeerr turns it down, no admin is created. The sign-in page then tells you why, and the log shows `ADMIN_PASSWORD rejected`. Pick a stronger password and restart.
 
-To find your Plex token, follow Plex's guide: [Finding an authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/).
+To find your Plex token, follow Plex's guide: [Finding an authentication token](https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/). Use the token from your own sign-in, not `PlexOnlineToken` from the Plex server's `Preferences.xml` (see [Configuration](CONFIGURATION.md)).
 
 After you sign in, a typical setup order is:
 
