@@ -23,6 +23,58 @@ _TRAILING_JUNK = re.compile(
 _TRAILING_SINGLE_EP = re.compile(r"\s+[-–—]\s*(?:single|ep)\s*$", re.IGNORECASE)
 _TRAILING_YEAR = re.compile(r"\s*[\(\[]\s*(\d{4})\s*[\)\]]\s*$")
 
+_EDITION_WORDS = frozenset(
+    {
+        "deluxe",
+        "super",
+        "edition",
+        "expanded",
+        "anniversary",
+        "remaster",
+        "remastered",
+        "the",
+        "special",
+        "collector's",
+        "collectors",
+        "collector’s",
+        "legacy",
+        "reissue",
+        "bonus",
+        "version",
+        "hi-res",
+        "hires",
+        "mono",
+        "stereo",
+        "udsacd",
+        "sacd",
+        "shm",
+        "mfsl",
+        "original",
+        "album",
+        "track",
+        "tracks",
+    }
+)
+_ORDINAL_RE = re.compile(r"^\d+(?:st|nd|rd|th)$")
+_YEAR_RE = re.compile(r"^\d{4}$")
+_TOKEN_SPLIT_RE = re.compile(r"[\s;,&/]+")
+_TRAILING_BRACKET_GROUP_RE = re.compile(r"\s*(?:\(([^()]*)\)|\[([^\[\]]*)\])\s*$")
+_TRAILING_DASH_SUFFIX_RE = re.compile(r"\s+[-–—]\s+(.+?)\s*$")
+
+
+def _is_edition_token(token: str) -> bool:
+    if token in _EDITION_WORDS or _ORDINAL_RE.match(token) or _YEAR_RE.match(token):
+        return True
+    if "-" in token:
+        parts = [p for p in token.split("-") if p]
+        return bool(parts) and all(_is_edition_token(p) for p in parts)
+    return False
+
+
+def _is_edition_phrase(phrase: str) -> bool:
+    tokens = [tok.lower() for tok in _TOKEN_SPLIT_RE.split(phrase.strip()) if tok]
+    return bool(tokens) and all(_is_edition_token(tok) for tok in tokens)
+
 
 def strip_album_junk(title: str) -> str:
     """Repeatedly strip trailing year, single/EP, disc, and format/remaster tags from an album title."""
@@ -39,10 +91,34 @@ def strip_album_junk(title: str) -> str:
     return cur
 
 
+def strip_edition(title: str) -> str:
+    """Strip trailing album junk and edition qualifiers without ever returning an empty string."""
+    if not isinstance(title, str) or not title:
+        return ""
+    original_stripped = title.strip()
+    if not original_stripped:
+        return title
+    cur = strip_album_junk(original_stripped)
+    while True:
+        match = _TRAILING_BRACKET_GROUP_RE.search(cur)
+        phrase = (match.group(1) if match.group(1) is not None else match.group(2)) if match else None
+        if match is None:
+            match = _TRAILING_DASH_SUFFIX_RE.search(cur)
+            phrase = match.group(1) if match else None
+        if match is None or phrase is None or not _is_edition_phrase(phrase):
+            break
+        nxt = cur[: match.start()].strip()
+        if not nxt:
+            break
+        cur = nxt
+    cur = strip_album_junk(cur)
+    return cur or original_stripped
+
+
 def album_titles_match(a: Any, b: Any) -> bool:
-    """Compare two album titles after stripping album-specific trailing qualifiers."""
-    left = strip_album_junk(a) if isinstance(a, str) else a
-    right = strip_album_junk(b) if isinstance(b, str) else b
+    """Compare two album titles after stripping album-specific trailing qualifiers and edition tags."""
+    left = strip_edition(a) if isinstance(a, str) else a
+    right = strip_edition(b) if isinstance(b, str) else b
     return titles_match(left, right)
 
 

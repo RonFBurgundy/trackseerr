@@ -109,6 +109,78 @@ def test_suggest_includes_various_artists_compilation(db: Database, tmp_path: Pa
     assert "Released as a compilation by Various Artists" in cand["reasons"]
 
 
+def test_suggest_title_match_ignores_edition_words(db: Database, tmp_path: Path):
+    _seed_album(
+        db,
+        tmp_path,
+        "alb-un",
+        "Life After Death (2014 Remastered Edition)",
+        [
+            {"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"},
+            {"num": 2, "title": "Jamming", "rec_id": "rec-jam"},
+        ],
+    )
+    db._conn.execute("UPDATE library_tracks SET duration_seconds = 200 WHERE album_id = ?", ("alb-un",))
+    db._conn.commit()
+    plain = _group("rg-life", "Life After Death", date="1997-03-25")
+    release_tracks = [_rt("Could I Be In Love", 1, "rec-bob", seconds=200), _rt("Jamming", 2, "rec-jam", seconds=200)]
+    enricher = _enricher({"rec-bob": [plain], "rec-jam": [plain]}, {"rg-life": release_tracks})
+
+    result = suggest_matches(db, enricher, "alb-un")
+
+    top = result["candidates"][0]
+    assert top["id"] == "rg-life"
+    assert top["confidence"] >= 90
+    assert "Album title matches" in top["reasons"]
+
+
+def test_suggest_own_release_beats_various_compilation(db: Database, tmp_path: Path):
+    _seed_album(
+        db,
+        tmp_path,
+        "alb-un",
+        "Pet Sounds (UDSACD)",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}],
+    )
+    va_comp = _group("rg-va", "Alle 40 goed: Evergreens", secondary=["Compilation"], date="1995-01-01", various=True)
+    own_album = _group("rg-own", "Pet Sounds", date="1999-01-01")
+    one_track = [_rt("Could I Be In Love", 1, "rec-bob")]
+    enricher = _enricher(
+        {"rec-bob": [va_comp, own_album]},
+        {"rg-va": one_track, "rg-own": one_track},
+    )
+
+    result = suggest_matches(db, enricher, "alb-un")
+
+    assert [c["id"] for c in result["candidates"]] == ["rg-own", "rg-va"]
+    va_cand = result["candidates"][1]
+    assert "Found only on a Various Artists compilation" in va_cand["reasons"]
+    # Own album also has +30 title match, VA loses both title match (30) and compilation penalty (20)
+    assert result["candidates"][0]["confidence"] - va_cand["confidence"] >= 20
+
+
+def test_suggest_tie_prefers_album_over_artist_compilation(db: Database, tmp_path: Path):
+    _seed_album(
+        db,
+        tmp_path,
+        "alb-un",
+        "Something Else",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}],
+    )
+    artist_comp = _group("rg-comp", "Greatest Hits", secondary=["Compilation"], date="1995-01-01", various=False)
+    plain_album = _group("rg-album", "Original LP", date="2005-01-01", various=False)
+    one_track = [_rt("Could I Be In Love", 1, "rec-bob")]
+    enricher = _enricher(
+        {"rec-bob": [artist_comp, plain_album]},
+        {"rg-comp": one_track, "rg-album": one_track},
+    )
+
+    result = suggest_matches(db, enricher, "alb-un")
+
+    assert [c["id"] for c in result["candidates"]] == ["rg-album", "rg-comp"]
+    assert result["candidates"][0]["confidence"] == result["candidates"][1]["confidence"]
+
+
 def test_suggest_maps_by_recording_then_title(db: Database, tmp_path: Path):
     _seed_album(
         db, tmp_path, "alb-un", "Hits",

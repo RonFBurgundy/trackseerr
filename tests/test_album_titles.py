@@ -8,6 +8,7 @@ from trackseerr.album_titles import (
     album_titles_match,
     clean_new_album_title,
     strip_album_junk,
+    strip_edition,
 )
 
 
@@ -45,6 +46,38 @@ from trackseerr.album_titles import (
 )
 def test_strip_album_junk(raw: str, expected: str) -> None:
     assert strip_album_junk(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("Life After Death (2014 Remastered Edition)", "Life After Death"),
+        ("ATLiens (25th Anniversary Deluxe Edition)", "ATLiens"),
+        ("Pet Sounds (UDSACD)", "Pet Sounds"),
+        ("Hotel California (Hi-Res Version)", "Hotel California"),
+        ("Who's Next (Deluxe Edition)", "Who's Next"),
+        ("Ramones - 40th Anniversary Deluxe Edition (Remastered)", "Ramones"),
+        ("Girls, Girls, Girls (40th Anniversary Remastered)", "Girls, Girls, Girls"),
+        ("Sign O' The Times (Super Deluxe)", "Sign O' The Times"),
+        ("Ready to Die (The Remaster; 2015 Remaster)", "Ready to Die"),
+        ("The Dock of the Bay (Mono)", "The Dock of the Bay"),
+        # Unchanged
+        ("Carry Me Home (Koven Remix)", "Carry Me Home (Koven Remix)"),
+        ("Throwing Copper (German)", "Throwing Copper (German)"),
+        (
+            "The Harder They Come (Original Motion Picture Soundtrack)",
+            "The Harder They Come (Original Motion Picture Soundtrack)",
+        ),
+        ("Deluxe", "Deluxe"),
+    ],
+)
+def test_strip_edition(raw: str, expected: str) -> None:
+    assert strip_edition(raw) == expected
+
+
+def test_album_titles_match_ignores_edition() -> None:
+    assert album_titles_match("Life After Death", "Life After Death (2014 Remastered Edition)")
+    assert not album_titles_match("Carry Me Home (Koven Remix)", "Carry Me Home (Kloset remix)")
 
 
 def test_album_titles_match() -> None:

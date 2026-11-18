@@ -135,6 +135,17 @@ def test_auto_counts_no_candidates_and_clears_stale(db: Database, tmp_path: Path
     assert db.get_match_suggestion("alb-1") is None
 
 
+def test_auto_match_drops_low_confidence_suggestion(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    _seed(db, tmp_path)
+    db.save_match_suggestion("alb-1", _cand("rg-old", 60, 1), 1, 2)
+    _Stub(monkeypatch, {"alb-1": [_cand("rg-junk", 10, 0)]})
+
+    counts = auto_match_unlinked(db, object())
+
+    assert counts["no_candidates"] == 1
+    assert db.get_match_suggestion("alb-1") is None
+
+
 def test_auto_stops_after_three_unavailable(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for n in range(5):
         _seed(db, tmp_path, f"alb-{n}")
