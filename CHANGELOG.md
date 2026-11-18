@@ -149,6 +149,11 @@ heading becomes the version and date.
 
 ### Fixed
 
+- MusicBrainz matching ignores edition words such as "Deluxe Edition", "25th Anniversary", "Remastered" or "Hi-Res Version", so a remastered album now matches the original release and links on its own.
+- Suggested matches prefer the artist's own album or single over a Various Artists compilation, and guesses with no matching tracks are no longer listed.
+- Duplicates no longer lists an album several times when singles or live albums share its title: the studio album is picked.
+- **Keep better quality** no longer throws away a file just because its sample rate or bitrate was never read. It compares only what both files report, then their size.
+- On phones, long names in the Suggested list and in Duplicates stay inside the screen. Duplicates shows its buttons first and folds the track list behind **Show tracks**.
 - Library Self-Heal no longer starts a second copy of itself when its schedule comes due while you are already running it by hand.
 - With rTorrent, a download of selected files now shows as complete when those files are done, instead of staying at a low percentage because the rest of the torrent was skipped.
 - Library Self-Heal folds an album that isn't linked to MusicBrainz into your same-titled album that is ("Hunky Dory  (2015 Remaster)" into "Hunky Dory", "Violator (2006 Remaster)" into "Violator"), whatever its size, as long as only one album matches and the songs don't already have files there.
