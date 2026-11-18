@@ -169,7 +169,8 @@ def test_sync_playlist_missing_tracks_csv(mock_server, tmp_path):
 
 
 @patch("trackseerr.clients.plex.PlexServer")
-def test_get_user_server_admin_vs_switch_user(mock_server):
+def test_get_user_server_admin_vs_switch_user(mock_server, monkeypatch):
+    monkeypatch.setenv("PLEX_TOKEN_CONFIRMED", "1")
     client = PlexClient("http://localhost:32400", "token")
     client.server.myPlexAccount.return_value.username = "Boss"
     assert client.is_admin_username("boss") is True

@@ -1,5 +1,6 @@
 import csv
 import logging
+import os
 import re
 import sqlite3
 import time
@@ -205,6 +206,15 @@ _SERVER_TOKEN_WARNING = (
     "PLEX_TOKEN is the Plex server's own token. "
     "Use a token from your own Plex sign-in instead; see docs/CONFIGURATION.md"
 )
+_UNCONFIRMED_TOKEN_WARNING = (
+    "TrackSeerr can't confirm PLEX_TOKEN is your own Plex sign-in token, so it won't contact plex.tv with it. "
+    "Home users come from your Plex server only. If it is your own sign-in token, set PLEX_TOKEN_CONFIRMED=1. "
+    "See docs/CONFIGURATION.md"
+)
+
+
+class PlexCloudCallsBlocked(PlexApiException):
+    """Raised when a plex.tv call is blocked because PLEX_TOKEN is not confirmed as an account token."""
 
 
 def _set_plexapi_identity() -> None:
@@ -239,6 +249,9 @@ class PlexClient:
         self._local_account_cache: Optional[tuple[float, dict[str, str]]] = None
         self._sections_cache: Optional[list[Any]] = None
         self._server_token_warned = False
+        self._token_confirmed: bool = (
+            os.environ.get("PLEX_TOKEN_CONFIRMED", "").strip().lower() in ("1", "true", "yes", "on")
+        )
 
         _set_plexapi_identity()
 
@@ -285,21 +298,41 @@ class PlexClient:
         return result
 
     @property
+    def token_kind(self) -> str:
+        """Classify PLEX_TOKEN as 'server', 'account', or 'unknown' (fail-closed)."""
+        auth_token = self._local_account().get("auth_token", "")
+        if auth_token:
+            if auth_token == self.token:
+                return "server"
+            return "account"
+        if self._token_confirmed:
+            return "account"
+        return "unknown"
+
+    @property
+    def cloud_calls_allowed(self) -> bool:
+        """True only when PLEX_TOKEN is known (or confirmed) not to be the server's own token."""
+        return self.token_kind == "account"
+
+    @property
     def uses_server_token(self) -> bool:
         """True when PLEX_TOKEN matches the Plex server's own PlexOnlineToken."""
-        auth_token = self._local_account().get("auth_token", "")
-        return bool(auth_token) and auth_token == self.token
+        return self.token_kind == "server"
 
     def token_warning(self) -> Optional[str]:
-        """Return a warning message if PLEX_TOKEN is the server's own token, else None."""
-        if self.uses_server_token:
+        """Return a warning message if PLEX_TOKEN is the server's own token or unconfirmed, else None."""
+        kind = self.token_kind
+        if kind == "server":
             return _SERVER_TOKEN_WARNING
+        if kind == "unknown":
+            return _UNCONFIRMED_TOKEN_WARNING
         return None
 
     def _get_home_users_local(self) -> List[dict]:
         """Build home users list from local PMS endpoints without contacting plex.tv."""
         if not self._server_token_warned:
-            logger.warning(_SERVER_TOKEN_WARNING)
+            warning = _SERVER_TOKEN_WARNING if self.token_kind == "server" else _UNCONFIRMED_TOKEN_WARNING
+            logger.warning(warning)
             self._server_token_warned = True
 
         local_username = self._local_account().get("username", "")
@@ -347,7 +380,7 @@ class PlexClient:
         Returns:
             List of dicts: [{'id': ..., 'username': ..., 'email': ..., 'thumb': ..., 'is_admin': ...}, ...]
         """
-        if self.uses_server_token:
+        if not self.cloud_calls_allowed:
             return self._get_home_users_local()
 
         home_users: List[dict] = []
@@ -987,7 +1020,7 @@ class PlexClient:
                         success=True,
                     )
                 )
-            except PlaylistProtectedError as e:
+            except (PlaylistProtectedError, PlexCloudCallsBlocked) as e:
                 logger.warning("Playlist '%s' not synced to '%s': %s", playlist.name, username, redact_text(str(e)))
                 results.append(
                     SyncResult(
@@ -1024,7 +1057,7 @@ class PlexClient:
         local_username = self._local_account().get("username", "")
         if local_username:
             return local_username
-        if self.uses_server_token:
+        if not self.cloud_calls_allowed:
             return ""
         try:
             account = self.server.myPlexAccount()
@@ -1049,6 +1082,12 @@ class PlexClient:
         """Resolve a Plex username to a server handle: admin -> self.server, else switchUser."""
         if self.is_admin_username(username, admin_username):
             return self.server
+        if not self.cloud_calls_allowed:
+            raise PlexCloudCallsBlocked(
+                f"Switching to Plex user '{username}' needs plex.tv. "
+                "TrackSeerr can't confirm PLEX_TOKEN is your own sign-in token, so it won't contact plex.tv with it. "
+                "See docs/CONFIGURATION.md."
+            )
         return self.server.switchUser(username)
 
     # -------------------------------------------------------------------------
@@ -1232,7 +1271,7 @@ class PlexClient:
         """List Plexamp mixes (read-only recommendation hubs) for a user. Returns [] on Plex failure."""
         try:
             srv = server if server is not None else self.get_user_server(username)
-        except PLEX_ERRORS as e:
+        except (*PLEX_ERRORS, PlexCloudCallsBlocked) as e:
             logger.warning("Could not resolve Plex server for '%s' while listing mixes: %s", username, safe_exc(e))
             return []
         mixes: List[dict] = []
@@ -1258,7 +1297,7 @@ class PlexClient:
         """Resolve a mix by key and return its track objects. Raises MixNotFoundError when unavailable."""
         try:
             srv = server if server is not None else self.get_user_server(username)
-        except PLEX_ERRORS as e:
+        except (*PLEX_ERRORS, PlexCloudCallsBlocked) as e:
             raise MixNotFoundError(f"Could not open Plex profile for '{username}': {safe_exc(e)}") from e
         for _hub, item in self._iter_mix_items(srv):
             if str(getattr(item, "key", "") or "") != mix_key:
@@ -1309,7 +1348,7 @@ class PlexClient:
                 logger.warning("Mix snapshot '%s' not refreshed: %s", snap["playlist_title"], redact_text(str(e)))
             except PlaylistProtectedError as e:
                 logger.warning("Mix snapshot '%s' not refreshed: %s", snap["playlist_title"], redact_text(str(e)))
-            except PLEX_ERRORS as e:
+            except (*PLEX_ERRORS, PlexCloudCallsBlocked) as e:
                 logger.warning("Mix snapshot '%s' refresh failed: %s", snap["playlist_title"], safe_exc(e))
         return refreshed
 

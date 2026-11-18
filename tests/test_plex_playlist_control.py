@@ -1,6 +1,7 @@
 """Tests for Plex Playlist Control: registry storage, overwrite protection, REST API, mixes and sync refresh."""
 
 import json
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -110,6 +111,8 @@ def make_client(admin_server, users=None, admin_name="admin"):
         return users[username]
 
     admin_server.switchUser = switch
+    if not hasattr(admin_server, "query"):
+        admin_server.query = lambda _path: ET.Element("MyPlex", {"authToken": "other-tok"})
     client.server = admin_server
     return client
 
@@ -356,6 +359,24 @@ def test_sync_switches_user_for_non_admin(db):
     client = make_client(FakeServer("admin"), users={"alice": alice_srv})
     results, _ = _sync(client, db, "Fresh", ["alice"])
     assert results[0].success is True and len(alice_srv.created) == 1
+
+
+def test_sync_multi_user_unknown_token_syncs_admin_and_fails_other_user(db):
+    admin_srv = FakeServer("admin")
+    admin_srv.query = lambda _path: ET.Element("MyPlex", {"username": "admin"})
+    alice_srv = FakeServer("alice")
+    client = make_client(admin_srv, users={"alice": alice_srv})
+    admin_srv.switchUser = MagicMock(side_effect=admin_srv.switchUser)
+
+    results, _ = _sync(client, db, "Fresh", ["admin", "alice"])
+
+    assert len(results) == 2
+    assert results[0].success is True
+    assert len(admin_srv.created) == 1
+    assert results[1].success is False
+    assert "PLEX_TOKEN" in results[1].error
+    admin_srv.switchUser.assert_not_called()
+    assert len(alice_srv.created) == 0
 
 
 def test_update_or_create_without_db_keeps_legacy_behaviour():
