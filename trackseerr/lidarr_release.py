@@ -29,6 +29,8 @@ _NOISE = re.compile(
     r"|(?:\d+\s+bit\s+)?(?:\d{4}\s+)?(?:digital\s+)?remaster(?:ed)?(?:\s+\d{4})?(?:\s+version)?"
     r"|hi\s+res(?:\s+(?:version|audio))?"
     r"|radio\s+edit"
+    r"|edit"
+    r"|original\s+mix"
     r"|single\s+version"
     r"|album\s+version"
     r"|(?:mono|stereo|explicit|clean|bonus\s+track)(?:\s+version)?"

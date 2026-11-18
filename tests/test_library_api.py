@@ -389,6 +389,95 @@ def test_library_monitored_toggle_endpoints(
     ).status_code == 404
 
 
+def test_monitor_track_monitors_album_and_artist_without_cascade(
+    app_and_client, test_db: Database, test_config: Config, seeded_users
+):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    test_db.upsert_library_artist({"id": "art-m1", "name": "Artist M1", "monitored": False})
+    test_db.upsert_library_album({
+        "id": "alb-m1", "artist_id": "art-m1", "title": "Album M1", "album_type": "album", "monitored": False
+    })
+    test_db.upsert_library_track({
+        "id": "trk-m1", "album_id": "alb-m1", "artist_id": "art-m1", "title": "Track M1", "monitored": False
+    })
+    test_db.upsert_library_track({
+        "id": "trk-m2", "album_id": "alb-m1", "artist_id": "art-m1", "title": "Track M2", "monitored": False
+    })
+
+    resp = client.put(
+        "/api/library/tracks/trk-m1/monitored",
+        json={"monitored": True},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["monitored"] is True
+    assert test_db.get_library_track("trk-m1")["monitored"] is True
+    assert test_db.get_library_album("alb-m1")["monitored"] is True
+    assert test_db.get_library_artist("art-m1")["monitored"] is True
+    assert test_db.get_library_track("trk-m2")["monitored"] is False
+
+
+def test_unmonitor_track_leaves_album(
+    app_and_client, test_db: Database, test_config: Config, seeded_users
+):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    test_db.upsert_library_artist({"id": "art-u1", "name": "Artist U1", "monitored": True})
+    test_db.upsert_library_album({
+        "id": "alb-u1", "artist_id": "art-u1", "title": "Album U1", "album_type": "album", "monitored": True
+    })
+    test_db.upsert_library_track({
+        "id": "trk-u1", "album_id": "alb-u1", "artist_id": "art-u1", "title": "Track U1", "monitored": True
+    })
+
+    resp = client.put(
+        "/api/library/tracks/trk-u1/monitored",
+        json={"monitored": False},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert test_db.get_library_track("trk-u1")["monitored"] is False
+    assert test_db.get_library_album("alb-u1")["monitored"] is True
+    assert test_db.get_library_artist("art-u1")["monitored"] is True
+
+
+def test_bulk_monitor_tracks_monitors_albums(
+    app_and_client, test_db: Database, test_config: Config, seeded_users
+):
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+
+    test_db.upsert_library_artist({"id": "art-b1", "name": "Artist B1", "monitored": False})
+    test_db.upsert_library_album({
+        "id": "alb-b1", "artist_id": "art-b1", "title": "Album B1", "album_type": "album", "monitored": False
+    })
+    test_db.upsert_library_track({
+        "id": "trk-b1", "album_id": "alb-b1", "artist_id": "art-b1", "title": "Track B1", "monitored": False
+    })
+    test_db.upsert_library_track({
+        "id": "trk-b2", "album_id": "alb-b1", "artist_id": "art-b1", "title": "Track B2", "monitored": False
+    })
+    test_db.upsert_library_track({
+        "id": "trk-b3", "album_id": "alb-b1", "artist_id": "art-b1", "title": "Track B3", "monitored": False
+    })
+
+    resp = client.post(
+        "/api/library/tracks/bulk-edit",
+        json={"track_ids": ["trk-b1", "trk-b2"], "monitored": True},
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tracks_updated"] == 2
+    assert test_db.get_library_track("trk-b1")["monitored"] is True
+    assert test_db.get_library_track("trk-b2")["monitored"] is True
+    assert test_db.get_library_album("alb-b1")["monitored"] is True
+    assert test_db.get_library_artist("art-b1")["monitored"] is True
+    assert test_db.get_library_track("trk-b3")["monitored"] is False
+
+
 # =========================================================================
 # 3. Delete Endpoints (Track, Album, Artist, File)
 # =========================================================================
