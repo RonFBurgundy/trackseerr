@@ -1073,12 +1073,26 @@ class LibraryCatalogStoreMixin:
 
     def record_merge_conflict(self, source_album_id: str, holder_album_id: str, kind: str) -> None:
         """Remembers an album merge that was blocked; a repeat refreshes kind and time and keeps ``dismissed``."""
+        src_id = str(source_album_id)
+        conflict_kind = str(kind)
         with self._lock:
+            if conflict_kind == "ambiguous":
+                has_dup = self.conn.execute(
+                    "SELECT 1 FROM library_merge_conflicts WHERE source_album_id = ? AND kind = 'duplicate_files' LIMIT 1",
+                    (src_id,),
+                ).fetchone()
+                if has_dup is not None:
+                    return
+            elif conflict_kind == "duplicate_files":
+                self.conn.execute(
+                    "DELETE FROM library_merge_conflicts WHERE source_album_id = ? AND kind = 'ambiguous'",
+                    (src_id,),
+                )
             self.conn.execute(
                 "INSERT INTO library_merge_conflicts (source_album_id, holder_album_id, kind) VALUES (?, ?, ?) "
                 "ON CONFLICT(source_album_id, holder_album_id) DO UPDATE SET kind = excluded.kind, "
                 "detected_at = CURRENT_TIMESTAMP",
-                (str(source_album_id), str(holder_album_id), str(kind)),
+                (src_id, str(holder_album_id), conflict_kind),
             )
             self.conn.commit()
 
@@ -1109,10 +1123,14 @@ class LibraryCatalogStoreMixin:
 
     def list_merge_conflicts(self, include_dismissed: bool = False) -> list[dict[str, Any]]:
         """Recorded blocked merges (both albums still present), newest first."""
-        sql = self._MERGE_CONFLICT_SELECT
+        conditions = [
+            "NOT (c.kind = 'ambiguous' AND EXISTS ("
+            "SELECT 1 FROM library_merge_conflicts d "
+            "WHERE d.source_album_id = c.source_album_id AND d.kind = 'duplicate_files'))"
+        ]
         if not include_dismissed:
-            sql += "WHERE c.dismissed = 0 "
-        sql += "ORDER BY c.detected_at DESC, c.id DESC"
+            conditions.append("c.dismissed = 0")
+        sql = self._MERGE_CONFLICT_SELECT + "WHERE " + " AND ".join(conditions) + " ORDER BY c.detected_at DESC, c.id DESC"
         with self.reader() as conn:
             return [self._map_merge_conflict(r) for r in conn.execute(sql).fetchall()]
 
@@ -1199,15 +1217,23 @@ class LibraryCatalogStoreMixin:
         return self._map_match_suggestion(row) if row is not None else None
 
     def list_artist_albums_with_release_group(self, artist_id: str) -> list[dict[str, Any]]:
-        """Albums of the artist that hold a release group, oldest first, as ``{id, title}`` dicts."""
+        """Albums of the artist that hold a release group, oldest first, as ``{id, title, album_type, secondary_types}`` dicts."""
         with self._lock:
             rows = self.conn.execute(
-                "SELECT id, title FROM library_albums WHERE artist_id = ? "
+                "SELECT id, title, album_type, secondary_types FROM library_albums WHERE artist_id = ? "
                 "AND mb_release_group_id IS NOT NULL AND mb_release_group_id != '' "
                 "ORDER BY created_at ASC, rowid ASC",
                 (str(artist_id),),
             ).fetchall()
-        return [{"id": str(r["id"]), "title": str(r["title"] or "")} for r in rows]
+        return [
+            {
+                "id": str(r["id"]),
+                "title": str(r["title"] or ""),
+                "album_type": str(r["album_type"] or ""),
+                "secondary_types": list(json.loads(r["secondary_types"])) if r["secondary_types"] else [],
+            }
+            for r in rows
+        ]
 
     def list_albums_without_mb_release(
         self, *, page: int, page_size: int, kind: str | None = None

@@ -463,6 +463,14 @@ def _fold_title_duplicate(db: Any, album: dict[str, Any], counts: dict[str, int]
     if not holders:
         return
     if len(holders) > 1:
+        studio_holders = [
+            h
+            for h in holders
+            if h.get("album_type") == "album" and not h.get("secondary_types")
+        ]
+        if len(studio_holders) == 1:
+            _merge_into_holder(db, album["id"], studio_holders[0]["id"], counts)
+            return
         counts["ambiguous"] += 1
         for holder in holders:
             db.record_merge_conflict(album["id"], holder["id"], "ambiguous")
