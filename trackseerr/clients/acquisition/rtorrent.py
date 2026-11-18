@@ -56,6 +56,7 @@ _LIST_FIELDS = (
     "d.state=",
     "d.complete=",
     "d.is_partially_done=",
+    "d.custom=tsr_done",
 )
 
 
@@ -91,9 +92,10 @@ def _failed_status(message: str) -> dict[str, Any]:
     return out
 
 
-def _seeding_seconds(finished: int, complete: bool) -> int:
-    if complete and finished > 0:
-        return max(0, int(time.time()) - finished)
+def _seeding_seconds(finished: int, complete: bool, marked: int = 0) -> int:
+    stamp = finished if finished > 0 else marked
+    if complete and stamp > 0:
+        return max(0, int(time.time()) - stamp)
     return 0
 
 
@@ -393,18 +395,26 @@ class RtorrentDriver(AcquisitionDriver):
         thash = download_id.upper()
         try:
             with httpx.Client(timeout=self.timeout, auth=self._auth) as client:
-                values = self._multicall(client, [(m, [thash]) for m in _STATUS_FIELDS])
+                calls = [(m, [thash]) for m in _STATUS_FIELDS] + [("d.custom", [thash, "tsr_done"])]
+                values = self._multicall(client, calls)
+                fields = dict(zip(_STATUS_FIELDS, values))
+                if fields.get("d.name") is None:
+                    return _queued_status()
+                complete = _int(fields.get("d.complete")) == 1 or _int(fields.get("d.is_partially_done")) == 1
+                marked = _int(values[-1])
+                if complete and _int(fields.get("d.timestamp.finished")) == 0 and marked == 0:
+                    try:
+                        self._call(client, "d.custom.set", thash, "tsr_done", str(int(time.time())))
+                    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+                        logger.debug("Failed to set tsr_done for %s: %s", download_id, exc)
         except (httpx.HTTPError, PermissionError, RuntimeError, ValueError) as e:
             logger.warning("Error fetching rTorrent status for %s: %s", download_id, e)
             return _failed_status(str(e))
 
-        fields = dict(zip(_STATUS_FIELDS, values))
-        if fields.get("d.name") is None:
-            return _queued_status()
-        return self._build_status(fields)
+        return self._build_status(fields, marked=marked)
 
     @staticmethod
-    def _build_status(f: dict[str, Any]) -> dict[str, Any]:
+    def _build_status(f: dict[str, Any], marked: int = 0) -> dict[str, Any]:
         size = _int(f.get("d.size_bytes"))
         completed = _int(f.get("d.completed_bytes"))
         rate = _int(f.get("d.down.rate"))
@@ -432,7 +442,7 @@ class RtorrentDriver(AcquisitionDriver):
             "content_path": content_path,
             "save_path": save_path,
             "ratio": _int(f.get("d.ratio")) / 1000.0,
-            "seeding_time_seconds": _seeding_seconds(_int(f.get("d.timestamp.finished")), complete),
+            "seeding_time_seconds": _seeding_seconds(_int(f.get("d.timestamp.finished")), complete, marked),
             "error_message": error_message,
         }
 
@@ -532,7 +542,7 @@ class RtorrentDriver(AcquisitionDriver):
             "name": str(f["d.name="] or ""),
             "size": _int(f["d.size_bytes="]),
             "ratio": _int(f["d.ratio="]) / 1000.0,
-            "seeding_time": _seeding_seconds(_int(f["d.timestamp.finished="]), complete),
+            "seeding_time": _seeding_seconds(_int(f["d.timestamp.finished="]), complete, _int(f.get("d.custom=tsr_done"))),
             "content_path": str(f["d.base_path="] or f["d.directory="] or ""),
             "state": state,
         }

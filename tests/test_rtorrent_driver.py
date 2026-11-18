@@ -1,5 +1,6 @@
 """Tests for the rTorrent (XML-RPC) acquisition driver."""
 
+import time
 import xmlrpc.client
 from pathlib import Path
 from typing import Any
@@ -67,10 +68,36 @@ def _status_reply(**overrides: Any) -> MagicMock:
         "d.timestamp.finished": 0,
         "d.is_partially_done": 0,
         "d.left_bytes": 750,
+        "d.custom": "",
     }
     base.update(overrides)
     order = list(base)
     return _ok([[base[k]] for k in order])
+
+
+def _fake_multicall_post(values: dict[str, Any], calls_seen: list[tuple[str, Any]] | None = None):
+    """Simulate rTorrent XML-RPC: faults on '=' in system.multicall methodName, answers d.custom."""
+    import xmlrpc.client
+
+    def _post(_self: Any, _url: str, *, content: str = "", **_kwargs: Any) -> MagicMock:
+        params, method = xmlrpc.client.loads(content)
+        if calls_seen is not None:
+            calls_seen.append((method, params))
+        if method == "system.multicall":
+            results: list[Any] = []
+            for call in params[0]:
+                mname = call["methodName"]
+                mparams = call["params"]
+                if "=" in mname:
+                    results.append({"faultCode": -506, "faultString": f"Method '{mname}' not defined"})
+                elif mname == "d.custom" and len(mparams) == 2 and mparams[1] == "tsr_done":
+                    results.append([values.get("d.custom", "")])
+                else:
+                    results.append([values.get(mname, 0)])
+            return _ok(results)
+        return _ok([0])
+
+    return _post
 
 
 def _body(mock_post: MagicMock, index: int = -1) -> str:
@@ -333,6 +360,96 @@ def test_rtorrent_status_partial_done_is_completed():
     assert res["progress"] == 100.0
 
 
+def test_rtorrent_partial_done_marks_done_time():
+    driver = RtorrentDriver(HOST)
+    calls_seen: list[tuple[str, Any]] = []
+    values = {
+        "d.name": "Album",
+        "d.size_bytes": 1000,
+        "d.completed_bytes": 30,
+        "d.down.rate": 0,
+        "d.complete": 0,
+        "d.state": 1,
+        "d.is_active": 1,
+        "d.hashing": 0,
+        "d.message": "",
+        "d.base_path": "/dl/Album",
+        "d.directory": "/dl",
+        "d.is_multi_file": 1,
+        "d.ratio": 1500,
+        "d.timestamp.finished": 0,
+        "d.is_partially_done": 1,
+        "d.left_bytes": 0,
+        "d.custom": "",
+    }
+    with patch("httpx.Client.post", new=_fake_multicall_post(values, calls_seen)):
+        res = driver.get_status(HASH)
+    assert res["seeding_time_seconds"] == 0
+    assert len(calls_seen) == 2
+    assert calls_seen[0][0] == "system.multicall"
+    assert {"methodName": "d.custom", "params": [HASH.upper(), "tsr_done"]} in calls_seen[0][1][0]
+    assert calls_seen[1][0] == "d.custom.set"
+    assert calls_seen[1][1][1] == "tsr_done"
+
+
+def test_rtorrent_partial_done_seeding_time_from_mark():
+    driver = RtorrentDriver(HOST)
+    stamp = int(time.time()) - 3600
+    calls_seen: list[tuple[str, Any]] = []
+    values = {
+        "d.name": "Album",
+        "d.size_bytes": 1000,
+        "d.completed_bytes": 30,
+        "d.down.rate": 0,
+        "d.complete": 0,
+        "d.state": 1,
+        "d.is_active": 1,
+        "d.hashing": 0,
+        "d.message": "",
+        "d.base_path": "/dl/Album",
+        "d.directory": "/dl",
+        "d.is_multi_file": 1,
+        "d.ratio": 1500,
+        "d.timestamp.finished": 0,
+        "d.is_partially_done": 1,
+        "d.left_bytes": 0,
+        "d.custom": str(stamp),
+    }
+    with patch("httpx.Client.post", new=_fake_multicall_post(values, calls_seen)):
+        res = driver.get_status(HASH)
+    assert 3590 <= res["seeding_time_seconds"] <= 3610
+    assert len(calls_seen) == 1
+
+
+def test_rtorrent_mark_not_rewritten_when_present():
+    driver = RtorrentDriver(HOST)
+    stamp = int(time.time()) - 120
+    calls_seen: list[tuple[str, Any]] = []
+    values = {
+        "d.name": "Album",
+        "d.size_bytes": 1000,
+        "d.completed_bytes": 30,
+        "d.down.rate": 0,
+        "d.complete": 0,
+        "d.state": 1,
+        "d.is_active": 1,
+        "d.hashing": 0,
+        "d.message": "",
+        "d.base_path": "/dl/Album",
+        "d.directory": "/dl",
+        "d.is_multi_file": 1,
+        "d.ratio": 1500,
+        "d.timestamp.finished": 0,
+        "d.is_partially_done": 1,
+        "d.left_bytes": 0,
+        "d.custom": str(stamp),
+    }
+    with patch("httpx.Client.post", new=_fake_multicall_post(values, calls_seen)):
+        driver.get_status(HASH)
+        driver.get_status(HASH)
+    assert [m for m, _ in calls_seen] == ["system.multicall", "system.multicall"]
+
+
 def test_rtorrent_status_partial_progress_counts_wanted_only():
     driver = RtorrentDriver(HOST)
     reply = _status_reply(
@@ -449,9 +566,9 @@ def test_rtorrent_invalid_reply_is_runtime_error():
 def test_rtorrent_list_category():
     driver = RtorrentDriver(HOST, category="trackseerr")
     rows = [
-        [HASH.upper(), "TrackSeerr Album", 1000, 1500, 0, "/dl/TrackSeerr Album", "/dl", "trackseerr", 1, 1, 0],
-        ["CD" * 20, "Other", 5, 0, 0, "/dl/Other", "/dl", "other", 1, 0, 0],
-        ["EF" * 20, "Partial", 600, 0, 0, "/dl/Partial", "/dl", "trackseerr", 1, 0, 1],
+        [HASH.upper(), "TrackSeerr Album", 1000, 1500, 0, "/dl/TrackSeerr Album", "/dl", "trackseerr", 1, 1, 0, ""],
+        ["CD" * 20, "Other", 5, 0, 0, "/dl/Other", "/dl", "other", 1, 0, 0, ""],
+        ["EF" * 20, "Partial", 600, 0, 0, "/dl/Partial", "/dl", "trackseerr", 1, 0, 1, ""],
     ]
     with patch("httpx.Client.post", return_value=_ok(rows)):
         items = driver.list_category()
@@ -464,6 +581,19 @@ def test_rtorrent_list_category():
     assert items[0]["content_path"] == "/dl/TrackSeerr Album"
 
     assert RtorrentDriver(HOST, category="").list_category() is None
+
+
+def test_rtorrent_list_category_uses_mark():
+    driver = RtorrentDriver(HOST, category="trackseerr")
+    stamp = int(time.time()) - 3600
+    rows = [
+        ["EF" * 20, "Partial", 600, 0, 0, "/dl/Partial", "/dl", "trackseerr", 1, 0, 1, str(stamp)],
+    ]
+    with patch("httpx.Client.post", return_value=_ok(rows)):
+        items = driver.list_category()
+    assert items is not None
+    assert len(items) == 1
+    assert 3590 <= items[0]["seeding_time"] <= 3610
 
 
 def test_rtorrent_factory_and_classification():
