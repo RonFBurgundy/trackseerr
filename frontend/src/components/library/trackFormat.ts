@@ -33,7 +33,7 @@ const UNMONITORED = 'bg-transparent text-neutral-500 border border-neutral-800';
  */
 export function getQualityBadge(track: TrackItem, albumMonitored?: boolean): QualityBadge {
   const file = track.file;
-  const wanted = track.monitored !== false && albumMonitored !== false;
+  const wanted = track.monitored === true || (track.monitored == null && albumMonitored !== false);
   if (!file && !track.has_file) {
     if (track.owned_elsewhere) {
       return { label: `On ${track.owned_elsewhere.album_title ?? 'another release'}`, className: NEUTRAL };

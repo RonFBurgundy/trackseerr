@@ -77,9 +77,11 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
     >
       {tracks.map((t) => {
         const badge = getQualityBadge(t, albumMonitored);
+        const isExcluded = t.excluded === true;
+        const isMonitored = !isExcluded && t.monitored === true;
         return (
-          <div key={t.id} className="p-2.5 flex items-center justify-between gap-3 hover:bg-[#141414] transition-colors">
-            <div className="flex items-center gap-3 min-w-0 flex-1">
+          <div key={t.id} className="p-2.5 flex items-center justify-between gap-2 sm:gap-3 hover:bg-[#141414] transition-colors">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-[7rem] flex-1">
               <span className="font-mono text-xs text-neutral-500 w-6 text-right flex-shrink-0">
                 {t.track_number || 1}
               </span>
@@ -98,7 +100,7 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-3 flex-shrink-0 font-mono text-xs">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0 font-mono text-xs">
               <span className="text-neutral-500 hidden sm:inline">{formatTrackDuration(trackSeconds(t))}</span>
               {t.owned_elsewhere?.album_id && onOpenAlbum ? (
                 <button
@@ -106,14 +108,14 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                   onClick={() => onOpenAlbum(t.owned_elsewhere!.album_id!)}
                   title={`Open ${t.owned_elsewhere.album_title ?? 'another release'}`}
                   aria-label={`Open ${t.owned_elsewhere.album_title ?? 'another release'}`}
-                  className={`px-2 py-0.5 rounded-[2px] text-[10px] font-bold truncate max-w-[10rem] ${badge.className}`}
+                  className={`px-2 py-0.5 rounded-[2px] text-[10px] font-bold truncate max-w-[5.5rem] sm:max-w-[10rem] ${badge.className}`}
                 >
                   {badge.label}
                 </button>
               ) : (
                 <span
                   title={t.owned_elsewhere ? `Owned on ${t.owned_elsewhere.album_title ?? 'another release'}` : undefined}
-                  className={`px-2 py-0.5 rounded-[2px] text-[10px] font-bold ${badge.className}`}
+                  className={`px-2 py-0.5 rounded-[2px] text-[10px] font-bold truncate max-w-[5.5rem] sm:max-w-[10rem] ${badge.className}`}
                 >
                   {badge.label}
                 </span>
@@ -124,37 +126,37 @@ export const AlbumTrackList: React.FC<AlbumTrackListProps> = ({
                   href={`https://musicbrainz.org/recording/${t.mb_recording_id}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="relative inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] bg-[#ba478f]/20 text-[#e599cf] border border-[#ba478f]/40 hover:bg-[#ba478f]/30 transition-colors after:absolute after:-inset-1 after:content-['']"
+                  className="relative hidden sm:inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] bg-[#ba478f]/20 text-[#e599cf] border border-[#ba478f]/40 hover:bg-[#ba478f]/30 transition-colors after:absolute after:-inset-1 after:content-['']"
                   title="Open recording on MusicBrainz"
                   aria-label="Open recording on MusicBrainz"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </a>
               )}
-              {isAdmin && canMonitorTracks && (t.monitored !== null || t.excluded === true) && (
+              {isAdmin && canMonitorTracks && (t.monitored !== null || isExcluded) && (
                 <div className="flex items-center gap-1.5 pl-1">
                   <span
                     className={`text-[9px] uppercase tracking-wider hidden sm:inline ${
-                      t.excluded
+                      isExcluded
                         ? 'text-red-400'
-                        : t.monitored
+                        : isMonitored
                         ? 'text-[#e5a00d]'
                         : 'text-neutral-500'
                     }`}
                   >
-                    {t.excluded ? 'Excluded' : t.monitored ? 'Monitored' : 'Unmonitored'}
+                    {isExcluded ? 'Excluded' : isMonitored ? 'Monitored' : 'Unmonitored'}
                   </span>
                   <TactileSwitch
-                    checked={!t.excluded && t.monitored === true}
-                    disabled={t.excluded === true}
-                    variant={t.excluded ? 'danger' : 'default'}
+                    checked={isMonitored}
+                    disabled={isExcluded}
+                    variant={isExcluded ? 'danger' : 'default'}
                     title={
-                      t.excluded
+                      isExcluded
                         ? `${t.exclusion_reason || 'Excluded'}. Remove the exclusion to monitor it.`
                         : undefined
                     }
-                    onChange={() => onToggleMonitored(t.id, t.monitored === true)}
-                    ariaLabel={t.excluded ? `Excluded: ${t.title}` : `Monitor ${t.title}`}
+                    onChange={() => onToggleMonitored(t.id, isMonitored)}
+                    ariaLabel={isExcluded ? `Excluded: ${t.title}` : `Monitor ${t.title}`}
                   />
                 </div>
               )}
