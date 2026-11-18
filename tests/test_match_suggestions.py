@@ -49,13 +49,17 @@ def _enricher(
     rg_tracks: dict[str, list[dict[str, Any]]] | None = None,
     rg_search: dict[str, list[dict[str, Any]] | None] | None = None,
     rec_search: list[dict[str, Any]] | None = None,
+    releases_by_rg: dict[str, list[dict[str, Any]]] | None = None,
 ) -> MagicMock:
     enricher = MagicMock(spec=MbidEnricherClient)
     enricher.get_recording_release_groups.side_effect = lambda rec: (groups_by_rec or {}).get(rec, [])
     enricher.get_release_group_tracks.side_effect = lambda rg, force=False: (rg_tracks or {}).get(rg, [])
     enricher.search_release_groups.side_effect = lambda artist, title, limit=10: (rg_search or {}).get(artist, [])
     enricher.search_recordings.side_effect = lambda artist, title, limit=10: rec_search if rec_search is not None else []
-    enricher.get_release_group_releases.return_value = []
+    if releases_by_rg is not None:
+        enricher.get_release_group_releases.side_effect = lambda rg, force=False: releases_by_rg.get(rg, [])
+    else:
+        enricher.get_release_group_releases.return_value = []
     return enricher
 
 
@@ -132,6 +136,78 @@ def test_suggest_title_match_ignores_edition_words(db: Database, tmp_path: Path)
     assert top["id"] == "rg-life"
     assert top["confidence"] >= 90
     assert "Album title matches" in top["reasons"]
+
+
+def test_suggest_maps_bonus_tracks_from_other_release(db: Database, tmp_path: Path):
+    _seed_album(
+        db,
+        tmp_path,
+        "alb-un",
+        "Hits (Deluxe)",
+        [
+            {"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"},
+            {"num": 2, "title": "Jamming", "rec_id": "rec-jam"},
+            {"num": 3, "title": "Bonus Song", "rec_id": "rec-bonus"},
+        ],
+    )
+    db._conn.execute("UPDATE library_tracks SET duration_seconds = 200 WHERE album_id = ?", ("alb-un",))
+    db._conn.commit()
+    releases = [
+        {
+            "id": "rel-std",
+            "title": "Hits",
+            "track_count": 2,
+            "media": [
+                {
+                    "position": 1,
+                    "tracks": [
+                        {"position": 1, "number": "1", "title": "Could I Be In Love", "recording_id": "rec-bob", "length": 200_000},
+                        {"position": 2, "number": "2", "title": "Jamming", "recording_id": "rec-jam", "length": 200_000},
+                    ],
+                }
+            ],
+        },
+        {
+            "id": "rel-deluxe",
+            "title": "Hits (Deluxe)",
+            "track_count": 3,
+            "media": [
+                {
+                    "position": 1,
+                    "tracks": [
+                        {"position": 1, "number": "1", "title": "Could I Be In Love", "recording_id": "rec-bob", "length": 200_000},
+                        {"position": 2, "number": "2", "title": "Jamming", "recording_id": "rec-jam", "length": 200_000},
+                        {"position": 3, "number": "3", "title": "Bonus Song", "recording_id": "rec-bonus", "length": 200_000},
+                    ],
+                }
+            ],
+        },
+    ]
+    enricher = _enricher(
+        {"rec-bob": [HITS], "rec-jam": [HITS]},
+        {"rg-hits": HITS_TRACKS},
+        releases_by_rg={"rg-hits": releases},
+    )
+
+    result = suggest_matches(db, enricher, "alb-un")
+
+    top = result["candidates"][0]
+    assert top["id"] == "rg-hits"
+    assert top["mapped"] == 3
+    assert top["track_count"] == 3
+    assert top["release_id"] == "rel-deluxe"
+    assert top["confidence"] >= 90
+
+
+def test_suggest_skips_release_lookup_when_all_mapped(db: Database, tmp_path: Path):
+    _two_track_album(db, tmp_path)
+    enricher = _enricher({"rec-bob": [HITS], "rec-jam": [HITS]}, {"rg-hits": HITS_TRACKS})
+
+    result = suggest_matches(db, enricher, "alb-un")
+
+    assert result["candidates"][0]["mapped"] == 2
+    assert result["candidates"][0].get("release_id") is None
+    enricher.get_release_group_releases.assert_not_called()
 
 
 def test_suggest_own_release_beats_various_compilation(db: Database, tmp_path: Path):
@@ -284,6 +360,20 @@ def test_apply_links_in_place_and_matches_release(db: Database, tmp_path: Path):
     assert db.get_library_track("alb-un-1")["mb_recording_id"] == "rec-bob"
     assert db.get_library_track("alb-un-2")["mb_recording_id"] == "rec-jam"
     enricher.get_release_group_releases.assert_called_with("rg-hits")
+
+
+def test_apply_sets_release_id_from_candidate(db: Database, tmp_path: Path):
+    _two_track_album(db, tmp_path, rec_ids=False)
+    enricher = _enricher(rg_tracks={"rg-hits": HITS_TRACKS})
+    candidate = {**HITS, "release_id": "rel-deluxe"}
+
+    result = apply_match(db, enricher, "alb-un", candidate, {"alb-un-1": "rec-bob", "alb-un-2": "rec-jam"})
+
+    assert result == {"album_id": "alb-un", "merged": False, "conflict": False}
+    album = db.get_library_album("alb-un")
+    assert album is not None
+    assert album["mb_release_group_id"] == "rg-hits"
+    assert album["mb_release_id"] == "rel-deluxe"
 
 
 def test_apply_compilation_moves_to_various_artists(db: Database, tmp_path: Path):

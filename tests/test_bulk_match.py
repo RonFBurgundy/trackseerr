@@ -10,6 +10,7 @@ import pytest
 
 from tests.test_compilation_filing import _seed_album
 from tests.test_library_api import _auth_headers, app_and_client, seeded_users, test_config, test_db  # noqa: F401
+from tests.test_match_suggestions import HITS, HITS_TRACKS, _enricher
 from trackseerr import match_suggestions
 from trackseerr.album_track_hydration import clear_negative_cache
 from trackseerr.api.dependencies import get_mbid_enricher
@@ -225,3 +226,64 @@ def test_migration_v100_creates_table(db: Database):
     cols = {r[1] for r in db.conn.execute("PRAGMA table_info(library_match_suggestions)").fetchall()}
     assert cols == {"album_id", "candidate_json", "confidence", "files_found", "file_count", "computed_at"}
     assert db.conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == SCHEMA_VERSION
+
+
+def test_auto_match_links_deluxe_with_bonus_tracks(db: Database, tmp_path: Path):
+    _seed_album(
+        db,
+        tmp_path,
+        "alb-1",
+        "Hits (Deluxe)",
+        [
+            {"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"},
+            {"num": 2, "title": "Jamming", "rec_id": "rec-jam"},
+            {"num": 3, "title": "Bonus Song", "rec_id": "rec-bonus"},
+        ],
+    )
+    db._conn.execute("UPDATE library_tracks SET duration_seconds = 200 WHERE album_id = ?", ("alb-1",))
+    db._conn.commit()
+    releases = [
+        {
+            "id": "rel-std",
+            "title": "Hits",
+            "track_count": 2,
+            "media": [
+                {
+                    "position": 1,
+                    "tracks": [
+                        {"position": 1, "number": "1", "title": "Could I Be In Love", "recording_id": "rec-bob", "length": 200_000},
+                        {"position": 2, "number": "2", "title": "Jamming", "recording_id": "rec-jam", "length": 200_000},
+                    ],
+                }
+            ],
+        },
+        {
+            "id": "rel-deluxe",
+            "title": "Hits (Deluxe)",
+            "track_count": 3,
+            "media": [
+                {
+                    "position": 1,
+                    "tracks": [
+                        {"position": 1, "number": "1", "title": "Could I Be In Love", "recording_id": "rec-bob", "length": 200_000},
+                        {"position": 2, "number": "2", "title": "Jamming", "recording_id": "rec-jam", "length": 200_000},
+                        {"position": 3, "number": "3", "title": "Bonus Song", "recording_id": "rec-bonus", "length": 200_000},
+                    ],
+                }
+            ],
+        },
+    ]
+    enricher = _enricher(
+        {"rec-bob": [HITS], "rec-jam": [HITS]},
+        {"rg-hits": HITS_TRACKS},
+        releases_by_rg={"rg-hits": releases},
+    )
+
+    counts = auto_match_unlinked(db, enricher)
+
+    assert counts["applied"] == 1
+    assert counts["suggested"] == 0
+    album = db.get_library_album("alb-1")
+    assert album is not None
+    assert album["mb_release_group_id"] == "rg-hits"
+    assert album["mb_release_id"] == "rel-deluxe"
