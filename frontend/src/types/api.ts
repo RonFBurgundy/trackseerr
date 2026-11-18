@@ -5447,6 +5447,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/media-server/plex-account": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Disconnect the stored Plex owner account token (Admin Only) */
+        delete: operations["disconnect_plex_account_api_settings_media_server_plex_account_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-server/plex-account/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check a Plex OAuth PIN and store the server owner's account token (Admin Only) */
+        post: operations["check_plex_account_pin_api_settings_media_server_plex_account_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-server/plex-account/pin": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a Plex OAuth PIN for linking the server owner's Plex account (Admin Only) */
+        post: operations["create_plex_account_pin_api_settings_media_server_plex_account_pin_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/media-server/test": {
         parameters: {
             query?: never;
@@ -11604,6 +11655,10 @@ export interface components {
             locked_by_env: boolean;
             /** Password */
             password: string;
+            /** Plex Account Connected */
+            plex_account_connected: boolean;
+            /** Plex Account Username */
+            plex_account_username: string;
             /** Type */
             type: string;
             /** Url */
@@ -12500,6 +12555,28 @@ export interface components {
             total: number;
             /** Tracks */
             tracks: components["schemas"]["PlaylistTrackItem"][];
+        };
+        /** PlexAccountCheckRequest */
+        PlexAccountCheckRequest: {
+            /**
+             * Pin Id
+             * @description Plex PIN ID returned by POST /media-server/plex-account/pin
+             */
+            pin_id: number;
+        };
+        /** PlexAccountCheckResponse */
+        PlexAccountCheckResponse: {
+            /** Connected */
+            connected: boolean;
+            /** Pending */
+            pending: boolean;
+            /** Username */
+            username?: string | null;
+        };
+        /** PlexAccountDisconnectResponse */
+        PlexAccountDisconnectResponse: {
+            /** Connected */
+            connected: boolean;
         };
         /** PlexIdentityResponse */
         PlexIdentityResponse: {
@@ -25268,6 +25345,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disconnect_plex_account_api_settings_media_server_plex_account_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlexAccountDisconnectResponse"];
+                };
+            };
+        };
+    };
+    check_plex_account_pin_api_settings_media_server_plex_account_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlexAccountCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlexAccountCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_plex_account_pin_api_settings_media_server_plex_account_pin_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlexPinResponse"];
                 };
             };
         };
