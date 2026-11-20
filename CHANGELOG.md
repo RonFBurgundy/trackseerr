@@ -153,6 +153,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Opening an album in the Library loads its track list even when the album isn't monitored and only Deezer knows it, so you can use Manual search on one song without monitoring anything.
+- TrackSeerr now shows up in your Plex devices as "TrackSeerr" for every request, not just for Sign in with Plex.
+- The System Status page shows the Plex token warning and what to do about it, instead of a plain green "Connected".
 - Playlist sync pushes your playlists to your own Plex account again. Since this morning's update it could fail with "Unable to find user" when your Plex server reported your account under a different name than plex.tv.
 - Requested songs whose title differs slightly from the album's track list, such as "(feat. …)" versus "(ft. …)" or an added "Edit" or "Original Mix", now link to that song. They are monitored and show on Wanted → Missing. Requests that couldn't be linked are tried again every day.
 - In an artist's album list, a song's status badge and its Monitored label now change as soon as you flip its switch. On phones the song rows fit the screen and the title stays readable.
