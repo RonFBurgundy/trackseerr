@@ -162,6 +162,7 @@ def set_album_monitored(
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    discovery: DiscoveryClient = Depends(get_discovery_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Updates monitoring status for an album and optionally cascades to child tracks."""
@@ -200,7 +201,9 @@ def set_album_monitored(
             )
 
     if body.monitored and body.cascade_tracks:
-        hydrate_album_tracks(db, enricher, album_id)  # no tracks yet: fetch them so the cascade has rows to monitor
+        hydrate_album_tracks(
+            db, enricher, album_id, discovery=discovery
+        )  # no tracks yet: fetch them so the cascade has rows to monitor
     db.set_album_monitored(
         album_id=album_id,
         monitored=body.monitored,
@@ -275,6 +278,7 @@ def bulk_edit_albums(
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    discovery: DiscoveryClient = Depends(get_discovery_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Monitors or unmonitors many albums at once (native: albums and their tracks; Lidarr: one album/monitor call)."""

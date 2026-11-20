@@ -98,12 +98,21 @@ def test_home_users_with_own_token_uses_account():
     assert [u["username"] for u in users] == ["admin_user", "alice"]
 
 
-def test_plexapi_identity_set():
+def test_plexapi_identity_set(monkeypatch):
+    import plexapi.myplex
+    import plexapi.server
+
+    monkeypatch.setattr("trackseerr.clients.plex._PLEXAPI_IDENTITY_SET", False)
     el = ET.Element("MyPlex", {"username": "admin"})
     _make_client(token="tok", query_el=el)
 
     assert plexapi.BASE_HEADERS["X-Plex-Product"] == "TrackSeerr"
     assert plexapi.BASE_HEADERS["X-Plex-Device-Name"] == "TrackSeerr"
+    assert plexapi.server.BASE_HEADERS is plexapi.BASE_HEADERS
+    assert plexapi.server.BASE_HEADERS["X-Plex-Product"] == "TrackSeerr"
+    assert plexapi.server.BASE_HEADERS["X-Plex-Device-Name"] == "TrackSeerr"
+    assert plexapi.myplex.BASE_HEADERS["X-Plex-Product"] == "TrackSeerr"
+    assert plexapi.myplex.BASE_HEADERS["X-Plex-Device-Name"] == "TrackSeerr"
 
 
 def test_test_connection_reports_server_token_warning():

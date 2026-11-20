@@ -200,6 +200,145 @@ def test_hydration_sets_total_tracks_and_detail_falls_back_to_rows(db: Database)
     assert get_artist("ar", db=db, client=None, _admin={})["albums"][0]["track_count"] == 5
 
 
+def test_hydration_falls_back_to_deezer_when_no_release_group(db: Database):
+    db.upsert_library_artist(LibraryArtist(id="ar", name="H", monitored=True, monitor_option="none"))
+    db.upsert_library_album(
+        LibraryAlbum(
+            id="al",
+            artist_id="ar",
+            title="Deezer Album",
+            clean_title="deezer album",
+            foreign_album_id="12919924",
+            monitored=False,
+        )
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    discovery = MagicMock(spec=DiscoveryClient)
+    discovery.get_album_details.return_value = {
+        "tracks": [
+            {"id": "d1", "title": "Green", "track_number": 1, "disc_number": 1, "duration_seconds": 200},
+            {"id": "d2", "title": "Blue", "track_number": 2, "disc_number": 1, "duration_seconds": 210},
+            {"id": "d3", "title": "Red", "track_number": 3, "disc_number": 1, "duration_seconds": 220},
+        ]
+    }
+
+    assert hydrate_album_tracks(db, enricher, "al", discovery=discovery) == 3
+    enricher.get_release_group_tracks.assert_not_called()
+    discovery.get_album_details.assert_called_once_with("12919924")
+    tracks = db.list_library_tracks(album_id="al")
+    assert len(tracks) == 3
+    assert all(not t["monitored"] for t in tracks)
+    assert {t["foreign_track_id"] for t in tracks} == {"d1", "d2", "d3"}
+    assert db.get_library_album("al")["total_tracks"] == 3
+
+
+def test_hydration_without_discovery_and_no_release_group_is_noop(db: Database):
+    db.upsert_library_artist(LibraryArtist(id="ar", name="H", monitored=True, monitor_option="none"))
+    db.upsert_library_album(
+        LibraryAlbum(
+            id="al",
+            artist_id="ar",
+            title="Deezer Album",
+            clean_title="deezer album",
+            foreign_album_id="12919924",
+            monitored=False,
+        )
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    assert hydrate_album_tracks(db, enricher, "al") == 0
+    assert db.list_library_tracks(album_id="al") == []
+
+
+def test_hydration_skips_deezer_for_mbid_foreign_id(db: Database):
+    db.upsert_library_artist(LibraryArtist(id="ar", name="H", monitored=True, monitor_option="none"))
+    db.upsert_library_album(
+        LibraryAlbum(
+            id="al",
+            artist_id="ar",
+            title="MB Album",
+            clean_title="mb album",
+            foreign_album_id="12345678-1234-1234-1234-1234567890ab",
+            monitored=False,
+        )
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    discovery = MagicMock(spec=DiscoveryClient)
+    assert hydrate_album_tracks(db, enricher, "al", discovery=discovery) == 0
+    discovery.get_album_details.assert_not_called()
+
+
+def test_hydration_deezer_error_is_negative_cached(db: Database):
+    import requests
+    from trackseerr.album_track_hydration import clear_negative_cache
+
+    clear_negative_cache()
+    db.upsert_library_artist(LibraryArtist(id="ar", name="H", monitored=True, monitor_option="none"))
+    db.upsert_library_album(
+        LibraryAlbum(
+            id="al",
+            artist_id="ar",
+            title="Deezer Album",
+            clean_title="deezer album",
+            foreign_album_id="12919924",
+            monitored=False,
+        )
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    discovery = MagicMock(spec=DiscoveryClient)
+    discovery.get_album_details.side_effect = requests.RequestException("boom")
+
+    assert hydrate_album_tracks(db, enricher, "al", discovery=discovery) == 0
+    assert hydrate_album_tracks(db, enricher, "al", discovery=discovery) == 0
+    assert discovery.get_album_details.call_count == 1
+    clear_negative_cache()
+
+
+def test_paged_tracks_hydrates_deezer_album_on_open(db: Database):
+    from trackseerr.api.routes.library.browse import paged_tracks
+    from trackseerr.library_filters import LibraryFacetFilter
+
+    db.upsert_library_artist(LibraryArtist(id="ar", name="H", monitored=True, monitor_option="none"))
+    db.upsert_library_album(
+        LibraryAlbum(
+            id="al",
+            artist_id="ar",
+            title="Deezer Album",
+            clean_title="deezer album",
+            foreign_album_id="deezer:album:12919924",
+            monitored=False,
+        )
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    discovery = MagicMock(spec=DiscoveryClient)
+    discovery.get_album_details.return_value = {
+        "tracks": [
+            {"id": "d1", "title": "Green", "track_number": 1, "disc_number": 1, "duration_seconds": 200},
+            {"id": "d2", "title": "Blue", "track_number": 2, "disc_number": 1, "duration_seconds": 210},
+        ]
+    }
+
+    res = paged_tracks(
+        page=1,
+        page_size=50,
+        sort_key=None,
+        sort_dir="asc",
+        q=None,
+        monitored_only=False,
+        artist_id=None,
+        album_id="al",
+        has_file=None,
+        facets=LibraryFacetFilter(),
+        db=db,
+        client=None,
+        enricher=enricher,
+        discovery=discovery,
+        _admin={},
+    )
+    assert res["total"] == 2
+    assert {r["title"] for r in res["records"]} == {"Green", "Blue"}
+    discovery.get_album_details.assert_called_once_with("deezer:album:12919924")
+
+
 def test_total_tracks_only_grows_unless_authoritative(db: Database):
     from trackseerr.artist_refresh import _store_total_tracks
 

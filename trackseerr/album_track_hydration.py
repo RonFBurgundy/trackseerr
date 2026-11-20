@@ -9,6 +9,7 @@ never refetched, and rows go through ``Database.upsert_library_track`` which reu
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 import uuid
@@ -17,9 +18,11 @@ from concurrent.futures import TimeoutError as FutureTimeout
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
+from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.clients.mbid_enricher import MbidEnricherClient
 from trackseerr.library_monitoring import hydrated_track_monitored
 from trackseerr.models import LibraryTrack
+from trackseerr.request_catalog import DISCOVERY_ERRORS
 from trackseerr.storage import Database, clean_library_name
 from trackseerr.track_credits import store_track_credits
 
@@ -83,6 +86,13 @@ def clear_negative_cache() -> None:
         _negative.clear()
 
 
+_MBID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def _is_mbid(value: str) -> bool:
+    return bool(_MBID_RE.match(value))
+
+
 def _fetch_tracks(
     enricher: MbidEnricherClient, rg_id: str, timeout: float
 ) -> list[dict[str, Any]]:
@@ -100,20 +110,87 @@ def _fetch_tracks(
         pool.shutdown(wait=False)
 
 
+def _fetch_discovery_tracks(discovery: DiscoveryClient, foreign_album_id: str) -> list[dict[str, Any]]:
+    try:
+        details = discovery.get_album_details(foreign_album_id)
+    except DISCOVERY_ERRORS as exc:
+        logger.warning("Discovery album track hydration failed for %s: %s", foreign_album_id, exc)
+        return []
+    if not isinstance(details, dict) or "error" in details:
+        return []
+    tracks = details.get("tracks")
+    if not isinstance(tracks, list):
+        return []
+    return [
+        {
+            "title": trk.get("title"),
+            "track_number": trk.get("track_number"),
+            "disc_number": trk.get("disc_number"),
+            "duration_seconds": trk.get("duration_seconds"),
+            "foreign_track_id": str(trk["id"]) if trk.get("id") is not None else None,
+        }
+        for trk in tracks
+        if isinstance(trk, dict)
+    ]
+
+
+def _insert_hydrated_tracks(
+    db: Database,
+    album_id: str,
+    artist_id: str,
+    fetched: list[dict[str, Any]],
+    *,
+    follow_album: bool,
+    option: str,
+    store_credits: bool,
+) -> int:
+    # max(existing, new): the release group's first release may be a shorter edition than one already recorded.
+    db.set_library_album_total_tracks(album_id, len(fetched))
+    created = 0
+    for trk in fetched:
+        title = trk.get("title") or "Unknown Track"
+        number = int(trk.get("track_number") or 1)
+        disc_number = int(trk.get("disc_number") or 1)
+        if db.get_library_track_by_title(album_id, title, track_number=number, disc_number=disc_number):
+            continue
+        saved = db.upsert_library_track(
+            LibraryTrack(
+                id=str(uuid.uuid4()),
+                album_id=album_id,
+                artist_id=artist_id,
+                title=title,
+                clean_title=clean_library_name(title),
+                track_number=number,
+                disc_number=disc_number,
+                duration_seconds=trk.get("duration_seconds"),
+                monitored=follow_album and hydrated_track_monitored(option, has_file=False),
+                mb_recording_id=trk.get("mb_recording_id"),
+                foreign_track_id=trk.get("foreign_track_id"),
+            )
+        )
+        if store_credits:
+            store_track_credits(db, str(saved["id"]), trk)
+        created += 1
+    return created
+
+
 def hydrate_album_tracks(
     db: Database,
     enricher: MbidEnricherClient,
     album_id: str,
     *,
+    discovery: Optional[DiscoveryClient] = None,
     timeout: float = HYDRATION_TIMEOUT_SECONDS,
     deadline: Optional[float] = None,
 ) -> int:
     """Fetches and stores the tracks of an album that has none yet; returns how many were created.
 
-    Returns 0 without any network call when the album is unknown, already has tracks, has no MusicBrainz release
-    group, or its last attempt failed/came back empty less than ``NEGATIVE_CACHE_SECONDS`` ago. New tracks are
-    unmonitored unless the album is monitored and the artist's option keeps tracks following their album (anything
-    but ``existing``); a track with a file is always created monitored under ``existing``.
+    Tracks come from MusicBrainz when the album has a release group, else from Deezer when a discovery client is
+    given and the album has a non-MBID ``foreign_album_id``. Returns 0 without any network call when the album is
+    unknown, already has tracks, has neither a MusicBrainz release group nor an eligible Deezer id, or its last
+    attempt failed/came back empty less than ``NEGATIVE_CACHE_SECONDS`` ago. New tracks are unmonitored unless the
+    album is monitored and the artist's option keeps tracks following their album (anything but ``existing``); a
+    track with a file is always created monitored under ``existing``.
 
     Concurrent calls for one album are single-flight: the others wait on the per-album lock, then find the tracks
     already stored. The check and the inserts run under that lock. ``deadline`` is an absolute ``time.monotonic()``
@@ -139,12 +216,12 @@ def hydrate_album_tracks(
         if _recently_failed(album_id):
             return 0
         album = db.get_library_album(album_id)
-        if album is None:
-            return 0
-        if db.list_library_tracks(album_id=album_id, limit=1):
+        if album is None or db.list_library_tracks(album_id=album_id, limit=1):
             return 0
         rg_id = str(album.get("mb_release_group_id") or "").strip()
-        if not rg_id:
+        foreign_album_id = str(album.get("foreign_album_id") or "").strip()
+        use_discovery = not rg_id and discovery is not None and bool(foreign_album_id) and not _is_mbid(foreign_album_id)
+        if not rg_id and not use_discovery:
             return 0
         budget = remaining()
         if budget <= 0:
@@ -155,38 +232,25 @@ def hydrate_album_tracks(
         option = str((artist or {}).get("monitor_option") or "")
         follow_album = bool(album.get("monitored")) and bool((artist or {}).get("monitored", True))
 
-        fetched = _fetch_tracks(enricher, rg_id, budget)
+        if rg_id:
+            fetched = _fetch_tracks(enricher, rg_id, budget)
+        elif discovery is not None:
+            fetched = _fetch_discovery_tracks(discovery, foreign_album_id)
+        else:
+            fetched = []
         if not fetched:
             if budget >= timeout:  # a fetch cut short by a batch deadline is not evidence the album is bad
                 _mark_failed(album_id)
             return 0
 
-        # max(existing, new): the release group's first release may be a shorter edition than one already recorded.
-        db.set_library_album_total_tracks(album_id, len(fetched))
-        created = 0
-        for trk in fetched:
-            title = trk.get("title") or "Unknown Track"
-            number = int(trk.get("track_number") or 1)
-            if db.get_library_track_by_title(
-                album_id, title, track_number=number, disc_number=int(trk.get("disc_number") or 1)
-            ):
-                continue
-            saved = db.upsert_library_track(
-                LibraryTrack(
-                    id=str(uuid.uuid4()),
-                    album_id=album_id,
-                    artist_id=artist_id,
-                    title=title,
-                    clean_title=clean_library_name(title),
-                    track_number=number,
-                    disc_number=int(trk.get("disc_number") or 1),
-                    duration_seconds=trk.get("duration_seconds"),
-                    monitored=follow_album and hydrated_track_monitored(option, has_file=False),
-                    mb_recording_id=trk.get("mb_recording_id"),
-                )
-            )
-            store_track_credits(db, str(saved["id"]), trk)
-            created += 1
-        return created
+        return _insert_hydrated_tracks(
+            db,
+            album_id,
+            artist_id,
+            fetched,
+            follow_album=follow_album,
+            option=option,
+            store_credits=bool(rg_id),
+        )
     finally:
         lock.release()

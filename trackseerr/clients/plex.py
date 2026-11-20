@@ -233,7 +233,9 @@ def _set_plexapi_identity() -> None:
     plexapi.X_PLEX_VERSION = trackseerr.__version__
     plexapi.X_PLEX_PROVIDES = "controller"
     plexapi.X_PLEX_IDENTIFIER = trackseerr.auth.DEFAULT_CLIENT_IDENTIFIER
-    plexapi.BASE_HEADERS = plexapi.reset_base_headers()
+    # Mutate in place because plexapi.server and plexapi.myplex bind BASE_HEADERS at import time.
+    plexapi.BASE_HEADERS.clear()
+    plexapi.BASE_HEADERS.update(plexapi.reset_base_headers())
     _PLEXAPI_IDENTITY_SET = True
 
 
