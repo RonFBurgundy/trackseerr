@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from trackseerr import lidarr_library
 from trackseerr.api.dependencies import (
     get_db,
+    get_discovery_client,
     get_lidarr_client,
     get_mbid_enricher,
     require_admin,
@@ -27,6 +28,7 @@ from trackseerr.api.routes.activity import (
     MAX_PAGE,
     require_lidarr,
 )
+from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.clients.lidarr import (
     LidarrClient,
 )
@@ -197,6 +199,7 @@ def paged_tracks(
     db: Database = Depends(get_db),
     client: Optional[LidarrClient] = Depends(get_lidarr_client),
     enricher: MbidEnricherClient = Depends(get_mbid_enricher),
+    discovery: DiscoveryClient = Depends(get_discovery_client),
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """A page of library tracks (with artist, album and file details) plus the filtered total.
@@ -211,7 +214,7 @@ def paged_tracks(
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=NATIVE_ONLY_DETAIL)
         return _lidarr_tracks_paged(page, page_size, sort_key, sort_dir, q, monitored_only, album_id, client)
     if album_id and page == 1 and not q and not monitored_only:
-        hydrate_album_tracks(db, enricher, album_id)
+        hydrate_album_tracks(db, enricher, album_id, discovery=discovery)
     res = _paged(
         "tracks", page, page_size, sort_key, sort_dir, q, monitored_only, artist_id, album_id, db, _enrich_tracks,
         facets=facets, has_file=has_file,
