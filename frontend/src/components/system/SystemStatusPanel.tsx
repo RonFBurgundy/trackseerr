@@ -56,6 +56,7 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
     mediaServer.isPlex && status?.plex.online && status.plex.message.startsWith('Connected. ')
       ? status.plex.message.slice('Connected. '.length).trim()
       : null;
+  const plexSignedIn = plexWarning?.includes('signed-in Plex account') ?? false;
   const clientsOnline = status?.download_clients.filter((c) => c.online).length ?? 0;
   const indexersOnline = status?.indexers.filter((i) => i.online).length ?? 0;
   const [showChangelogModal, setShowChangelogModal] = useState<boolean>(false);
@@ -121,7 +122,9 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
             {plexWarning && (
               <div className={`my-2 border rounded-[3px] px-3 py-2 text-[11px] font-mono break-words space-y-1 ${HEALTH_STYLE.warning}`}>
                 <p>{plexWarning}</p>
-                <p>Use Sign in with Plex under Settings &gt; Media Management &gt; Media Server.</p>
+                {!plexSignedIn && (
+                  <p>Use Sign in with Plex under Settings &gt; Media Management &gt; Media Server.</p>
+                )}
               </div>
             )}
             <StatusRow label="Download Clients:">
