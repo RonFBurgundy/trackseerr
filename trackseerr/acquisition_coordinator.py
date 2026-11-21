@@ -487,6 +487,41 @@ def resolve_duration(
     return None
 
 
+def album_duration_for_track(
+    db: Database, album_id: Optional[str], track_id: Optional[str]
+) -> Optional[DurationInfo]:
+    """Resolve the parent album's duration for a track search, tagged with source='album'."""
+    try:
+        resolved_album_id = album_id
+        if not resolved_album_id and track_id:
+            track = db.get_library_track(str(track_id))
+            resolved_album_id = track.get("album_id") if track else None
+        if not resolved_album_id:
+            return None
+        durations, total = db.get_album_track_durations(str(resolved_album_id))
+        info = resolve_durations(durations, total)
+        if info is not None and not info.estimated:
+            return dataclasses.replace(info, source="album")
+        return info
+    except sqlite3.Error as e:
+        logger.warning("Could not resolve album duration for album %s / track %s: %s", album_id, track_id, e)
+    return None
+
+
+def pick_release_duration(
+    raw_title: str,
+    wanted_title: Optional[str],
+    track_duration: Optional[DurationInfo],
+    album_duration: Optional[DurationInfo],
+) -> Optional[DurationInfo]:
+    """Use track duration when the release names the track, otherwise album duration."""
+    if not wanted_title:
+        return track_duration
+    if phrase_score(title_core(wanted_title), raw_title) >= 80:
+        return track_duration
+    return album_duration
+
+
 @dataclass(frozen=True)
 class SearchContext:
     """What triggered a search, persisted with each search_log row."""
@@ -1141,6 +1176,16 @@ class AcquisitionCoordinator:
         prof = _to_quality_profile(profile)
         prepared = prepare_profile(prof)
         duration = resolve_duration(db, album_id, track_id, item_type) if db is not None else None
+        album_duration = (
+            album_duration_for_track(db, album_id, track_id)
+            if item_type == "track" and db is not None
+            else None
+        )
+        wanted_title = (
+            self._wanted_track_title(db, None, track_id)
+            if item_type == "track" and db is not None
+            else None
+        )
         tracks: list[tuple[int, int, str]] = []
         if item_type == "album" and album_id and db is not None:
             try:
@@ -1177,7 +1222,9 @@ class AcquisitionCoordinator:
                 parsed,
                 prepared,
                 candidate.size_bytes if candidate.size_bytes > 0 else None,
-                duration=duration,
+                duration=pick_release_duration(candidate.title, wanted_title, duration, album_duration)
+                if item_type == "track"
+                else duration,
                 artist_tags=artist_tags,
                 **candidate_context(candidate),
             )

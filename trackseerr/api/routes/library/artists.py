@@ -202,6 +202,7 @@ def get_artist(
     stored, with_files = _album_track_counts(db, artist_id)
     for alb in albums:
         # Informational only: albums outside the profile stay in the catalog and can be monitored manually.
+        alb["artist_name"] = artist.get("name")
         alb["in_profile"] = album_in_metadata_profile(profile, alb.get("album_type"), alb.get("secondary_types"))
         alb["cover_url"] = _versioned_art_url("album", alb["id"], alb.get("art_version"), alb.get("cover_url"))
         # Release track count (provider-reported, else the stored rows) and how many tracks own a file.

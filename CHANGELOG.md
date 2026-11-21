@@ -153,6 +153,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Manual search on a song from an artist's page now searches under that artist instead of "Unknown Artist".
+- Manual and automatic song searches no longer reject a full-album torrent for too high a bitrate. The album torrent's size is now checked against the album's length, since only the song's file is downloaded from it.
 - Opening an album in the Library loads its track list even when the album isn't monitored and only Deezer knows it, so you can use Manual search on one song without monitoring anything.
 - TrackSeerr now shows up in your Plex devices as "TrackSeerr" for every request, not just for Sign in with Plex.
 - The System Status page shows the Plex token warning and what to do about it, instead of a plain green "Connected".

@@ -17,6 +17,8 @@ from trackseerr.acquisition_coordinator import (
     _extract_info_hash,
     NoClientAvailable,
     candidate_rank,
+    album_duration_for_track,
+    pick_release_duration,
     resolve_duration,
     SearchContext,
     acquisition_coordinator,
@@ -419,6 +421,11 @@ def search_releases(
     # 3. Parse and evaluate each candidate release
     prepared = prepare_profile(profile)
     duration = resolve_duration(db, query.album_id, query.track_id, query.item_type)
+    album_duration = (
+        album_duration_for_track(db, query.album_id, query.track_id)
+        if query.item_type == "track"
+        else None
+    )
     artist_tags = delay_gate.artist_tags(db, clean_artist)
     delay_profile = delay_gate.resolve_delay_profile(db, clean_artist, tags=artist_tags)
     preferred_protocol = delay_profile.get("preferred_protocol")
@@ -431,7 +438,9 @@ def search_releases(
                 parsed,
                 prepared,
                 r.size_bytes if r.size_bytes > 0 else None,
-                duration=duration,
+                duration=pick_release_duration(r.title, clean_title, duration, album_duration)
+                if query.item_type == "track"
+                else duration,
                 artist_tags=artist_tags,
                 **candidate_context(r),
             )
