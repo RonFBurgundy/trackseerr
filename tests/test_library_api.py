@@ -180,6 +180,7 @@ def test_library_stats_and_browsing_routes(
     assert "albums" in art_detail
     assert len(art_detail["albums"]) == 1
     assert art_detail["albums"][0]["id"] == "alb-1"
+    assert all(alb["artist_name"] == art_detail["name"] for alb in art_detail["albums"])
     assert art_detail["image_url"] == "https://example.com/okc.jpg"
 
     # Artist 404

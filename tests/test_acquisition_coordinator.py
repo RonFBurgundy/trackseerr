@@ -1246,6 +1246,112 @@ def test_length_check_skipped_without_length(test_db):
     assert _ids(ranked) == ["nolen"]
 
 
+def test_pick_release_duration_track_named_uses_track():
+    from trackseerr.acquisition_coordinator import pick_release_duration
+    from trackseerr.decision_engine import DurationInfo
+
+    track_dur = DurationInfo(200.0, estimated=False, source="tracks")
+    album_dur = DurationInfo(1000.0, estimated=False, source="album")
+    picked = pick_release_duration(
+        "Yo-Yo Ma - Green (Vincent's Tune) [FLAC]",
+        "Green (Vincent's Tune)",
+        track_dur,
+        album_dur,
+    )
+    assert picked is track_dur
+
+
+def test_pick_release_duration_album_release_uses_album():
+    from trackseerr.acquisition_coordinator import pick_release_duration
+    from trackseerr.decision_engine import DurationInfo
+
+    track_dur = DurationInfo(200.0, estimated=False, source="tracks")
+    album_dur = DurationInfo(1000.0, estimated=False, source="album")
+    picked = pick_release_duration(
+        "Yo.Yo.Ma.Silkroad.Ensemble.Sing.Me.Home.2016.FLAC.[16bit.44.1kHz]-PK",
+        "Green (Vincent's Tune)",
+        track_dur,
+        album_dur,
+    )
+    assert picked is album_dur
+
+
+def test_pick_release_duration_album_unknown_returns_none():
+    from trackseerr.acquisition_coordinator import pick_release_duration
+    from trackseerr.decision_engine import DurationInfo
+
+    track_dur = DurationInfo(200.0, estimated=False, source="tracks")
+    picked = pick_release_duration(
+        "Yo.Yo.Ma.Silkroad.Ensemble.Sing.Me.Home.2016.FLAC.[16bit.44.1kHz]-PK",
+        "Green (Vincent's Tune)",
+        track_dur,
+        None,
+    )
+    assert picked is None
+
+
+def test_pick_release_duration_no_wanted_title_keeps_track():
+    from trackseerr.acquisition_coordinator import pick_release_duration
+    from trackseerr.decision_engine import DurationInfo
+
+    track_dur = DurationInfo(200.0, estimated=False, source="tracks")
+    album_dur = DurationInfo(1000.0, estimated=False, source="album")
+    picked = pick_release_duration(
+        "Yo.Yo.Ma.Silkroad.Ensemble.Sing.Me.Home.2016.FLAC.[16bit.44.1kHz]-PK",
+        None,
+        track_dur,
+        album_dur,
+    )
+    assert picked is track_dur
+
+
+def test_album_duration_for_track_from_track_id(test_db):
+    from trackseerr.acquisition_coordinator import album_duration_for_track
+
+    _seed_tracks(test_db)
+    info = album_duration_for_track(test_db, album_id=None, track_id="alb-t0")
+    assert info is not None
+    assert info.seconds == 200.0 * len(_TITLES)
+    assert info.source == "album"
+    assert info.estimated is False
+
+
+def test_album_duration_for_track_missing_track_returns_none(test_db):
+    from trackseerr.acquisition_coordinator import album_duration_for_track
+
+    assert album_duration_for_track(test_db, album_id=None, track_id="missing-track-id") is None
+
+
+def test_evaluate_and_rank_track_search_measures_album_torrent_against_album(test_db):
+    from trackseerr.decision_engine import evaluate_prepared as real_evaluate_prepared
+
+    _seed_tracks(test_db)
+    cand = AcquisitionSearchResult(
+        download_id="alb",
+        title="A1 - alb 2016 FLAC",
+        artist="A1",
+        source="torznab",
+        protocol="torrent",
+        seeders=5,
+        size_bytes=120_000_000,
+    )
+    with patch(
+        "trackseerr.acquisition_coordinator.evaluate_prepared",
+        wraps=real_evaluate_prepared,
+    ) as mock_eval:
+        ranked = AcquisitionCoordinator().evaluate_and_rank(
+            [cand],
+            _slsk_profile(),
+            db=test_db,
+            album_id="alb",
+            track_id="alb-t0",
+            item_type="track",
+        )
+    assert _ids(ranked) == ["alb"]
+    assert mock_eval.call_count == 1
+    assert mock_eval.call_args.kwargs["duration"].source == "album"
+
+
 # --- Soulseek album folders ------------------------------------------------
 
 _TITLES = ["Title One", "Title Two", "Title Three", "Title Four", "Title Five"]
