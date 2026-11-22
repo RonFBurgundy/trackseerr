@@ -150,7 +150,12 @@ export function useManualSearch(
           request_id: target.requestId ?? undefined,
         });
         setGrabbedIds((prev) => new Set(prev).add(release.id));
-        onToast(`Sent to ${res.client || 'download client'}`);
+        const clientLabel = res.client || 'download client';
+        if (typeof res.warning === 'string' && res.warning.trim().length > 0) {
+          onToast(`Sent to ${clientLabel}. ${res.warning}`, 'error');
+        } else {
+          onToast(`Sent to ${clientLabel}`);
+        }
         onGrabbedRef.current?.();
       } catch (err: unknown) {
         const fallback = err instanceof ApiError && err.status === 409 ? 'Manual grabs need native mode' : 'Grab failed';
