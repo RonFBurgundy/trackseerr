@@ -8721,6 +8721,8 @@ export interface components {
             message: string;
             /** Success */
             success: boolean;
+            /** Warning */
+            warning?: string | null;
         };
         /**
          * GrabResult
