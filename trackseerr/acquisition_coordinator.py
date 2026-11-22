@@ -1659,11 +1659,15 @@ class AcquisitionCoordinator:
         wanted_title = self._wanted_track_title(db, request_id, track_id)
         torrent_bytes = track_file_selection.fetch_torrent_bytes(top_candidate) if wanted_title else None
         if not wanted_title or not torrent_bytes:
-            return False
-        entry, outcome = track_file_selection.select_track_file(torrent_bytes, wanted_title, artist)
-        if outcome == "selected" and entry is not None:
             if not isinstance(top_candidate.extra, dict):
                 top_candidate.extra = {}
+            top_candidate.extra["track_file_selection"] = "unavailable"
+            return False
+        entry, outcome = track_file_selection.select_track_file(torrent_bytes, wanted_title, artist)
+        if not isinstance(top_candidate.extra, dict):
+            top_candidate.extra = {}
+        top_candidate.extra["track_file_selection"] = outcome
+        if outcome == "selected" and entry is not None:
             top_candidate.extra["file_indices"] = [entry["file_index"]]
             top_candidate.extra["file_paths"] = [entry["path"]]
             top_candidate.extra["torrent_bytes_size"] = entry["size_bytes"]

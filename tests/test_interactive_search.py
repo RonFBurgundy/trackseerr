@@ -1571,6 +1571,72 @@ def test_manual_grab_ambiguous_track_downloads_whole_torrent(app_and_client, tes
     assert mock_outcome.call_args[0][1] == "whole_release"
 
 
+def test_manual_grab_no_match_returns_warning(app_and_client, test_db, test_config, seeded_users):
+    """Manual grab returns a warning when track file selection finds no match."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_qbit_and_track_request(test_db)
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "album1234567890abcdef"
+
+    with (
+        patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=mock_driver),
+        patch("trackseerr.track_file_selection.fetch_torrent_bytes", return_value=b"torrent-bytes"),
+        patch("trackseerr.track_file_selection.select_track_file", return_value=(None, "no_match")),
+    ):
+        resp = client.post("/api/acquisition/grab", headers=admin_headers, json=_track_grab_payload())
+
+    assert resp.status_code == 200
+    res = resp.json()
+    assert res["warning"].startswith("Couldn't find the song's file")
+
+
+def test_manual_grab_selected_has_no_warning(app_and_client, test_db, test_config, seeded_users):
+    """Manual grab omits warning when a single track file is selected."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_qbit_and_track_request(test_db)
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "album1234567890abcdef"
+
+    with (
+        patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=mock_driver),
+        patch("trackseerr.track_file_selection.fetch_torrent_bytes", return_value=b"torrent-bytes"),
+        patch(
+            "trackseerr.track_file_selection.select_track_file",
+            return_value=({"file_index": 3, "path": "Album/04 - Song.flac", "size_bytes": 123}, "selected"),
+        ),
+    ):
+        resp = client.post("/api/acquisition/grab", headers=admin_headers, json=_track_grab_payload())
+
+    assert resp.status_code == 200
+    res = resp.json()
+    assert res["success"] is True
+    assert "warning" not in res
+
+
+def test_manual_grab_unavailable_torrent_returns_warning(app_and_client, test_db, test_config, seeded_users):
+    """Manual grab returns a warning when .torrent bytes cannot be fetched."""
+    _, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    _seed_qbit_and_track_request(test_db)
+
+    mock_driver = MagicMock()
+    mock_driver.download.return_value = "album1234567890abcdef"
+
+    with (
+        patch("trackseerr.api.routes.acquisition.get_acquisition_driver", return_value=mock_driver),
+        patch("trackseerr.track_file_selection.fetch_torrent_bytes", return_value=None),
+    ):
+        resp = client.post("/api/acquisition/grab", headers=admin_headers, json=_track_grab_payload())
+
+    assert resp.status_code == 200
+    res = resp.json()
+    assert "warning" in res
+
+
 def test_manual_grab_torrent_fetch_error_falls_back(app_and_client, test_db, test_config, seeded_users, caplog):
     """A RequestException while fetching .torrent bytes logs a warning and falls back to whole torrent."""
     import requests

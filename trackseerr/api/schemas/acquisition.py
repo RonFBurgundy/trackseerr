@@ -75,6 +75,7 @@ class GrabResponse(ApiModel):
     download_id: str
     client: str
     message: str
+    warning: Optional[str] = None
 
 
 class PendingDeletedResponse(ApiModel):

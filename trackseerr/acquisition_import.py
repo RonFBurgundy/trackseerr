@@ -333,6 +333,19 @@ def _strip_artist_prefix(title: str, artist: Optional[str]) -> str:
     return title
 
 
+_ANY_ARTIST_SEP_RE = re.compile(r"\s+[-–—]\s+")
+
+
+def _strip_any_artist_prefix(title: str) -> str:
+    match = _ANY_ARTIST_SEP_RE.search(title)
+    if not match:
+        return title
+    remainder = title[match.end():].strip()
+    if not remainder:
+        return title
+    return _strip_leading_track_number(remainder)
+
+
 def _clean_pack_title(title: str, wanted_title: Optional[str] = None) -> str:
     """Cleans DJ pool title decorations and strips trailing BPM if not part of wanted title."""
     clean, extras = clean_pool_title(title)
@@ -463,6 +476,28 @@ def _resolve_job_wanted_track_and_title(
     return resolved_track, None
 
 
+def _fallback_other_artist_match(
+    inspected: list[tuple[Path, dict[str, Any], str]],
+    wanted_title: str,
+    wanted_has_single_variant: bool,
+) -> list[tuple[Path, dict[str, Any]]]:
+    tier1_plain: list[tuple[Path, dict[str, Any]]] = []
+    tier2_variant: list[tuple[Path, dict[str, Any]]] = []
+    for af, meta, cand_title in inspected:
+        cand = _strip_any_artist_prefix(cand_title)
+        if cand == cand_title or not titles_match(cand, wanted_title):
+            continue
+        cand_has_single_variant = bool(
+            _SINGLE_VARIANT_RE.search(cand) or _SINGLE_VARIANT_RE.search(af.stem)
+        )
+        if wanted_has_single_variant or not cand_has_single_variant:
+            tier1_plain.append((af, meta))
+        else:
+            tier2_variant.append((af, meta))
+    matches = tier1_plain if tier1_plain else tier2_variant
+    return matches if len(matches) == 1 else []
+
+
 def _match_files_for_track(
     audio_files: list[Path],
     wanted_title: str,
@@ -472,6 +507,7 @@ def _match_files_for_track(
     wanted_has_single_variant = bool(_SINGLE_VARIANT_RE.search(wanted_title))
     tier1_plain: list[tuple[Path, dict[str, Any]]] = []
     tier2_variant: list[tuple[Path, dict[str, Any]]] = []
+    inspected: list[tuple[Path, dict[str, Any], str]] = []
 
     for af in audio_files:
         try:
@@ -480,6 +516,7 @@ def _match_files_for_track(
             logger.debug("Inspection error during file selection for %s: %s", af, insp_err)
             meta = {}
         cand_title = _candidate_file_title(af, meta, artist)
+        inspected.append((af, meta, cand_title))
         matches = titles_match(cand_title, wanted_title)
         if not matches and artist:
             cand_stripped = _strip_artist_prefix(cand_title, artist)
@@ -496,7 +533,10 @@ def _match_files_for_track(
         else:
             tier2_variant.append((af, meta))
 
-    return tier1_plain if tier1_plain else tier2_variant
+    primary = tier1_plain if tier1_plain else tier2_variant
+    if primary:
+        return primary
+    return _fallback_other_artist_match(inspected, wanted_title, wanted_has_single_variant)
 
 
 def _job_quality_profile(job: _ImportJob) -> Optional[QualityProfile]:

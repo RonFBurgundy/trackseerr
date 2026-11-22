@@ -8,6 +8,7 @@ from typing import Any
 
 from trackseerr.acquisition_import import (
     _SINGLE_VARIANT_RE,
+    _strip_any_artist_prefix,
     _strip_artist_prefix,
     _strip_leading_track_number,
 )
@@ -28,6 +29,38 @@ def _file_candidate_title(stem: str, artist: str | None) -> str:
         if stripped != cleaned:
             cleaned = _strip_leading_track_number(stripped) if cleaned == stem else stripped
     return cleaned
+
+
+def _fallback_other_artist_entry(
+    audio_entries: list[dict[str, Any]],
+    wanted_title: str,
+    artist: str | None,
+    wanted_has_single_variant: bool,
+) -> tuple[dict[str, Any] | None, str]:
+    tier1_plain: list[dict[str, Any]] = []
+    tier2_variant: list[dict[str, Any]] = []
+
+    for entry in audio_entries:
+        stem = PurePosixPath(entry["path"]).stem
+        raw_cand = _file_candidate_title(stem, artist)
+        cand = _strip_any_artist_prefix(raw_cand)
+        if cand == raw_cand or not titles_match(cand, wanted_title):
+            continue
+
+        cand_has_single_variant = bool(
+            _SINGLE_VARIANT_RE.search(cand) or _SINGLE_VARIANT_RE.search(stem)
+        )
+        if wanted_has_single_variant or not cand_has_single_variant:
+            tier1_plain.append(entry)
+        else:
+            tier2_variant.append(entry)
+
+    matches = tier1_plain if tier1_plain else tier2_variant
+    if len(matches) == 1:
+        return matches[0], "selected"
+    if not matches:
+        return None, "no_match"
+    return None, "ambiguous"
 
 
 def select_track_file(
@@ -79,7 +112,9 @@ def select_track_file(
     if len(matches) == 1:
         return matches[0], "selected"
     if not matches:
-        return None, "no_match"
+        return _fallback_other_artist_entry(
+            audio_entries, wanted_title, artist, wanted_has_single_variant
+        )
     return None, "ambiguous"
 
 

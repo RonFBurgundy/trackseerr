@@ -164,6 +164,65 @@ def test_artist_prefix_in_filename() -> None:
     assert entry["path"].endswith("KAROL G - 03 - Ocean (Remix).flac")
 
 
+def test_other_artist_prefix_in_filename() -> None:
+    torrent_bytes = _make_album_torrent(
+        [
+            ("01. Silkroad Ensemble - Green (Vincent's Tune).flac", 24_000_000),
+            ("02. Silkroad Ensemble - Sing Me Home.flac", 23_000_000),
+            ("03. Silkroad Ensemble - Ethiopia.flac", 25_000_000),
+            ("cover.jpg", 120_000),
+        ],
+        name="Yo-Yo Ma & The Silk Road Ensemble - Sing Me Home",
+    )
+
+    entry, outcome = select_track_file(
+        torrent_bytes,
+        wanted_title="Green (Vincent's Tune) (feat. Roomful of Teeth)",
+        artist="Yo-Yo Ma",
+    )
+
+    assert outcome == "selected"
+    assert entry is not None
+    assert entry["file_index"] == 0
+
+
+def test_other_artist_prefix_ambiguous() -> None:
+    torrent_bytes = _make_album_torrent(
+        [
+            ("01. A - Green.flac", 24_000_000),
+            ("05. B - Green.flac", 23_000_000),
+        ],
+        name="Various - Album",
+    )
+
+    entry, outcome = select_track_file(
+        torrent_bytes,
+        wanted_title="Green",
+        artist="Yo-Yo Ma",
+    )
+
+    assert (entry, outcome) == (None, "ambiguous")
+
+
+def test_hyphenated_name_not_split() -> None:
+    torrent_bytes = _make_album_torrent(
+        [
+            ("01 - Re-Up.flac", 24_000_000),
+            ("02 - Other.flac", 23_000_000),
+        ],
+        name="Artist - Album",
+    )
+
+    entry, outcome = select_track_file(
+        torrent_bytes,
+        wanted_title="Up",
+        artist="Artist",
+    )
+
+    assert entry is None
+    assert outcome == "no_match"
+
+
 def test_fetch_torrent_bytes_handles_magnets_and_errors(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
