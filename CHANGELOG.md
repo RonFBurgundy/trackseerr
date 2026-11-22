@@ -153,6 +153,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- A song grab from an album torrent now finds the song's file when the file name credits a different artist (for example "Silkroad Ensemble - Green" on a Yo-Yo Ma album), so only that file downloads. It only does this when exactly one file matches.
+- Manual search now warns you when a song grab will download the whole torrent because TrackSeerr can't find the song's file in it or the download client can't download single files.
 - Manual search on a song from an artist's page now searches under that artist instead of "Unknown Artist".
 - Manual and automatic song searches no longer reject a full-album torrent for too high a bitrate. The album torrent's size is now checked against the album's length, since only the song's file is downloaded from it.
 - Opening an album in the Library loads its track list even when the album isn't monitored and only Deezer knows it, so you can use Manual search on one song without monitoring anything.
