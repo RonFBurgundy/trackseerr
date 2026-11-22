@@ -526,19 +526,29 @@ def _dispatch_manual_grab(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Download client error: {redact_text(str(e))}")
 
 
+_WHOLE_TORRENT_CLIENT_WARNING = (
+    "This download client can't download single files, so the whole torrent will download. "
+    "Only the song is imported."
+)
+_WHOLE_TORRENT_MATCH_WARNING = (
+    "Couldn't find the song's file in this torrent, so the whole torrent will download. "
+    "Only the song is imported."
+)
+
+
 def _maybe_select_track_file(
     db: Database,
     search_result: AcquisitionSearchResult,
     payload: ManualGrabPayload,
     client: Optional[dict[str, Any]],
-) -> None:
+) -> Optional[str]:
     """Narrow a single-track torrent manual grab to the matching file when possible."""
     if payload.item_type != "track" or search_result.protocol != "torrent":
-        return
+        return None
     if search_result.extra and search_result.extra.get("file_indices"):
-        return
+        return None
     if client is not None and not supports_partial_download(client):
-        return
+        return _WHOLE_TORRENT_CLIENT_WARNING
     try:
         acquisition_coordinator._choose_track_file(
             db,
@@ -554,6 +564,13 @@ def _maybe_select_track_file(
             payload.release.title,
             safe_exc(exc),
         )
+        return _WHOLE_TORRENT_MATCH_WARNING
+    extra = search_result.extra if isinstance(search_result.extra, dict) else {}
+    if extra.get("file_indices"):
+        return None
+    if extra.get("track_file_selection") in ("no_match", "ambiguous", "unavailable"):
+        return _WHOLE_TORRENT_MATCH_WARNING
+    return None
 
 
 def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any]) -> dict[str, Any]:
@@ -600,7 +617,7 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
     )
 
     # 2b. Narrow single-track torrent grabs to the matching file
-    _maybe_select_track_file(db, search_result, payload, client)
+    warning = _maybe_select_track_file(db, search_result, payload, client)
 
     # 3. Dispatch download to client driver
     client, client_driver, download_hash = _dispatch_manual_grab(
@@ -687,12 +704,15 @@ def _grab_release(payload: ManualGrabPayload, db: Database, admin: dict[str, Any
         download_id,
     )
 
-    return {
+    result: dict[str, Any] = {
         "success": True,
         "download_id": download_id,
         "client": client_name,
         "message": f"Successfully enqueued '{payload.release.title}'",
     }
+    if warning is not None:
+        result["warning"] = warning
+    return result
 
 
 class PendingReleaseResponse(ApiModel):
