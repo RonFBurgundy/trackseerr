@@ -27,6 +27,7 @@ export type ActivityHistoryEvent =
   | 'grabbed'
   | 'imported'
   | 'failed'
+  | 'held'
   | 'deleted'
   | 'blocklisted'
   | 'upgraded';

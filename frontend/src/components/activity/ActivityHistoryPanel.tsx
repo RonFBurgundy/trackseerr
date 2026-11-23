@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState } from 'react';
-import { AlertOctagon, ArrowUpCircle, Ban, CheckCircle2, Download, Trash2, XCircle } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, ArrowUpCircle, Ban, CheckCircle2, Download, Trash2, XCircle } from 'lucide-react';
 import type { ActivityHistoryEvent, ActivityHistoryRecord, ListSortDir } from '@/types/activity';
 import { getActivityHistory, getActivityHistoryIndex, markHistoryFailed } from '@/services/activityService';
 import { errorMessage } from '@/services/apiClient';
@@ -17,6 +17,7 @@ const EVENTS: Array<{ id: ActivityHistoryEvent; label: string }> = [
   { id: 'grabbed', label: 'Grabbed' },
   { id: 'imported', label: 'Imported' },
   { id: 'failed', label: 'Failed' },
+  { id: 'held', label: 'Needs import' },
   { id: 'deleted', label: 'Deleted' },
   { id: 'blocklisted', label: 'Blocklisted' },
   { id: 'upgraded', label: 'Upgraded' },
@@ -26,6 +27,7 @@ const EVENT_STYLE: Readonly<Record<string, { cls: string; icon: React.ReactNode 
   grabbed: { cls: 'text-info-300 border-info-800 bg-info-950/50', icon: <Download className="h-3 w-3" /> },
   imported: { cls: 'text-green-300 border-green-800 bg-green-950/50', icon: <CheckCircle2 className="h-3 w-3" /> },
   failed: { cls: 'text-red-300 border-red-800 bg-red-950/50', icon: <XCircle className="h-3 w-3" /> },
+  held: { cls: 'text-amber-300 border-amber-800 bg-amber-950/50', icon: <AlertTriangle className="h-3 w-3" /> },
   deleted: { cls: 'text-neutral-300 border-neutral-700 bg-neutral-900', icon: <Trash2 className="h-3 w-3" /> },
   blocklisted: { cls: 'text-orange-300 border-orange-800 bg-orange-950/50', icon: <Ban className="h-3 w-3" /> },
   upgraded: { cls: 'text-[#e5a00d] border-[#e5a00d]/40 bg-[#e5a00d]/10', icon: <ArrowUpCircle className="h-3 w-3" /> },
@@ -33,13 +35,14 @@ const EVENT_STYLE: Readonly<Record<string, { cls: string; icon: React.ReactNode 
 
 const EventBadge: React.FC<{ event: string | null | undefined; message: string | null | undefined }> = ({ event, message }) => {
   const style = (event ? EVENT_STYLE[event] : undefined) ?? EVENT_STYLE.deleted;
+  const label = EVENTS.find((e) => e.id === event)?.label ?? event;
   return (
     <span
       title={message ?? undefined}
       className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[2px] border text-[10px] font-bold uppercase ${style.cls}`}
     >
       {style.icon}
-      {event}
+      {label}
     </span>
   );
 };
