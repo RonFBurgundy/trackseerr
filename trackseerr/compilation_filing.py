@@ -22,7 +22,6 @@ from trackseerr.redaction import safe_exc
 logger = logging.getLogger(__name__)
 
 _PRIMARY_RANK = {"album": 0, "single": 1, "ep": 2}
-SMALL_COMPILATION_MAX_TRACKS = 3
 
 
 def various_artists_id(db: Any) -> str:
@@ -165,11 +164,27 @@ def album_artist_credit(db: Any, album: dict[str, Any]) -> tuple[str, Optional[s
 
 
 def keeps_compilation(db: Any, album: dict[str, Any]) -> bool:
-    """True when a compilation should stay under Various Artists (monitored or > SMALL_COMPILATION_MAX_TRACKS owned)."""
-    if album.get("monitored"):
+    """True when a compilation should stay under Various Artists (setting on or monitored by hand)."""
+    if db.get_media_management_settings().get("keep_compilations_together"):
         return True
-    owned = sum(1 for t in db.list_library_tracks(album_id=str(album["id"]), limit=1000) if t.get("has_file"))
-    return owned > SMALL_COMPILATION_MAX_TRACKS
+    if "monitored_by_hand" not in album:
+        album = db.get_library_album(str(album["id"])) or album
+    return bool(album.get("monitored_by_hand"))
+
+
+def home_album_for_new_file(
+    db: Any,
+    enricher: Any,
+    artist_id: str,
+    groups: list[dict[str, Any]],
+    track_title: str,
+) -> Optional[dict[str, Any]]:
+    """Creates or fetches the artist's canonical non-various album for a new file, or None."""
+    artist = db.get_library_artist(artist_id) or {}
+    home = home_release_group(groups, artist.get("mbid"), track_title)
+    if home is None:
+        return None
+    return db.get_library_album(ensure_release_group_album(db, enricher, artist_id, home))
 
 
 def _primary_track_credit(db: Any, track_id: str) -> Optional[dict[str, Any]]:
@@ -375,7 +390,10 @@ def _refile_one_album(db: Any, enricher: Any, album: dict[str, Any], va_id: str,
         return
     counts["albums"] += 1
     if not keeps_compilation(db, album):
-        file_tracks_under_home(db, enricher, album, per_rec, counts)
+        name, mbid = album_artist_credit(db, album)
+        for track in tracks:
+            ensure_primary_credit(db, str(track["id"]), name, mbid)
+        file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True)
         counts["kept_small"] = counts.get("kept_small", 0) + 1
         return
     if db.album_holding_release_group(va_id, str(group["id"]), str(album["id"])) is not None:

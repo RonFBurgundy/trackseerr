@@ -252,7 +252,6 @@ class SettingsStoreMixin:
                     "enrich_mbids",
                     "fingerprint_on_weak_match",
                     "keep_compilations_together",
-            "keep_compilations_together",
                     "prefer_local_artwork",
                     "recycle_bin_permanent_delete",
                 ):

@@ -198,23 +198,32 @@ def _filed_album_for_title(
     track_title: str,
 ) -> Optional[dict[str, Any]]:
     """Album for a new file whose own album tag names a compilation or no release at all of the recording."""
+    from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
     from trackseerr.compilation_filing import (
         ensure_release_group_album,
-        home_release_group,
+        home_album_for_new_file,
         various_artists_id,
         various_group_for_title,
     )
 
     va_group = various_group_for_title(groups, album_title)
     if va_group is not None:
+        if db.get_media_management_settings().get("keep_compilations_together"):
+            return db.get_library_album(ensure_release_group_album(db, enricher, various_artists_id(db), va_group))
+        va_artist = db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID)
+        if va_artist is not None:
+            existing_id = db.album_holding_release_group(str(va_artist["id"]), str(va_group["id"]), "")
+            if existing_id is not None:
+                existing = db.get_library_album(existing_id)
+                if existing is not None and existing.get("monitored_by_hand"):
+                    return existing
+        home_album = home_album_for_new_file(db, enricher, artist_id, groups, track_title)
+        if home_album is not None:
+            return home_album
         return db.get_library_album(ensure_release_group_album(db, enricher, various_artists_id(db), va_group))
     if any(album_titles_match(g.get("title"), album_title) for g in groups):
         return None
-    artist = db.get_library_artist(artist_id) or {}
-    home = home_release_group(groups, artist.get("mbid"), track_title)
-    if home is None:
-        return None
-    return db.get_library_album(ensure_release_group_album(db, enricher, artist_id, home))
+    return home_album_for_new_file(db, enricher, artist_id, groups, track_title)
 
 
 def album_for_recording(
