@@ -274,6 +274,40 @@ class TestPathBuilder:
         path = build_track_path(metadata, default_settings)
         assert path == "/music/Various Artists/Wayne's World - Music from the Motion Picture (1992) - Soundtrack/01 - Queen - Bohemian Rhapsody (MP3 320kbps).mp3"
 
+    def test_compilation_ignores_stray_artist_folder(self, default_settings):
+        metadata = {
+            "artist": "Carl Douglas",
+            "album_artist": "Various Artists",
+            "artist_folder": "Carl Douglas",
+            "album": "70s Disco Hits",
+            "title": "Kung Fu Fighting",
+            "track_number": 1,
+            "disc_number": 1,
+            "total_discs": 1,
+            "is_compilation": True,
+            "codec": "FLAC",
+            "extension": ".flac",
+        }
+        path = build_track_path(metadata, default_settings)
+        assert path.startswith(f"/music/{default_settings.get('compilation_artist_folder', 'Various Artists')}/")
+
+    def test_real_album_artist_compilation_keeps_artist_folder(self, default_settings):
+        metadata = {
+            "artist": "Bob Marley",
+            "album_artist": "Bob Marley",
+            "artist_folder": "Bob Marley & The Wailers",
+            "album": "Legend",
+            "title": "Is This Love",
+            "track_number": 1,
+            "disc_number": 1,
+            "total_discs": 1,
+            "is_compilation": True,
+            "codec": "FLAC",
+            "extension": ".flac",
+        }
+        path = build_track_path(metadata, default_settings)
+        assert path.startswith("/music/Bob Marley & The Wailers/")
+
     def _closer_meta(self, **extra):
         return {
             "artist": "Adriatique", "album": "Closer", "title": "Closer", "track_number": 1,

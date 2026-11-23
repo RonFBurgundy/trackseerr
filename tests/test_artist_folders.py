@@ -80,3 +80,24 @@ def test_resolve_artist_folder():
 
     # db=None falls back to existing_artist_folder
     assert resolve_artist_folder(None, artist, settings) == "Existing Folder"
+
+
+def test_resolve_artist_folder_various_artists_returns_none():
+    from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+
+    db = MagicMock()
+    settings = {"root_folder_path": "/music", "rename_artist_folders": False}
+    artist = {"id": "va-1", "mbid": VARIOUS_ARTISTS_MBID, "name": "VA"}
+    db.list_artist_file_paths.return_value = [
+        "/music/Carl Douglas/Comp/01.flac",
+        "/music/Carl Douglas/Comp/02.flac",
+    ]
+    assert resolve_artist_folder(db, artist, settings) is None
+
+
+def test_resolve_artist_folder_various_by_name():
+    db = MagicMock()
+    settings = {"root_folder_path": "/music", "rename_artist_folders": False}
+    artist = {"id": "va-2", "name": "Various Artists"}
+    db.list_artist_file_paths.return_value = ["/music/Carl Douglas/Comp/01.flac"]
+    assert resolve_artist_folder(db, artist, settings) is None
