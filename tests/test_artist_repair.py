@@ -339,6 +339,9 @@ class _Run:
     def set_progress(self, current: int, total: Optional[int] = None) -> None:
         pass
 
+    def set_stage(self, index: int, count: int, label: str) -> None:
+        pass
+
 
 def test_repair_and_match_backs_up_repairs_then_matches(db: Database, monkeypatch: pytest.MonkeyPatch):
     import trackseerr.backup

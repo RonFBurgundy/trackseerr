@@ -691,7 +691,27 @@ def _format_counts(counts: dict[str, int]) -> str:
     return ", ".join(f"{k}={v}" for k, v in counts.items())
 
 
-def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
+REPAIR_STAGES = (
+    "Repairing artists",
+    "Fingerprinting songs",
+    "Searching MusicBrainz",
+    "Linking albums",
+    "Merging duplicates",
+    "Filing compilations",
+    "Moving songs out of Various Artists",
+    "Matching editions",
+    "Auto-matching albums",
+    "Re-matching editions",
+)
+
+
+def run_repair_and_match(
+    db: Any,
+    run: Any,
+    extra_stop: StopFn = None,
+    stage_offset: int = 0,
+    stage_count: Optional[int] = None,
+) -> None:
     """Body of the ``mb_release_match`` task: back up, repair artist rows, then match albums to releases.
 
     ``run`` is the task's ``RunHandle``. ``extra_stop`` lets the start-up caller also stop on process shutdown.
@@ -708,6 +728,8 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
         merge_title_duplicates,
     )
 
+    total_stages = stage_count or len(REPAIR_STAGES)
+
     def stop() -> bool:
         return bool(run.should_stop() or (extra_stop is not None and extra_stop()))
 
@@ -716,10 +738,12 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
     except (OSError, sqlite3.Error) as exc:
         logger.warning("Could not take the pre-repair backup, continuing: %s", safe_exc(exc))
     enricher = get_shared_enricher(db)
+    run.set_stage(stage_offset + 1, total_stages, REPAIR_STAGES[0])
     repair = run_artist_repair(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"repair: {_format_counts(repair)}"
     if stop():
         return
+    run.set_stage(stage_offset + 2, total_stages, REPAIR_STAGES[1])
     api_key = str(db.get_media_management_settings().get("acoustid_api_key") or "").strip()
     if api_key:
         filled = fill_recordings_from_fingerprints(
@@ -730,34 +754,42 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
             return
     else:
         run.message = f"{run.message}; fill: skipped (no AcoustID key)"
+    run.set_stage(stage_offset + 3, total_stages, REPAIR_STAGES[2])
     searched = fill_recordings_from_search(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; search: {_format_counts(searched)}"
     if stop():
         return
+    run.set_stage(stage_offset + 4, total_stages, REPAIR_STAGES[3])
     linked = link_albums_by_recording(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; link: {_format_counts(linked)}"
     if stop():
         return
+    run.set_stage(stage_offset + 5, total_stages, REPAIR_STAGES[4])
     dupes = merge_title_duplicates(db, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; dupes: {_format_counts(dupes)}"
     if stop():
         return
+    run.set_stage(stage_offset + 6, total_stages, REPAIR_STAGES[5])
     various = refile_various_albums(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; various: {_format_counts(various)}"
     if stop():
         return
+    run.set_stage(stage_offset + 7, total_stages, REPAIR_STAGES[6])
     out_of_various = refile_out_of_various(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; out of various: {_format_counts(out_of_various)}"
     if stop():
         return
+    run.set_stage(stage_offset + 8, total_stages, REPAIR_STAGES[7])
     counts = match_album_releases(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; match: {_format_counts(counts)}"
     if stop():
         return
+    run.set_stage(stage_offset + 9, total_stages, REPAIR_STAGES[8])
     auto = auto_match_unlinked(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; auto: {_format_counts(auto)}"
     if stop() or not auto["applied"]:
         return
+    run.set_stage(stage_offset + 10, total_stages, REPAIR_STAGES[9])
     rematch = match_album_releases(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; rematch: {_format_counts(rematch)}"
 
