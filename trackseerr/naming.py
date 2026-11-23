@@ -989,7 +989,9 @@ def build_path_parts(
     if is_compilation and (not meta.get("artist") or is_various_artists_folder(album_artist) or not album_artist):
         artist_meta = dict(meta)
         artist_meta["artist"] = album_artist if (album_artist and not is_various_artists_folder(album_artist)) else va_folder
-    artist_component = _fixed_artist_folder(meta.get("artist_folder")) or render(artist_format, artist_meta)
+    ignore_artist_folder = is_compilation and (not album_artist or is_various_artists_folder(album_artist))
+    observed_folder = None if ignore_artist_folder else _fixed_artist_folder(meta.get("artist_folder"))
+    artist_component = observed_folder or render(artist_format, artist_meta)
     if not artist_component:
         artist_component = va_folder if is_compilation else "Unknown Artist"
 

@@ -6,6 +6,7 @@ import sqlite3
 from collections import Counter
 from typing import Any
 
+from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
 from trackseerr.naming import (
     _fixed_artist_folder,
     existing_artist_folder,
@@ -109,11 +110,17 @@ def resolve_artist_folder(
 ) -> str | None:
     """Folder name for an artist's files.
 
-    Returns None when ``rename_artist_folders`` is on (the format renders it);
+    Returns None when ``rename_artist_folders`` is on (the format renders it)
+    or for the Various Artists artist (so the path renderer uses ``compilation_artist_folder``);
     otherwise the observed folder among existing library files, falling back to
     ``existing_artist_folder`` when the artist has no files yet or on sqlite3 error.
     """
     if not artist or (settings or {}).get("rename_artist_folders"):
+        return None
+    if (
+        str(artist.get("mbid") or "").lower() == VARIOUS_ARTISTS_MBID
+        or is_various_artists_folder(artist.get("name"))
+    ):
         return None
 
     try:
