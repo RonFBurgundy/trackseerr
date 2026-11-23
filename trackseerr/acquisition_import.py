@@ -17,6 +17,7 @@ from typing import Any, Optional
 import httpx
 
 from trackseerr import delay_gate
+from trackseerr.held_song_catalog import add_wanted_song_from_musicbrainz
 from trackseerr.acquisition_coordinator import _to_quality_profile
 from trackseerr.clients.acquisition import is_torrent_driver_type
 from trackseerr.mb_metadata_store import get_shared_enricher
@@ -1690,6 +1691,10 @@ class ImportPipelineMixin(ImportCatalogMixin):
 
             if matched_expected_track is None:
                 matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
+                if matched_expected_track is None and add_wanted_song_from_musicbrainz(
+                    db, job.item, metadata, duration
+                ):
+                    matched_expected_track = self._cross_album_match(db, ctx, job, metadata, duration)
                 if matched_expected_track is None:
                     logger.warning(
                         "Holding unmatched file %s for download %s (manual import required)", af, job.download_id

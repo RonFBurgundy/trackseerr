@@ -60,6 +60,7 @@ from trackseerr.notifications import notification_dispatcher
 from trackseerr.redaction import safe_exc
 from trackseerr import slskd_challenges
 from trackseerr.storage import Database
+from trackseerr.held_song_catalog import add_wanted_song_from_musicbrainz
 from trackseerr.track_matching import (
     candidate_artist_ids,
     find_fileless_equivalent,
@@ -78,6 +79,7 @@ from trackseerr.seed_safety import (
 )
 
 logger = logging.getLogger(__name__)
+_MB_ADD_TRIED: set[str] = set()
 
 from trackseerr.acquisition_import import (
     ImportPipelineMixin,
@@ -796,6 +798,16 @@ class AcquisitionWorker(ImportPipelineMixin):
             duration,
         ):
             return "retry_import"
+        if path_str not in _MB_ADD_TRIED:
+            _MB_ADD_TRIED.add(path_str)
+            if add_wanted_song_from_musicbrainz(db, item, metadata, duration):
+                if find_fileless_equivalent(
+                    db,
+                    candidate_artist_ids(db, item, metadata.get("artist")),
+                    title,
+                    duration,
+                ):
+                    return "retry_import"
         return "still_held"
 
     @staticmethod
