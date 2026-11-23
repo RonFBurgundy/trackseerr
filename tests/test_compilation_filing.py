@@ -55,10 +55,17 @@ def _group(
 NOW_44 = _group("rg-now44", "Now That's What I Call Music! 44", secondary=["Compilation"], date="1999-11-01", various=True)
 
 
-def _enricher(groups_by_rec: dict[str, list[dict[str, Any]]], rg_tracks: dict[str, list[dict[str, Any]]] | None = None):
+def _enricher(
+    groups_by_rec: dict[str, list[dict[str, Any]]],
+    rg_tracks: dict[str, list[dict[str, Any]]] | None = None,
+    search_results: dict[tuple[str, str], list[dict[str, Any]] | None] | None = None,
+):
     enricher = MagicMock(spec=MbidEnricherClient)
     enricher.get_recording_release_groups.side_effect = lambda rec: groups_by_rec.get(rec, [])
     enricher.get_release_group_tracks.side_effect = lambda rg, force=False: (rg_tracks or {}).get(rg, [])
+    enricher.search_recordings.side_effect = lambda artist, title, limit=10: (search_results or {}).get(
+        (artist, title), []
+    )
     return enricher
 
 
@@ -506,3 +513,142 @@ def test_refile_out_of_various_no_release_group_album(db: Database, tmp_path: Pa
     assert bob is not None and alice is not None
     assert db.album_holding_release_group(str(bob["id"]), "rg-bob", "") is not None
     assert db.album_holding_release_group(str(alice["id"]), "rg-alice", "") is not None
+
+
+LMFAO_MBID = "44444444-4444-4444-4444-444444444444"
+
+
+def test_out_of_various_credit_without_mbid_searches_home(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Party Rock Anthem", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "LMFAO", "artist_mbid": None, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    single = _group("rg-party-single", "Party Rock Anthem", primary="Single", artist_ids=[LMFAO_MBID])
+    enricher = _enricher(
+        {"rec-va-only": [NOW_44], "rec-lmfao-studio": [single]},
+        search_results={
+            ("LMFAO", "Party Rock Anthem"): [
+                {
+                    "id": "rec-lmfao-studio",
+                    "title": "Party Rock Anthem",
+                    "score": 100,
+                    "artist_ids": [LMFAO_MBID],
+                    "artist_names": ["LMFAO"],
+                    "artist_credit": "LMFAO",
+                }
+            ]
+        },
+    )
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["filed_home"] == 1
+    assert counts["searched_home"] == 1
+    assert db.get_library_album("alb-va") is None
+    lmfao = db.get_library_artist_by_mbid(LMFAO_MBID)
+    assert lmfao is not None and lmfao["name"] == "LMFAO" and not lmfao["monitored"]
+    holder = db.album_holding_release_group(str(lmfao["id"]), "rg-party-single", "")
+    assert holder is not None
+    moved = [t for t in db.list_library_tracks(album_id=holder, limit=50) if t["has_file"]]
+    assert len(moved) == 1
+    assert moved[0]["mb_recording_id"] == "rec-va-only"
+
+
+def test_out_of_various_compilation_only_recording_searches_home(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.upsert_library_artist(LibraryArtist(id="artist-bob", name="Bob Marley", mbid=BOB_MBID, monitored=True))
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    home = _group("rg-exodus", "Exodus", artist_ids=[BOB_MBID])
+    enricher = _enricher(
+        {"rec-va-only": [NOW_44], "rec-bob-studio": [home]},
+        search_results={
+            ("Bob Marley", "Could I Be In Love"): [
+                {
+                    "id": "rec-bob-studio",
+                    "title": "Could I Be In Love",
+                    "score": 100,
+                    "artist_ids": [BOB_MBID],
+                    "artist_names": ["Bob Marley"],
+                    "artist_credit": "Bob Marley",
+                }
+            ]
+        },
+    )
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["filed_home"] == 1
+    assert counts["searched_home"] == 1
+    assert db.get_library_album("alb-va") is None
+    holder = db.album_holding_release_group("artist-bob", "rg-exodus", "")
+    assert holder is not None
+    moved = [t for t in db.list_library_tracks(album_id=holder, limit=50) if t["has_file"]]
+    assert len(moved) == 1 and moved[0]["mb_recording_id"] == "rec-va-only"
+
+
+def test_out_of_various_search_rejects_other_artist(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    other_home = _group("rg-other", "Other", artist_ids=[ALICE_MBID])
+    enricher = _enricher(
+        {"rec-va-only": [NOW_44], "rec-other": [other_home]},
+        search_results={
+            ("Bob Marley", "Could I Be In Love"): [
+                {
+                    "id": "rec-other",
+                    "title": "Could I Be In Love",
+                    "score": 100,
+                    "artist_ids": [ALICE_MBID],
+                    "artist_names": ["Bob Marley"],
+                    "artist_credit": "Bob Marley",
+                }
+            ]
+        },
+    )
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["filed_home"] == 0
+    assert counts["searched_home"] == 0
+    album = db.get_library_album("alb-va")
+    assert album is not None and album["artist_id"] == va_id
+
+
+def test_out_of_various_search_no_candidate_stays(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    enricher = _enricher({"rec-va-only": [NOW_44]}, search_results={("Bob Marley", "Could I Be In Love"): []})
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["filed_home"] == 0
+    assert counts["searched_home"] == 0
+    assert counts["errors"] == 0
+    album = db.get_library_album("alb-va")
+    assert album is not None and album["artist_id"] == va_id
