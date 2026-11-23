@@ -125,7 +125,9 @@ def _run_replay_poll(db: Database, staging: Path, held_tags: dict[str, dict[str,
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=mock_inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=mock_inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=mock_inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None), \
+         patch("trackseerr.acquisition_import.add_wanted_song_from_musicbrainz", return_value=None), \
+         patch("trackseerr.acquisition_worker.add_wanted_song_from_musicbrainz", return_value=None):
         worker = AcquisitionWorker()
         stats = worker.poll_once(db=db, staging_dir=str(staging))
     return stats

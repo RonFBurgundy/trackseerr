@@ -18,8 +18,8 @@ collect_ignore_glob = [] if os.environ.get("RUN_INTEGRATION") == "1" else ["inte
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "real_metadata_network: allow real DNS/HTTP to musicbrainz.org, api.deezer.com, coverartarchive.org, "
-        "itunes.apple.com (refused by default in tests)",
+        "real_metadata_network: allow real DNS/HTTP to musicbrainz.org, brainzmash.cc, api.deezer.com, "
+        "coverartarchive.org, itunes.apple.com (refused by default in tests)",
     )
     config.addinivalue_line(
         "markers",
@@ -320,7 +320,7 @@ def _isolated_mediacover_service(request, monkeypatch):
     _reset()
 
 
-_BANNED_HOSTS = ("musicbrainz.org", "api.deezer.com", "deezer.com", "coverartarchive.org", "itunes.apple.com")
+_BANNED_HOSTS = ("musicbrainz.org", "brainzmash.cc", "api.deezer.com", "deezer.com", "coverartarchive.org", "itunes.apple.com")
 _real_getaddrinfo = socket.getaddrinfo
 _network_violations: list[str] = []
 
@@ -341,9 +341,9 @@ def _guarded_getaddrinfo(host, *args, **kwargs):
 
 @pytest.fixture(autouse=True)
 def _no_real_metadata_network(request, monkeypatch):
-    """No test may resolve musicbrainz.org, api.deezer.com, coverartarchive.org or itunes.apple.com: those must be
-    mocked. Name resolution is refused for every client library (and every thread, including strays that outlive their
-    test), and any attempt fails the test it landed in. Opt out with ``@pytest.mark.real_metadata_network``."""
+    """No test may resolve musicbrainz.org, brainzmash.cc, api.deezer.com, coverartarchive.org or itunes.apple.com:
+    those must be mocked. Name resolution is refused for every client library (and every thread, including strays that
+    outlive their test), and any attempt fails the test it landed in. Opt out with ``@pytest.mark.real_metadata_network``."""
     if request.node.get_closest_marker("real_metadata_network"):
         yield
         return

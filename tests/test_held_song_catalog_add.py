@@ -464,3 +464,183 @@ def test_parked_download_retried_after_add(
     _run_worker(db, dl, staging, metas2, poll_method="_poll_once")
     assert len(unmatched_fake.search_calls) == 1
     assert db.get_active_download("dl-2")["status"] == DownloadStatus.WARNING.value
+
+
+def test_compilation_holder_not_used(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+):
+    _, staging, _, _, _ = _seed_funkadelic(db, tmp_path)
+    db.upsert_library_album(
+        LibraryAlbum(
+            id="alb-mb",
+            artist_id="art-func",
+            title="Greatest Hits",
+            album_type="compilation",
+            secondary_types=["Compilation"],
+            mb_release_group_id="RG-comp",
+        )
+    )
+    dl = staging / "Funkadelic - Whole Lot of BS"
+    f = dl / "09_Whole Lot of BS (1972 Version).flac"
+    _flac(f)
+    metas = {
+        f.name: {
+            "title": "Whole Lot of BS (1972 Version)",
+            "duration": 240.0,
+            "duration_seconds": 240.0,
+            "track_number": 9,
+        }
+    }
+    rg_comp = {
+        "id": "RG-comp",
+        "title": "Greatest Hits",
+        "primary_type": "Album",
+        "secondary_types": ["Compilation"],
+    }
+    rg_album = {
+        "id": "RG-album",
+        "title": "Maggot Brain",
+        "primary_type": "Album",
+        "secondary_types": [],
+        "first_release_date": "1971-07-12",
+    }
+    fake = _FakeEnricher(
+        search_result=[_r1_candidate(241000)],
+        release_groups={"R1": [rg_comp, rg_album]},
+    )
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: fake)
+
+    def _seed_home_album(d: Database, _enr: Any, artist_id: str, group: dict[str, Any]) -> str:
+        d.upsert_library_album(
+            LibraryAlbum(
+                id="alb-home",
+                artist_id=artist_id,
+                title=str(group["title"]),
+                mb_release_group_id=str(group["id"]),
+                monitored=False,
+            )
+        )
+        return "alb-home"
+
+    with patch(
+        "trackseerr.compilation_filing.ensure_release_group_album",
+        side_effect=_seed_home_album,
+    ) as mock_ensure:
+        _run_worker(db, dl, staging, metas)
+
+    mock_ensure.assert_called_once()
+    assert mock_ensure.call_args[0][3]["id"] == "RG-album"
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert db.get_library_track_by_mb_recording_id("R1", album_id="alb-home") is not None
+    assert db.get_library_track_by_mb_recording_id("R1", album_id="alb-mb") is None
+
+
+def test_requested_album_title_wins(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+):
+    _, staging, _, _, _ = _seed_funkadelic(db, tmp_path)
+    db.upsert_library_album(
+        LibraryAlbum(
+            id="alb-single",
+            artist_id="art-func",
+            title="Whole Lot of BS",
+            album_type="single",
+            mb_release_group_id="RG-single",
+        )
+    )
+    dl = staging / "Funkadelic - Whole Lot of BS"
+    f = dl / "09_Whole Lot of BS (1972 Version).flac"
+    _flac(f)
+    metas = {
+        f.name: {
+            "title": "Whole Lot of BS (1972 Version)",
+            "album": "Maggot Brain",
+            "duration": 240.0,
+            "duration_seconds": 240.0,
+            "track_number": 9,
+        }
+    }
+    fake = _FakeEnricher(
+        search_result=[_r1_candidate(241000)],
+        release_groups={
+            "R1": [
+                {"id": "RG-single", "title": "Whole Lot of BS", "primary_type": "Single", "secondary_types": []},
+                {"id": "RG1", "title": "Maggot Brain", "primary_type": "Album", "secondary_types": []},
+            ]
+        },
+    )
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: fake)
+
+    with patch("trackseerr.compilation_filing.ensure_release_group_album") as mock_ensure:
+        _run_worker(db, dl, staging, metas)
+
+    mock_ensure.assert_not_called()
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert db.get_library_track_by_mb_recording_id("R1", album_id="alb-mb") is not None
+    assert db.get_library_track_by_mb_recording_id("R1", album_id="alb-single") is None
+
+
+def test_home_holder_reused(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+):
+    _, staging, _, _, _ = _seed_funkadelic(db, tmp_path)
+    dl = staging / "Funkadelic - Whole Lot of BS"
+    f = dl / "09_Whole Lot of BS (1972 Version).flac"
+    _flac(f)
+    metas = {
+        f.name: {
+            "title": "Whole Lot of BS (1972 Version)",
+            "album": "",
+            "duration": 240.0,
+            "duration_seconds": 240.0,
+            "track_number": 9,
+        }
+    }
+    fake = _FakeEnricher(
+        search_result=[_r1_candidate(241000)],
+        release_groups={"R1": [{"id": "RG1", "title": "Maggot Brain", "primary_type": "Album", "secondary_types": []}]},
+    )
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: fake)
+
+    with patch("trackseerr.compilation_filing.ensure_release_group_album") as mock_ensure:
+        _run_worker(db, dl, staging, metas)
+
+    mock_ensure.assert_not_called()
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.IMPORTED.value
+    assert db.get_library_track_by_mb_recording_id("R1", album_id="alb-mb") is not None
+
+
+def test_no_home_group_still_holds(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+):
+    _, staging, _, _, _ = _seed_funkadelic(db, tmp_path)
+    dl = staging / "Funkadelic - Whole Lot of BS"
+    f = dl / "09_Whole Lot of BS (1972 Version).flac"
+    _flac(f)
+    metas = {
+        f.name: {
+            "title": "Whole Lot of BS (1972 Version)",
+            "duration": 240.0,
+            "duration_seconds": 240.0,
+            "track_number": 9,
+        }
+    }
+    fake = _FakeEnricher(
+        search_result=[_r1_candidate(241000)],
+        release_groups={
+            "R1": [
+                {"id": "RG-va", "title": "Now Funk", "primary_type": "Album", "is_various": True},
+                {"id": "RG-comp", "title": "Best Of", "primary_type": "Album", "secondary_types": ["Compilation"]},
+            ]
+        },
+    )
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: fake)
+
+    _run_worker(db, dl, staging, metas)
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.WARNING.value
+    assert db.get_library_track_by_mb_recording_id("R1") is None

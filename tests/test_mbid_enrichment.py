@@ -562,6 +562,7 @@ class TestAcquisitionEnrichment:
         with (
             patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=mock_driver),
             patch("trackseerr.clients.mbid_enricher.MbidEnricherClient.lookup_track_mbids", return_value=resolved_mbids) as mock_lookup,
+            patch("trackseerr.clients.mbid_enricher.MbidEnricherClient.get_recording_release_groups", return_value=[]),
         ):
             worker = AcquisitionWorker()
             stats = worker.poll_once(db=test_db, staging_dir=str(staging_dir))
@@ -671,7 +672,11 @@ class TestScannerMbidIngestion:
         write_audio_tags(track_file, tags_to_embed)
 
         scanner = LibraryScanner()
-        status = scanner.scan(test_db, root_folder=str(music_dir))
+        with patch(
+            "trackseerr.clients.mbid_enricher.MbidEnricherClient.get_recording_release_groups",
+            return_value=[],
+        ):
+            status = scanner.scan(test_db, root_folder=str(music_dir))
 
         assert status["status"] == "completed"
         assert status["artists_created"] == 1

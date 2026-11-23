@@ -30,6 +30,7 @@ from trackseerr.api.dependencies import (
     get_config,
     get_db,
     get_discovery_client,
+    get_mbid_enricher,
 )
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.artist_ingest import ingest_artist_native
@@ -234,10 +235,15 @@ def mock_discovery_client():
 @pytest.fixture
 def app_and_client(test_db: Database, test_config: Config, mock_discovery_client):
     """Creates a FastAPI test client with injected test database, config, and discovery mock."""
+    mock_enricher = MagicMock(spec=MbidEnricherClient)
+    mock_enricher.lookup_artist_mbid.return_value = None
+    mock_enricher.source_available.return_value = True
+
     app = create_app(db=test_db, config=test_config)
     app.dependency_overrides[get_db] = lambda: test_db
     app.dependency_overrides[get_config] = lambda: test_config
     app.dependency_overrides[get_discovery_client] = lambda: mock_discovery_client
+    app.dependency_overrides[get_mbid_enricher] = lambda: mock_enricher
 
     client = TestClient(app)
     return app, client
