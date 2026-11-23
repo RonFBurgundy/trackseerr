@@ -294,6 +294,7 @@ def test_expired_row_is_dropped(db, clients, clock, caplog):
     clock.advance(60 + 24 * 60 - 1)  # just inside max(24h, 2x60min) past release_at
     stats, driver = tick(db, clock)
     assert stats["released"] == 1  # still valid
+    clock.advance(24 * 60 + 1)  # past served-window TTL so the item can park again
     park_again = park(db)
     clock.advance(60 + 24 * 60 + 5)
     stats, driver = tick(db, clock)
@@ -378,3 +379,98 @@ def test_apply_gate_with_none_in_parked_rank(db, clock):
     db.conn.commit()
     res, _ = grab(db, [cand()], album_id="alb-1")  # must not raise TypeError
     assert res.get("delayed") is True
+
+
+# ---------------------------------------------------------------------------------------------- 6. dedupe & served
+
+
+def test_same_release_for_two_items_parks_once(db, clock):
+    set_default(db)
+    res1, _ = grab(db, [cand()], album_id="alb-1")
+    assert res1.get("delayed") is True
+    res2, _ = grab(db, [cand()], request_id="req-2")
+    assert res2.get("delayed") is True
+    rows = db.list_pending_releases()
+    assert len(rows) == 1
+    assert rows[0]["album_id"] == "alb-1"
+    assert rows[0]["added_at"] == "2026-01-01T12:00:00Z"
+
+
+def test_different_release_for_other_item_still_parks(db, clock):
+    set_default(db)
+    grab(db, [cand()], album_id="alb-1")
+    grab(db, [cand(title="Nirvana - Nevermind (Deluxe) [FLAC]", did="id-2")], request_id="req-2")
+    assert len(db.list_pending_releases()) == 2
+
+
+def test_failed_after_served_window_grabs_immediately(db, clients, clock):
+    park(db)
+    _stats, tick_driver = tick(db, clock, 61)
+    tick_driver.download.assert_called_once()
+
+    clock.advance(5)
+    res, grab_driver = grab(db, [cand(title="Nirvana - Nevermind (Remaster) [FLAC]", did="id-9")])
+    assert res["success"] is True
+    grab_driver.download.assert_called_once()
+    assert db.list_pending_releases() == []
+
+
+def test_served_window_expires(db, clients, clock):
+    park(db)
+    _stats, tick_driver = tick(db, clock, 61)
+    tick_driver.download.assert_called_once()
+
+    clock.advance(24 * 60 + 1)
+    res, grab_driver = grab(db, [cand(title="Nirvana - Nevermind (Remaster) [FLAC]", did="id-9")])
+    assert res.get("delayed") is True
+    grab_driver.download.assert_not_called()
+    assert len(db.list_pending_releases()) == 1
+
+
+def test_manual_grab_now_does_not_mark_served(db, clients, clock):
+    row = park(db)
+    driver = MagicMock()
+    driver.download.return_value = HASH
+    with patch("trackseerr.acquisition_coordinator.get_acquisition_driver", return_value=driver):
+        manual = pending_worker.grab_pending(db, row)
+    assert manual["success"] is True
+    driver.download.assert_called_once()
+
+    res, grab_driver = grab(db, [cand(title="Nirvana - Nevermind (Remaster) [FLAC]", did="id-9")])
+    assert res.get("delayed") is True
+    grab_driver.download.assert_not_called()
+    assert len(db.list_pending_releases()) == 1
+
+
+def test_served_window_is_per_protocol(db, clients, clock):
+    d = db.list_delay_profiles()[-1]
+    db.update_delay_profile(
+        d["id"],
+        {
+            "name": d["name"],
+            "preferred_protocol": "torrent",
+            "delays": {"usenet": 60, "torrent": 60, "soulseek": 0},
+            "bypass_if_highest_quality": False,
+            "bypass_if_above_score": None,
+            "tags": [],
+        },
+    )
+    res1, _ = grab(db, [cand()])
+    assert res1.get("delayed") is True
+    _stats, tick_driver = tick(db, clock, 61)
+    tick_driver.download.assert_called_once()
+
+    usenet_cand = AcquisitionSearchResult(
+        download_id="id-nzb",
+        title="Nirvana - Nevermind [FLAC]",
+        artist="Nirvana",
+        album="Nevermind",
+        size_bytes=300_000_000,
+        download_url=SECRET_URL,
+        source="newznab",
+        protocol="usenet",
+    )
+    res2, grab_driver = grab(db, [usenet_cand])
+    assert res2.get("delayed") is True
+    grab_driver.download.assert_not_called()
+    assert len(db.list_pending_releases()) == 1

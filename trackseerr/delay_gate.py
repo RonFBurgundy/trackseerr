@@ -21,6 +21,7 @@ from trackseerr.item_history import GrabTrigger
 from trackseerr.models import AcquisitionSearchResult, EvaluationResult
 
 logger = logging.getLogger(__name__)
+_SERVED_TTL_MIN = timedelta(hours=24)
 
 _CANDIDATE_FIELDS = (
     "download_id",
@@ -191,6 +192,32 @@ class GateDecision:
     claimed: Optional[dict[str, Any]] = None
 
 
+def _skip_or_hold_without_row(
+    db: Any,
+    *,
+    candidate: AcquisitionSearchResult,
+    key: str,
+    delay: int,
+    now: datetime,
+    album_id: Optional[str],
+    track_id: Optional[str],
+    request_id: Optional[str],
+) -> Optional[GateDecision]:
+    """Deduplicates identical parked releases across items and skips re-waiting after a served window."""
+    protocol = normalize_protocol(candidate.protocol)
+    parked = db.find_pending_release_by_release(candidate.title or "", protocol)
+    if parked is not None:
+        return GateDecision(
+            False,
+            f"Same release already parked for another item: {parked['reason']}",
+            pending=parked,
+        )
+    ttl = max(_SERVED_TTL_MIN, timedelta(minutes=2 * delay))
+    if db.delay_window_served_since(protocol, _iso(now - ttl), key, album_id, track_id, request_id):
+        return GateDecision(True, "delay window already served for this item", candidate=candidate, claimed=None)
+    return None
+
+
 def apply_gate(
     db: Any,
     *,
@@ -233,6 +260,20 @@ def apply_gate(
         why = "no delay for this protocol" if delay <= 0 else f"delay bypassed: {bypass}"
         return GateDecision(True, why, candidate=candidate, claimed=claimed)
 
+    if existing is None:
+        early = _skip_or_hold_without_row(
+            db,
+            candidate=candidate,
+            key=key,
+            delay=delay,
+            now=now,
+            album_id=album_id,
+            track_id=track_id,
+            request_id=request_id,
+        )
+        if early is not None:
+            return early
+
     added_at = parse_ts(existing["added_at"]) if existing else now
     release_at = added_at + timedelta(minutes=delay)
     rank_list = [list(x) if isinstance(x, tuple) else x for x in rank]
@@ -247,6 +288,9 @@ def apply_gate(
             claimed = db.claim_pending_release(existing["id"])
             if claimed is None:  # the tick, the endpoint or another search is grabbing this item right now
                 return GateDecision(False, "already being released", pending=existing)
+        db.mark_delay_window_served(
+            key, normalize_protocol(candidate.protocol), _iso(now), album_id, track_id, request_id
+        )
         return GateDecision(True, f"delay window of {delay} min elapsed", candidate=candidate, claimed=claimed)
 
     reason = f"Delayed {delay} min for {normalize_protocol(candidate.protocol)} (profile '{profile.get('name')}')"

@@ -263,6 +263,16 @@ CREATE TABLE pending_releases (
                 release_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
             , attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT);
+CREATE TABLE delay_windows_served (
+                item_key TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                album_id TEXT,
+                track_id TEXT,
+                request_id TEXT,
+                served_at TEXT NOT NULL,
+                PRIMARY KEY (item_key, protocol)
+            );
+CREATE INDEX idx_delay_served_served_at ON delay_windows_served(served_at);
 CREATE TABLE quality_definitions (
                 quality TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
