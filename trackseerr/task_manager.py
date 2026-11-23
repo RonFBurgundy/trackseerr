@@ -466,6 +466,7 @@ class RunHandle:
         self.stop_event = threading.Event()
         self.progress_current: int = 0
         self.progress_total: Optional[int] = None
+        self.stage: Optional[str] = None
 
     def should_stop(self) -> bool:
         return self.stop_event.is_set()
@@ -473,6 +474,11 @@ class RunHandle:
     def set_progress(self, current: int, total: Optional[int] = None) -> None:
         self.progress_current = current
         self.progress_total = total
+
+    def set_stage(self, index: int, count: int, label: str) -> None:
+        self.stage = f"Step {index} of {count} · {label}"
+        self.progress_current = 0
+        self.progress_total = None
 
     def apply_result(self, result: Any) -> None:
         """Takes the outcome from a worker's result dict (``status == already_running`` discards the run)."""
@@ -516,13 +522,13 @@ def is_cancellable(task_id: str) -> bool:
         return task_id in _manual_runs
 
 
-def manual_run_progress(task_id: str) -> Optional[tuple[int, Optional[int]]]:
+def manual_run_progress(task_id: str) -> Optional[tuple[int, Optional[int], Optional[str]]]:
     with _manual_runs_lock:
         handle = _manual_runs.get(task_id)
         if handle is None:
             return None
-        if handle.progress_total is not None or handle.progress_current > 0:
-            return (handle.progress_current, handle.progress_total)
+        if handle.progress_total is not None or handle.progress_current > 0 or handle.stage is not None:
+            return (handle.progress_current, handle.progress_total, handle.stage)
         return None
 
 

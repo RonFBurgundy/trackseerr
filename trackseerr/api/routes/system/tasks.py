@@ -211,11 +211,16 @@ def _task_progress(task_id: str, running: bool) -> Optional[TaskProgress]:
         )
     snap = task_manager.manual_run_progress(task_id)
     if snap:
+        current, total, stage = snap
         msg = job_tracker.running_message(task_id)
+        if stage and msg:
+            combined = f"{stage} · {msg}"
+        else:
+            combined = stage or msg
         return TaskProgress(
-            current=snap[0],
-            total=snap[1] or None,
-            message=redact_text(msg) if msg else None,
+            current=current if total else None,
+            total=total or None,
+            message=redact_text(combined) if combined else None,
         )
     message = job_tracker.running_message(task_id)
     return TaskProgress(message=redact_text(message)) if message else None

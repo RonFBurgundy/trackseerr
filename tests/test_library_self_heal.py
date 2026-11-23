@@ -32,7 +32,7 @@ def test_self_heal_runs_repair_then_safe_renames(db: Database, monkeypatch: pyte
     events: list[str] = []
     sentinel_server = object()
 
-    def fake_repair(d: Any, run: Any) -> None:
+    def fake_repair(d: Any, run: Any, **kw: Any) -> None:
         events.append("repair")
         run.message = "repair: artists=1"
 
@@ -64,7 +64,7 @@ def test_self_heal_skips_renames_in_lidarr_mode(db: Database, monkeypatch: pytes
     db.update_media_management_settings({"library_mode": "lidarr"})
     events: list[str] = []
 
-    def fake_repair(d: Any, run: Any) -> None:
+    def fake_repair(d: Any, run: Any, **kw: Any) -> None:
         events.append("repair")
         run.message = "repair: ok"
 
@@ -91,7 +91,7 @@ def test_self_heal_skips_renames_in_lidarr_mode(db: Database, monkeypatch: pytes
 def test_self_heal_stops_after_repair_when_cancelled(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
     events: list[str] = []
 
-    def fake_repair(d: Any, run: Any) -> None:
+    def fake_repair(d: Any, run: Any, **kw: Any) -> None:
         events.append("repair")
         run.stop_event.set()
 
@@ -127,7 +127,9 @@ def test_safe_rename_file_ids_only_default_selected(db: Database, tmp_path: Path
 
 
 def test_worker_records_scheduled_run(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(artist_repair, "run_repair_and_match", lambda d, run: setattr(run, "message", "repair: ok"))
+    monkeypatch.setattr(
+        artist_repair, "run_repair_and_match", lambda d, run, **kw: setattr(run, "message", "repair: ok")
+    )
     monkeypatch.setattr(lsh, "safe_rename_file_ids", lambda d: ["fl-1"])
     monkeypatch.setattr(
         lsh, "apply_renames", lambda d, ids, srv: {"renamed_count": 1, "blocked_count": 0, "errors": []}
@@ -172,7 +174,9 @@ def test_never_calls_retag(db: Database, tmp_path: Path, monkeypatch: pytest.Mon
         "retag_library",
         lambda *a, **kw: (_ for _ in ()).throw(AssertionError("retag_library must never be called")),
     )
-    monkeypatch.setattr(artist_repair, "run_repair_and_match", lambda d, run: setattr(run, "message", "repair: ok"))
+    monkeypatch.setattr(
+        artist_repair, "run_repair_and_match", lambda d, run, **kw: setattr(run, "message", "repair: ok")
+    )
     monkeypatch.setattr(lsh, "get_media_server", lambda cfg: None)
 
     run = RunHandle()
@@ -304,3 +308,41 @@ def test_manual_trigger_refused_while_scheduled_run_active(db: Database) -> None
         assert exc_info.value.status_code == 409
     finally:
         tasks_mod.library_self_heal_worker._active_run = False
+
+
+def test_self_heal_records_stages_in_order(db: Database, monkeypatch: pytest.MonkeyPatch) -> None:
+    import trackseerr.backup
+    import trackseerr.compilation_filing
+    import trackseerr.match_suggestions
+    import trackseerr.mb_metadata_store
+    import trackseerr.recording_search
+    import trackseerr.release_matching
+
+    monkeypatch.setattr(trackseerr.backup, "create_backup", lambda *a, **kw: None)
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: object())
+    monkeypatch.setattr(artist_repair, "run_artist_repair", lambda *a, **kw: {"artists": 0})
+    monkeypatch.setattr(trackseerr.recording_search, "fill_recordings_from_search", lambda *a, **kw: {})
+    monkeypatch.setattr(trackseerr.release_matching, "link_albums_by_recording", lambda *a, **kw: {})
+    monkeypatch.setattr(trackseerr.release_matching, "merge_title_duplicates", lambda *a, **kw: {})
+    monkeypatch.setattr(trackseerr.compilation_filing, "refile_various_albums", lambda *a, **kw: {})
+    monkeypatch.setattr(trackseerr.compilation_filing, "refile_out_of_various", lambda *a, **kw: {})
+    monkeypatch.setattr(trackseerr.release_matching, "match_album_releases", lambda *a, **kw: {})
+    monkeypatch.setattr(trackseerr.match_suggestions, "auto_match_unlinked", lambda *a, **kw: {"applied": 1})
+    monkeypatch.setattr(lsh, "safe_rename_file_ids", lambda d: [])
+    monkeypatch.setattr(lsh, "apply_renames", lambda d, ids, srv: {"renamed_count": 0, "blocked_count": 0, "errors": []})
+    monkeypatch.setattr(lsh, "get_media_server", lambda cfg: None)
+
+    stages: list[tuple[int, int, str]] = []
+
+    class _RecordingRun(RunHandle):
+        def set_stage(self, index: int, count: int, label: str) -> None:
+            stages.append((index, count, label))
+            super().set_stage(index, count, label)
+
+    run = _RecordingRun()
+    run_self_heal(db, _cfg(), run)
+
+    expected_total = len(artist_repair.REPAIR_STAGES) + 1
+    assert [s[0] for s in stages] == list(range(1, expected_total + 1))
+    assert all(s[1] == expected_total for s in stages)
+    assert stages[-1][2] == "Renaming files"

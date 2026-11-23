@@ -15,6 +15,8 @@ from trackseerr.task_manager import (
     is_cancellable,
     is_paused,
     record_task_run,
+    register_manual_run,
+    unregister_manual_run,
     wait_for_next_cycle,
 )
 
@@ -27,12 +29,14 @@ WORKER_WAKE_SECONDS = 3600.0
 
 def run_self_heal(db: Any, config: Any, run: Any) -> None:
     """Runs catalog repair + release matching, then applies safe library-wide renames (never retags)."""
-    from trackseerr.artist_repair import run_repair_and_match
+    from trackseerr.artist_repair import REPAIR_STAGES, run_repair_and_match
 
-    run_repair_and_match(db, run)
+    total_stages = len(REPAIR_STAGES) + 1
+    run_repair_and_match(db, run, stage_count=total_stages)
     if run.should_stop():
         return
 
+    run.set_stage(total_stages, total_stages, "Renaming files")
     if get_library_mode(db) == "lidarr":
         run.message = f"{run.message or ''}; renames: skipped (Lidarr mode)"
         return
@@ -173,7 +177,11 @@ class LibrarySelfHealWorker:
             self._active_run = True
         try:
             with record_task_run(db, "library_self_heal", TRIGGER_SCHEDULED) as run:
-                run_self_heal(db, config, run)
+                register_manual_run("library_self_heal", run)
+                try:
+                    run_self_heal(db, config, run)
+                finally:
+                    unregister_manual_run("library_self_heal", run)
             return True
         except (sqlite3.Error, OSError) as exc:
             logger.warning("LibrarySelfHealWorker: self-heal failed: %s", safe_exc(exc))
