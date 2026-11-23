@@ -222,6 +222,10 @@ class MediaManagementSettingsModel(ApiModel):
     fingerprint_on_weak_match: bool = Field(
         False, description="Fingerprint files via AcoustID during download import when the tag match is weak or missing"
     )
+    keep_compilations_together: bool = Field(
+        False,
+        description="Keep songs from compilations together under Various Artists instead of filing each under its own artist",
+    )
     mb_mirror_url: str = Field("https://api.brainzmash.cc", description="MusicBrainz / BrainzMash API mirror base URL")
     mb_mirror_url_from_env: bool = Field(
         False, description="True when MUSICBRAINZ_URL or MUSICBRAINZ_MIRROR_URL sets the server; the saved value is then ignored"
@@ -278,6 +282,7 @@ class MediaManagementUpdateModel(BaseModel):
     acoustid_api_key: str | None = None
     acoustid_user_key: str | None = None
     fingerprint_on_weak_match: bool | None = None
+    keep_compilations_together: bool | None = None
     mb_mirror_url: str | None = None
     prefer_local_artwork: bool | None = None
     scan_monitor_option: str | None = None

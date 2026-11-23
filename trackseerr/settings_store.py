@@ -136,6 +136,7 @@ class SettingsStoreMixin:
                 str(res["acoustid_user_key"]) if res.get("acoustid_user_key") is not None else None
             )
             res["fingerprint_on_weak_match"] = bool(res.get("fingerprint_on_weak_match", 0))
+            res["keep_compilations_together"] = bool(res.get("keep_compilations_together", 0))
             res["mb_mirror_url"] = str(res.get("mb_mirror_url") or "https://api.brainzmash.cc")
             env_url = env_mb_mirror_url()
             if env_url:
@@ -193,6 +194,7 @@ class SettingsStoreMixin:
             "acoustid_api_key",
             "acoustid_user_key",
             "fingerprint_on_weak_match",
+            "keep_compilations_together",
             "mb_mirror_url",
             "prefer_local_artwork",
             "scan_monitor_option",
@@ -249,6 +251,8 @@ class SettingsStoreMixin:
                     "enable_quality_upgrades",
                     "enrich_mbids",
                     "fingerprint_on_weak_match",
+                    "keep_compilations_together",
+            "keep_compilations_together",
                     "prefer_local_artwork",
                     "recycle_bin_permanent_delete",
                 ):

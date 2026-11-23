@@ -208,6 +208,7 @@ def set_album_monitored(
         album_id=album_id,
         monitored=body.monitored,
         cascade_tracks=body.cascade_tracks,
+        by_hand=True,
     )
     updated = db.get_library_album(album_id)
     if updated is None:  # deleted between the write and the read
@@ -310,7 +311,7 @@ def bulk_edit_albums(
                 break
             hydrate_album_tracks(db, enricher, alb_id, deadline=deadline)
 
-    updated_count = db.bulk_set_albums_monitored(target_ids, body.monitored) if target_ids else 0
+    updated_count = db.bulk_set_albums_monitored(target_ids, body.monitored, by_hand=True) if target_ids else 0
     res_albums: dict[str, Any] = {"albums_updated": updated_count}
     if skipped_excluded > 0:
         res_albums["skipped_excluded"] = skipped_excluded

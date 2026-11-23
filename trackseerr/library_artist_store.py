@@ -66,6 +66,7 @@ class LibraryArtistStoreMixin:
         res.pop("search_text", None)
         res.pop("search_clean", None)
         res["monitored"] = bool(res.get("monitored", 1))
+        res["monitored_by_hand"] = bool(res.get("monitored_by_hand", 0))
         if res.get("year") is not None:
             res["year"] = int(res["year"])
         if res.get("total_tracks") is not None:
@@ -805,7 +806,7 @@ class LibraryArtistStoreMixin:
         return result
 
     def bulk_set_albums_monitored(
-        self, album_ids: list[str], monitored: bool, cascade_tracks: bool = True
+        self, album_ids: list[str], monitored: bool, cascade_tracks: bool = True, *, by_hand: bool = False
     ) -> int:
         """Sets ``monitored`` on many albums (and their tracks) in one transaction; returns albums updated."""
         val = 1 if monitored else 0
@@ -822,10 +823,16 @@ class LibraryArtistStoreMixin:
                             f"SELECT id FROM library_albums WHERE monitored <> ? AND id IN ({marks})", [val, *chunk]
                         ).fetchall()
                     ]
-                    cur = self.conn.execute(
-                        f"UPDATE library_albums SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({marks})",
-                        [val, *chunk],
-                    )
+                    if by_hand:
+                        cur = self.conn.execute(
+                            f"UPDATE library_albums SET monitored = ?, monitored_by_hand = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({marks})",
+                            [val, val, *chunk],
+                        )
+                    else:
+                        cur = self.conn.execute(
+                            f"UPDATE library_albums SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id IN ({marks})",
+                            [val, *chunk],
+                        )
                     updated += max(int(cur.rowcount), 0)
                     self._cancel_pending_profile_recompute_for_albums(chunk)
                     if cascade_tracks:

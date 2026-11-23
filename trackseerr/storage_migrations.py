@@ -90,6 +90,8 @@ class MigrationsMixin:
                 (100, self._migration_v100),
                 (101, self._migration_v101),
                 (102, self._migration_v102),
+                (103, self._migration_v103),
+                (104, self._migration_v104),
             ]
 
             applied = 0
@@ -342,6 +344,24 @@ class MigrationsMixin:
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_delay_served_served_at ON delay_windows_served(served_at)"
         )
+
+    def _migration_v103(self, cur: sqlite3.Cursor) -> None:
+        """v103: Add monitored_by_hand flag to library_albums."""
+        cur.execute("PRAGMA table_info(library_albums)")
+        existing_cols = {row[1] for row in cur.fetchall()}
+        if "monitored_by_hand" not in existing_cols:
+            cur.execute(
+                "ALTER TABLE library_albums ADD COLUMN monitored_by_hand INTEGER NOT NULL DEFAULT 0"
+            )
+
+    def _migration_v104(self, cur: sqlite3.Cursor) -> None:
+        """v104: Add keep_compilations_together flag to media_management_settings."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        existing_cols = {row[1] for row in cur.fetchall()}
+        if "keep_compilations_together" not in existing_cols:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN keep_compilations_together INTEGER NOT NULL DEFAULT 0"
+            )
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:
         """v100: library_match_suggestions keeps the best unsure MusicBrainz match per unlinked album."""

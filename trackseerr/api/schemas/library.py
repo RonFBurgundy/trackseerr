@@ -234,6 +234,7 @@ class LibraryAlbumRecord(ApiModel):
     year: Optional[int] = None
     album_type: Optional[str] = None
     monitored: Optional[bool] = None
+    monitored_by_hand: bool = False
     path: Optional[str] = None
     cover_url: Optional[str] = None
     total_tracks: Optional[int] = None
