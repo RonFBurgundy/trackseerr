@@ -856,3 +856,38 @@ def test_skip_reason_logged(
 
     assert "MusicBrainz add skipped" in caplog.text
     assert "file title is not the wanted song" in caplog.text
+
+
+def test_base_title_fallback_skips_live(
+    tmp_path: Path, db: Database, monkeypatch: pytest.MonkeyPatch
+):
+    wanted = "Rock Star (Live)"
+    _, staging, _, _, _ = _seed_funkadelic(db, tmp_path, title=wanted)
+    dl = staging / "Funkadelic - Rock Star (Live)"
+    f = dl / "09_Rock Star (Live).flac"
+    _flac(f)
+    metas = {
+        f.name: {
+            "title": wanted,
+            "duration": 240.0,
+            "duration_seconds": 240.0,
+            "track_number": 9,
+        }
+    }
+    fake = _FakeEnricher(
+        search_results_by_title={
+            wanted: [],
+            "Rock Star": [
+                {"id": "R-240", "title": "Rock Star", "artist_credit": "Funkadelic", "score": 100, "length_ms": 240000},
+            ],
+        },
+        release_groups={"R-240": [{"id": "RG1", "title": "Maggot Brain", "primary_type": "Album"}]},
+    )
+    monkeypatch.setattr(trackseerr.mb_metadata_store, "get_shared_enricher", lambda d: fake)
+
+    _run_worker(db, dl, staging, metas)
+
+    dl_row = db.get_active_download("dl-1")
+    assert dl_row["status"] == DownloadStatus.WARNING.value
+    assert len(db.list_library_tracks(album_id="alb-mb", limit=100)) == 8
+    assert fake.search_calls == [("Funkadelic", wanted)]
