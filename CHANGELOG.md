@@ -102,6 +102,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Various Artists is now kept for compilations you are really collecting: more than 3 songs, or a monitored album. When you only have one or two songs from a compilation, Library Self-Heal files each song under its own artist's release, and albums by a single artist that were wrongly listed under Various Artists move back to that artist. Plexamp then shows far fewer "Various Artists" albums once you run Rename Files and Retag.
 - Switching on one song in an album now also monitors its album and artist, so the song is really searched for. The album's other songs stay as they were.
 - TrackSeerr no longer contacts plex.tv with your Plex token unless it can tell the token is your own sign-in token. If your Plex server doesn't say, Settings → System → Status explains why, home users come from your Plex server only, and other users' playlists aren't changed. To fix it, use **Sign in with Plex** (see Added).
 - Rename Files now pre-selects renames that only remove a copy number like " (1)" or stray spaces from a name, even when AcoustID flags the audio, because the name still names the same song. If the name without the copy number is already taken by another file, the rename is marked as a name collision and left unselected.
@@ -154,6 +155,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Compilation files no longer get moved into another artist's folder (some had ended up under "Carl Douglas"). Run Rename Files once to put them back under Various Artists.
 - A download that was waiting for a manual import and gets retried now imports from the file on disk, instead of failing because Soulseek had already forgotten the transfer.
 - When adding a missing song from MusicBrainz, a title like "I Miss My Baby - 1972 Version" is also looked up as "I Miss My Baby", and the match is only used when its length is within 3 seconds of your file. Live, remix and other versions are never swapped for the plain song.
 - When two requests want the same file, a delay profile now holds it once instead of starting a second wait for the copy.
