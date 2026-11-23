@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- When a requested song downloads but isn't on any album in your library (a bonus track from a reissue, for example), TrackSeerr looks it up on MusicBrainz, adds it to the right album and imports it, instead of leaving it for a manual import. Songs already waiting for a manual import get one try after you update.
 - **Sign in with Plex** under Settings → Media Management → Media Server. Sign in once as the Plex server owner and TrackSeerr uses that account for Plex Home users and other users' playlists. Your `PLEX_TOKEN` is then only used to talk to your own Plex server, so you don't need `PLEX_TOKEN_CONFIRMED`.
 - Plex playlist sync matches songs by ID before guessing by name. Spotify songs (and Deezer songs when Deezer includes it) carry their ISRC, which leads straight to the exact file in your library and its Plex track, so a remaster or live copy is no longer picked by mistake. Songs that name matching can't find are looked up on MusicBrainz by artist, title and length, up to 40 per sync.
 - **Find match** in Library tools → Not on MusicBrainz: suggests the MusicBrainz release for an album, with how sure it is and which of your files it found. Choosing one links the album, then shows the new file names and tags to approve.
