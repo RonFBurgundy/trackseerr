@@ -326,16 +326,22 @@ class LibraryCatalogStoreMixin:
             self.conn.commit()
 
     def set_album_monitored(
-        self, album_id: str, monitored: bool, cascade_tracks: bool = True
+        self, album_id: str, monitored: bool, cascade_tracks: bool = True, *, by_hand: bool = False
     ) -> bool:
         """Sets monitoring status for an album and optionally cascades to child tracks."""
         val = 1 if monitored else 0
         with self._lock:
             before = self.conn.execute("SELECT monitored FROM library_albums WHERE id = ?", (str(album_id),)).fetchone()
-            cur = self.conn.execute(
-                "UPDATE library_albums SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                (val, str(album_id)),
-            )
+            if by_hand:
+                cur = self.conn.execute(
+                    "UPDATE library_albums SET monitored = ?, monitored_by_hand = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (val, val, str(album_id)),
+                )
+            else:
+                cur = self.conn.execute(
+                    "UPDATE library_albums SET monitored = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (val, str(album_id)),
+                )
             if cur.rowcount == 0:
                 return False
             self._cancel_pending_profile_recompute_for_albums([str(album_id)])

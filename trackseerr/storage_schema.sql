@@ -573,7 +573,7 @@ CREATE TABLE library_albums (
                 total_tracks INTEGER,
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
-            , mb_release_group_id TEXT, mb_release_id TEXT, genres TEXT, sort_title TEXT NOT NULL DEFAULT '', search_text TEXT NOT NULL DEFAULT '', search_clean TEXT NOT NULL DEFAULT '', secondary_types TEXT, art_version TEXT);
+            , mb_release_group_id TEXT, mb_release_id TEXT, genres TEXT, sort_title TEXT NOT NULL DEFAULT '', search_text TEXT NOT NULL DEFAULT '', search_clean TEXT NOT NULL DEFAULT '', secondary_types TEXT, art_version TEXT, monitored_by_hand INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE media_issues (
                 id TEXT PRIMARY KEY,
                 request_id TEXT REFERENCES music_requests(id) ON DELETE SET NULL,
