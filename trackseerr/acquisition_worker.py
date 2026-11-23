@@ -291,6 +291,34 @@ def _apply_stall_checks(
     return status_dict
 
 
+def _is_held_retry(item: dict[str, Any]) -> bool:
+    """True when a held download was requeued for import retry with files already on disk."""
+    return (
+        item.get("status") == DownloadStatus.COMPLETED.value
+        and str(item.get("error_message") or "").startswith("Retried import")
+        and bool(item.get("unmatched_files"))
+    )
+
+
+def _poll_status(
+    db: Database,
+    driver: Any,
+    item: dict[str, Any],
+    target_lookup: str,
+    client_config: dict[str, Any],
+    is_slskd: bool,
+) -> Optional[dict[str, Any]]:
+    """Query the download client or short-circuit to completed for retried held imports."""
+    if _is_held_retry(item):
+        return {"status": DownloadStatus.COMPLETED.value, "progress": 100.0}
+    try:
+        status_dict = driver.get_status(target_lookup)
+    except Exception as e:
+        logger.warning("Exception querying driver status for %s: %s", target_lookup, e)
+        return None
+    return _apply_stall_checks(db, driver, item, status_dict, target_lookup, client_config, is_slskd)
+
+
 def _research_after_failure(db: Database, item: dict[str, Any], reason: str) -> None:
     """Queue an immediate wanted-search for the track (or album's tracks) of a failed download."""
     from trackseerr.backlog_worker import backlog_worker  # lazy: backlog_worker imports this module's neighbours
@@ -1171,14 +1199,10 @@ class AcquisitionWorker(ImportPipelineMixin):
 
         # Poll driver status
         target_lookup = item.get("download_hash") or download_id
-        try:
-            status_dict = driver.get_status(target_lookup)
-        except Exception as e:
-            logger.warning("Exception querying driver status for %s: %s", target_lookup, e)
-            return
-
         is_slskd = str(client_config.get("driver_type")).lower() == "slskd"
-        status_dict = _apply_stall_checks(db, driver, item, status_dict, target_lookup, client_config, is_slskd)
+        status_dict = _poll_status(db, driver, item, target_lookup, client_config, is_slskd)
+        if status_dict is None:
+            return
 
         cur_status = status_dict.get("status", DownloadStatus.DOWNLOADING.value).lower()
         progress = float(status_dict.get("progress") or 0.0)
