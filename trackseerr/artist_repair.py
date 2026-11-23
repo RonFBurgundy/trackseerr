@@ -697,7 +697,7 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
     ``run`` is the task's ``RunHandle``. ``extra_stop`` lets the start-up caller also stop on process shutdown.
     """
     from trackseerr.backup import create_backup
-    from trackseerr.compilation_filing import refile_various_albums
+    from trackseerr.compilation_filing import refile_out_of_various, refile_various_albums
     from trackseerr.match_suggestions import auto_match_unlinked
     from trackseerr.mb_metadata_store import get_shared_enricher
     from trackseerr.recording_search import fill_recordings_from_search
@@ -744,6 +744,10 @@ def run_repair_and_match(db: Any, run: Any, extra_stop: StopFn = None) -> None:
         return
     various = refile_various_albums(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; various: {_format_counts(various)}"
+    if stop():
+        return
+    out_of_various = refile_out_of_various(db, enricher, should_stop=stop, on_progress=run.set_progress)
+    run.message = f"{run.message}; out of various: {_format_counts(out_of_various)}"
     if stop():
         return
     counts = match_album_releases(db, enricher, should_stop=stop, on_progress=run.set_progress)

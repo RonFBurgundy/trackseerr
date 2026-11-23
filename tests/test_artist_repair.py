@@ -411,7 +411,10 @@ def test_run_repair_and_match_runs_search_after_fill(db: Database, monkeypatch: 
     artist_repair.run_repair_and_match(db, run)
 
     assert "; search: tracks=3, filled=2" in run.message
+    assert "; various:" in run.message
+    assert "; out of various:" in run.message
     assert run.message.index("fill:") < run.message.index("search:") < run.message.index("link:")
+    assert run.message.index("; various:") < run.message.index("; out of various:")
 
 
 def test_run_repair_and_match_runs_fill_with_key(db: Database, monkeypatch: pytest.MonkeyPatch):
