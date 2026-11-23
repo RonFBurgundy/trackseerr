@@ -153,6 +153,10 @@ heading becomes the version and date.
 
 ### Fixed
 
+- When two requests want the same file, a delay profile now holds it once instead of starting a second wait for the copy.
+- A song that already waited its full delay no longer waits again when that download fails; the next copy found within a day (or twice the delay, if longer) is grabbed straight away.
+- Downloads that finish but need a manual import now show in History as **Needs import**, instead of stopping at "grabbed".
+- Files titled like "Song (Jack Mix; 2006 Remaster)" now match the library's "Song (Jack Mix)" instead of waiting for a manual import.
 - A song grab from an album torrent now finds the song's file when the file name credits a different artist (for example "Silkroad Ensemble - Green" on a Yo-Yo Ma album), so only that file downloads. It only does this when exactly one file matches.
 - Manual search now warns you when a song grab will download the whole torrent because TrackSeerr can't find the song's file in it or the download client can't download single files.
 - Manual search on a song from an artist's page now searches under that artist instead of "Unknown Artist".
