@@ -154,6 +154,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- A download that was waiting for a manual import and gets retried now imports from the file on disk, instead of failing because Soulseek had already forgotten the transfer.
+- When adding a missing song from MusicBrainz, a title like "I Miss My Baby - 1972 Version" is also looked up as "I Miss My Baby", and the match is only used when its length is within 3 seconds of your file. Live, remix and other versions are never swapped for the plain song.
 - When two requests want the same file, a delay profile now holds it once instead of starting a second wait for the copy.
 - A song that already waited its full delay no longer waits again when that download fails; the next copy found within a day (or twice the delay, if longer) is grabbed straight away.
 - Downloads that finish but need a manual import now show in History as **Needs import**, instead of stopping at "grabbed".
