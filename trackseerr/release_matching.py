@@ -369,7 +369,12 @@ def _link_unmatched_album(
 
 
 def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
-    from trackseerr.compilation_filing import file_album_under_various, various_group_for_title
+    from trackseerr.compilation_filing import (
+        file_album_under_various,
+        file_tracks_under_home,
+        keeps_compilation,
+        various_group_for_title,
+    )
 
     tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
     owned_rec_ids = [
@@ -386,6 +391,8 @@ def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], 
     under_various = _album_is_various_artists(db, album)
     va_group = None if under_various else various_group_for_title(list(groups.values()), album["title"])
     if va_group is not None:
+        if not keeps_compilation(db, album) and file_tracks_under_home(db, enricher, album, per_rec, counts):
+            return
         file_album_under_various(db, enricher, album, va_group, counts)
         return
 

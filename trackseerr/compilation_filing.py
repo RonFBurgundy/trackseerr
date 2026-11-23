@@ -22,6 +22,7 @@ from trackseerr.redaction import safe_exc
 logger = logging.getLogger(__name__)
 
 _PRIMARY_RANK = {"album": 0, "single": 1, "ep": 2}
+SMALL_COMPILATION_MAX_TRACKS = 3
 
 
 def various_artists_id(db: Any) -> str:
@@ -163,6 +164,47 @@ def album_artist_credit(db: Any, album: dict[str, Any]) -> tuple[str, Optional[s
     return str(artist.get("name") or ""), artist.get("mbid")
 
 
+def keeps_compilation(db: Any, album: dict[str, Any]) -> bool:
+    """True when a compilation should stay under Various Artists (monitored or > SMALL_COMPILATION_MAX_TRACKS owned)."""
+    if album.get("monitored"):
+        return True
+    owned = sum(1 for t in db.list_library_tracks(album_id=str(album["id"]), limit=1000) if t.get("has_file"))
+    return owned > SMALL_COMPILATION_MAX_TRACKS
+
+
+def _primary_track_credit(db: Any, track_id: str) -> Optional[dict[str, Any]]:
+    credits = [c for c in db.list_track_artists(track_id) if str(c.get("role") or "").casefold() == "primary"]
+    if not credits:
+        return None
+    return min(credits, key=lambda c: (c.get("position") is None, int(c.get("position") or 0)))
+
+
+def performer_artist(db: Any, track_id: str) -> Optional[dict[str, Any]]:
+    """Library artist for a track's primary credit (created unmonitored when missing); None without an MBID."""
+    credit = _primary_track_credit(db, track_id)
+    if credit is None:
+        return None
+    mbid = str(credit.get("artist_mbid") or "").strip()
+    if not mbid:
+        return None
+    existing = db.get_library_artist_by_mbid(mbid)
+    if existing is not None:
+        return dict(existing)
+    name = str(credit.get("artist_name") or "").strip()
+    if not name:
+        return None
+    created = db.upsert_library_artist(
+        LibraryArtist(
+            id=str(uuid.uuid4()),
+            name=name,
+            mbid=mbid,
+            monitored=False,
+            monitor_option="none",
+        )
+    )
+    return dict(created)
+
+
 def file_album_under_various(
     db: Any, enricher: Any, album: dict[str, Any], group: dict[str, Any], counts: dict[str, int]
 ) -> bool:
@@ -189,6 +231,8 @@ def file_tracks_under_home(
     album: dict[str, Any],
     per_rec_groups: dict[str, list[dict[str, Any]]],
     counts: dict[str, int],
+    *,
+    per_track_artist: bool = False,
 ) -> bool:
     """Moves each recording-known track of a small album into the album of its canonical release.
 
@@ -196,17 +240,26 @@ def file_tracks_under_home(
     """
     from trackseerr.artist_repair import move_track_into_album
 
-    artist_id = str(album["artist_id"])
-    artist = db.get_library_artist(artist_id) or {}
+    album_artist_id = str(album["artist_id"])
+    album_artist = None if per_track_artist else (db.get_library_artist(album_artist_id) or {})
     acted = False
     for track in db.list_library_tracks(album_id=album["id"], limit=1000):
         rec = str(track.get("mb_recording_id") or "").strip()
         if not rec or not track.get("has_file"):
             continue
-        home = home_release_group(per_rec_groups.get(rec, []), artist.get("mbid"), str(track.get("title") or ""))
+        if per_track_artist:
+            target_artist = performer_artist(db, str(track["id"]))
+            if target_artist is None:
+                continue
+            target_artist_id = str(target_artist["id"])
+            target_mbid = target_artist.get("mbid")
+        else:
+            target_artist_id = album_artist_id
+            target_mbid = (album_artist or {}).get("mbid")
+        home = home_release_group(per_rec_groups.get(rec, []), target_mbid, str(track.get("title") or ""))
         if home is None:
             continue
-        holder = ensure_release_group_album(db, enricher, artist_id, home)
+        holder = ensure_release_group_album(db, enricher, target_artist_id, home)
         if holder == str(album["id"]):
             continue
         acted = True
@@ -218,28 +271,42 @@ def file_tracks_under_home(
     return acted
 
 
-def _various_group_of_album(db: Any, enricher: Any, album: dict[str, Any]) -> Optional[dict[str, Any]]:
-    rg_id = str(album.get("mb_release_group_id") or "").strip()
-    for track in db.list_library_tracks(album_id=album["id"], limit=1000):
+def _per_recording_groups(enricher: Any, tracks: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    per_rec: dict[str, list[dict[str, Any]]] = {}
+    for track in tracks:
         rec = str(track.get("mb_recording_id") or "").strip()
-        if not rec or not track.get("has_file"):
-            continue
-        for group in enricher.get_recording_release_groups(rec):
+        if rec and track.get("has_file") and rec not in per_rec:
+            per_rec[rec] = enricher.get_recording_release_groups(rec)
+    return per_rec
+
+
+def _various_group_of_album(
+    rg_id: str, per_rec: dict[str, list[dict[str, Any]]]
+) -> Optional[dict[str, Any]]:
+    for groups in per_rec.values():
+        for group in groups:
             if group.get("is_various") and str(group.get("id")) == rg_id:
                 return group
     return None
 
 
 def _refile_one_album(db: Any, enricher: Any, album: dict[str, Any], va_id: str, counts: dict[str, int]) -> None:
-    group = _various_group_of_album(db, enricher, album)
+    rg_id = str(album.get("mb_release_group_id") or "").strip()
+    tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
+    per_rec = _per_recording_groups(enricher, tracks)
+    group = _various_group_of_album(rg_id, per_rec)
     if group is None:
         return
     counts["albums"] += 1
+    if not keeps_compilation(db, album):
+        file_tracks_under_home(db, enricher, album, per_rec, counts)
+        counts["kept_small"] = counts.get("kept_small", 0) + 1
+        return
     if db.album_holding_release_group(va_id, str(group["id"]), str(album["id"])) is not None:
         file_album_under_various(db, enricher, album, group, counts)
         return
     name, mbid = album_artist_credit(db, album)
-    for track in db.list_library_tracks(album_id=album["id"], limit=1000):
+    for track in tracks:
         ensure_primary_credit(db, str(track["id"]), name, mbid)
     db.move_album_to_artist(str(album["id"]), va_id)
     counts["moved"] += 1
@@ -252,7 +319,7 @@ def refile_various_albums(
     on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
 ) -> dict[str, int]:
     """Moves linked compilation albums that sit under a track artist to Various Artists."""
-    counts = {"albums": 0, "moved": 0, "merged": 0, "merge_conflict": 0, "errors": 0}
+    counts = {"albums": 0, "moved": 0, "merged": 0, "kept_small": 0, "filed_home": 0, "merge_conflict": 0, "errors": 0}
     va_id = various_artists_id(db)
     candidates = db.list_albums_with_files_outside_artist(va_id)
     total = len(candidates)
@@ -270,4 +337,83 @@ def refile_various_albums(
         if on_progress is not None:
             on_progress(done, total)
     logger.info("Various Artists refile finished: %s", counts)
+    return counts
+
+
+def _group_by_id(rg_id: str, per_rec: dict[str, list[dict[str, Any]]]) -> Optional[dict[str, Any]]:
+    for groups in per_rec.values():
+        for group in groups:
+            if str(group.get("id")) == rg_id:
+                return group
+    return None
+
+
+def _sole_performer_mbid(db: Any, owned_tracks: list[dict[str, Any]]) -> Optional[str]:
+    mbids: set[str] = set()
+    for track in owned_tracks:
+        credit = _primary_track_credit(db, str(track["id"]))
+        mbid = str((credit or {}).get("artist_mbid") or "").strip().lower()
+        if not mbid:
+            return None
+        mbids.add(mbid)
+    return next(iter(mbids)) if len(mbids) == 1 else None
+
+
+def _move_wrongly_linked_album(
+    db: Any, album: dict[str, Any], owned_tracks: list[dict[str, Any]], group: dict[str, Any], counts: dict[str, int]
+) -> None:
+    sole_mbid = _sole_performer_mbid(db, owned_tracks)
+    group_artists = {str(a).lower() for a in group.get("artist_ids") or []}
+    if sole_mbid is None or sole_mbid not in group_artists:
+        counts["skipped"] += 1
+        return
+    artist = performer_artist(db, str(owned_tracks[0]["id"]))
+    if artist is None:
+        counts["skipped"] += 1
+        return
+    db.move_album_to_artist(str(album["id"]), str(artist["id"]))
+    counts["moved_to_artist"] += 1
+
+
+def _refile_out_of_various_one(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
+    tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
+    owned_tracks = [t for t in tracks if t.get("has_file")]
+    per_rec = _per_recording_groups(enricher, owned_tracks)
+    rg_id = str(album.get("mb_release_group_id") or "").strip()
+    if rg_id:
+        group = _group_by_id(rg_id, per_rec)
+        if group is not None and not group.get("is_various"):
+            counts["albums"] += 1
+            _move_wrongly_linked_album(db, album, owned_tracks, group, counts)
+            return
+    if not rg_id or not keeps_compilation(db, album):
+        counts["albums"] += 1
+        file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True)
+
+
+def refile_out_of_various(
+    db: Any,
+    enricher: Any,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+) -> dict[str, int]:
+    """Moves real-artist albums and small compilations out of Various Artists to their performer."""
+    counts = {"albums": 0, "moved_to_artist": 0, "filed_home": 0, "merge_conflict": 0, "skipped": 0, "errors": 0}
+    va_id = various_artists_id(db)
+    candidates = db.list_albums_with_files_for_artist(va_id)
+    total = len(candidates)
+    if on_progress is not None:
+        on_progress(0, total)
+    for done, album in enumerate(candidates, start=1):
+        if should_stop is not None and should_stop():
+            logger.info("Out of Various Artists refile stopped early: %s", counts)
+            return counts
+        try:
+            _refile_out_of_various_one(db, enricher, album, counts)
+        except (sqlite3.Error, requests.RequestException) as exc:
+            counts["errors"] += 1
+            logger.warning("Out of Various Artists refile failed for album %s: %s", album.get("id"), safe_exc(exc))
+        if on_progress is not None:
+            on_progress(done, total)
+    logger.info("Out of Various Artists refile finished: %s", counts)
     return counts
