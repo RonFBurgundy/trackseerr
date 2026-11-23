@@ -727,11 +727,12 @@ class DownloadStoreMixin:
                 changed
                 and previous is not None
                 and previous["status"] != new_status
-                and new_status in ("failed", "imported")
+                and new_status in ("failed", "imported", "warning")
             ):
+                event = "held" if new_status == "warning" else new_status
                 try:
                     self.record_download_event(
-                        "failed" if new_status == "failed" else "imported",
+                        event,
                         download_id=str(download_id),
                         message=error_message,
                     )

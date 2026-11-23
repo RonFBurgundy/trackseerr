@@ -68,7 +68,10 @@ def norm_title(text: Any) -> str:
 
     def _bracket(match: "re.Match[str]") -> str:
         inner = match.group(1)
-        return " " if _is_noise(inner) else f" {inner} "
+        if _FEATURING.match(_squash(inner)):
+            return " "
+        kept = [p for p in re.split(r"[,/;]", inner) if not _is_noise(p)]
+        return f" {' '.join(kept)} " if kept else " "
 
     folded = _BRACKETED.sub(_bracket, folded)
     parts = _DASH_SPLIT.split(folded)

@@ -84,3 +84,38 @@ def test_native_history_track_and_resolved_library_ids(db):
     assert (recs["h1"]["artist_id"], recs["h1"]["album_id"]) == ("art-1", "alb-1")
     assert recs["h2"]["track"] is None and recs["h2"]["album_id"] == "alb-1"
     assert (recs["h3"]["artist_id"], recs["h3"]["album_id"]) == (None, None)  # deleted album: no dead link
+
+
+def test_warning_transition_records_held_event(db):
+    with db._lock:
+        db.conn.execute("PRAGMA foreign_keys = OFF")
+        db.conn.execute(
+            "INSERT INTO active_downloads (id, client_id, artist, title, status) VALUES (?, ?, ?, ?, ?)",
+            ("dl-held-1", "c1", "Depeche Mode", "Happiest Girl", "downloading"),
+        )
+        db.conn.commit()
+    msg = "1 file(s) couldn't be matched — manual import required"
+    assert db.update_download_status("dl-held-1", "warning", error_message=msg)
+    rows, total = db.list_download_history(1, 10, "asc", event="held")
+    assert total == 1
+    assert rows[0]["event"] == "held"
+    assert rows[0]["message"] == msg
+
+
+def test_warning_repeat_records_once(db):
+    with db._lock:
+        db.conn.execute("PRAGMA foreign_keys = OFF")
+        db.conn.execute(
+            "INSERT INTO active_downloads (id, client_id, artist, title, status) VALUES (?, ?, ?, ?, ?)",
+            ("dl-held-2", "c1", "Depeche Mode", "Happiest Girl", "downloading"),
+        )
+        db.conn.commit()
+    msg = "1 file(s) couldn't be matched — manual import required"
+    assert db.update_download_status("dl-held-2", "warning", error_message=msg)
+    assert db.update_download_status("dl-held-2", "warning", error_message=msg)
+    _, total = db.list_download_history(1, 10, "asc", event="held")
+    assert total == 1
+
+
+def test_history_filter_accepts_held():
+    assert "held" in Database.HISTORY_EVENTS
