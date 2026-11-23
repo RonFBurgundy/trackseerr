@@ -179,30 +179,76 @@ def _primary_track_credit(db: Any, track_id: str) -> Optional[dict[str, Any]]:
     return min(credits, key=lambda c: (c.get("position") is None, int(c.get("position") or 0)))
 
 
-def performer_artist(db: Any, track_id: str) -> Optional[dict[str, Any]]:
-    """Library artist for a track's primary credit (created unmonitored when missing); None without an MBID."""
-    credit = _primary_track_credit(db, track_id)
-    if credit is None:
+def _artist_for_mbid(db: Any, mbid: str, name: str) -> Optional[dict[str, Any]]:
+    """Library artist for an MBID, created unmonitored when missing and named; None without an MBID."""
+    clean_mbid = str(mbid or "").strip()
+    if not clean_mbid:
         return None
-    mbid = str(credit.get("artist_mbid") or "").strip()
-    if not mbid:
-        return None
-    existing = db.get_library_artist_by_mbid(mbid)
+    existing = db.get_library_artist_by_mbid(clean_mbid)
     if existing is not None:
         return dict(existing)
-    name = str(credit.get("artist_name") or "").strip()
-    if not name:
+    clean_name = str(name or "").strip()
+    if not clean_name:
         return None
     created = db.upsert_library_artist(
         LibraryArtist(
             id=str(uuid.uuid4()),
-            name=name,
-            mbid=mbid,
+            name=clean_name,
+            mbid=clean_mbid,
             monitored=False,
             monitor_option="none",
         )
     )
     return dict(created)
+
+
+def performer_artist(db: Any, track_id: str) -> Optional[dict[str, Any]]:
+    """Library artist for a track's primary credit (created unmonitored when missing); None without an MBID."""
+    credit = _primary_track_credit(db, track_id)
+    if credit is None:
+        return None
+    return _artist_for_mbid(db, str(credit.get("artist_mbid") or ""), str(credit.get("artist_name") or ""))
+
+
+def _search_home(
+    db: Any, enricher: Any, track: dict[str, Any], credit: dict[str, Any]
+) -> Optional[tuple[dict[str, Any], dict[str, Any]]]:
+    """Finds a track's performer artist and home release group via MusicBrainz recording search."""
+    from trackseerr import recording_search
+
+    name = str(credit.get("artist_name") or "").strip()
+    title = str(track.get("title") or "")
+    if not name or not title:
+        return None
+    candidates = enricher.search_recordings(name, title)
+    if not candidates:
+        return None
+    cand = recording_search.pick_search_recording(candidates, title, name, track.get("duration_seconds"), set())
+    if cand is None:
+        return None
+    credit_mbid = str(credit.get("artist_mbid") or "").strip()
+    cand_ids = [str(a).strip() for a in cand.get("artist_ids") or [] if str(a).strip()]
+    if credit_mbid:
+        if credit_mbid.lower() not in {a.lower() for a in cand_ids}:
+            return None
+        mbid = credit_mbid
+    elif cand_ids:
+        mbid = cand_ids[0]
+    else:
+        return None
+    cand_id = str(cand.get("id") or "").strip()
+    if not cand_id:
+        return None
+    groups = enricher.get_recording_release_groups(cand_id)
+    home = home_release_group(groups or [], mbid, title)
+    if home is None:
+        return None
+    cand_names = [str(n).strip() for n in cand.get("artist_names") or [] if str(n).strip()]
+    artist_name = name if credit_mbid else (cand_names[0] if cand_names else name)
+    artist = _artist_for_mbid(db, mbid, artist_name)
+    if artist is None:
+        return None
+    return artist, home
 
 
 def file_album_under_various(
@@ -223,6 +269,32 @@ def file_album_under_various(
         credit_filed_tracks(db, holder, track_ids, rec_ids, name, mbid)
         counts["filed_compilation"] = counts.get("filed_compilation", 0) + 1
     return merged
+
+
+def _resolve_per_track_target(
+    db: Any,
+    enricher: Any,
+    track: dict[str, Any],
+    per_rec_groups: dict[str, list[dict[str, Any]]],
+    rec: str,
+) -> Optional[tuple[dict[str, Any], dict[str, Any], bool]]:
+    """Resolves (artist, home_group, from_search) for a track in per-track mode."""
+    title = str(track.get("title") or "")
+    target_artist = performer_artist(db, str(track["id"]))
+    home = (
+        home_release_group(per_rec_groups.get(rec, []), target_artist.get("mbid"), title)
+        if target_artist is not None
+        else None
+    )
+    if target_artist is not None and home is not None:
+        return target_artist, home, False
+    credit = _primary_track_credit(db, str(track["id"]))
+    if credit is None:
+        return None
+    hit = _search_home(db, enricher, track, credit)
+    if hit is None:
+        return None
+    return hit[0], hit[1], True
 
 
 def file_tracks_under_home(
@@ -247,22 +319,26 @@ def file_tracks_under_home(
         rec = str(track.get("mb_recording_id") or "").strip()
         if not rec or not track.get("has_file"):
             continue
+        from_search = False
         if per_track_artist:
-            target_artist = performer_artist(db, str(track["id"]))
-            if target_artist is None:
+            resolved = _resolve_per_track_target(db, enricher, track, per_rec_groups, rec)
+            if resolved is None:
                 continue
+            target_artist, home, from_search = resolved
             target_artist_id = str(target_artist["id"])
-            target_mbid = target_artist.get("mbid")
         else:
             target_artist_id = album_artist_id
-            target_mbid = (album_artist or {}).get("mbid")
-        home = home_release_group(per_rec_groups.get(rec, []), target_mbid, str(track.get("title") or ""))
-        if home is None:
-            continue
+            home = home_release_group(
+                per_rec_groups.get(rec, []), (album_artist or {}).get("mbid"), str(track.get("title") or "")
+            )
+            if home is None:
+                continue
         holder = ensure_release_group_album(db, enricher, target_artist_id, home)
         if holder == str(album["id"]):
             continue
         acted = True
+        if from_search:
+            counts["searched_home"] = counts.get("searched_home", 0) + 1
         if move_track_into_album(db, str(track["id"]), holder) == "merged":
             counts["filed_home"] = counts.get("filed_home", 0) + 1
         else:
@@ -398,7 +474,15 @@ def refile_out_of_various(
     on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
 ) -> dict[str, int]:
     """Moves real-artist albums and small compilations out of Various Artists to their performer."""
-    counts = {"albums": 0, "moved_to_artist": 0, "filed_home": 0, "merge_conflict": 0, "skipped": 0, "errors": 0}
+    counts = {
+        "albums": 0,
+        "moved_to_artist": 0,
+        "filed_home": 0,
+        "searched_home": 0,
+        "merge_conflict": 0,
+        "skipped": 0,
+        "errors": 0,
+    }
     va_id = various_artists_id(db)
     candidates = db.list_albums_with_files_for_artist(va_id)
     total = len(candidates)
