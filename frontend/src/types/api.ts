@@ -9813,6 +9813,11 @@ export interface components {
             mbid?: string | null;
             /** Monitored */
             monitored?: boolean | null;
+            /**
+             * Monitored By Hand
+             * @default false
+             */
+            monitored_by_hand: boolean;
             /** Order Index */
             order_index?: number | null;
             /** Path */
@@ -11377,6 +11382,12 @@ export interface components {
              */
             import_mode: "move" | "hardlink" | "copy";
             /**
+             * Keep Compilations Together
+             * @description Keep songs from compilations together under Various Artists instead of filing each under its own artist
+             * @default false
+             */
+            keep_compilations_together: boolean;
+            /**
              * Library Mode
              * @description Library management mode: native or lidarr
              * @default native
@@ -11558,6 +11569,8 @@ export interface components {
             import_bitrate_check?: ("off" | "warn" | "reject") | null;
             /** Import Mode */
             import_mode?: ("move" | "hardlink" | "copy") | null;
+            /** Keep Compilations Together */
+            keep_compilations_together?: boolean | null;
             /** Library Mode */
             library_mode?: string | null;
             /** Mb Mirror Url */
