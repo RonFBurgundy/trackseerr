@@ -95,6 +95,17 @@ def _search_recording(
     base = _base_title(query_title)
     if not base:
         return None, False
+    import re
+    from trackseerr import release_matching
+
+    stripped_query = re.sub(
+        r"(?:\s*[\(\[]\s*\d{4}\s+(?:mix|version)\s*[\)\]]|\s*[-–—]\s*\d{4}\s+(?:mix|version))\s*$",
+        "",
+        query_title,
+        flags=re.IGNORECASE,
+    )
+    if release_matching._version_words(stripped_query) - release_matching._version_words(base):
+        return None, False
     base_candidates = enricher.search_recordings(artist_name, base)
     if not base_candidates:
         return None, False
