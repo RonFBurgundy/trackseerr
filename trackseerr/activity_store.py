@@ -34,7 +34,7 @@ class ActivityStoreMixin:
         "size_bytes": "d.size_bytes",
     }
     HISTORY_SORT_KEYS: dict[str, str] = {"date": "h.created_at"}
-    HISTORY_EVENTS: tuple[str, ...] = ("grabbed", "imported", "failed", "deleted", "blocklisted", "upgraded")
+    HISTORY_EVENTS: tuple[str, ...] = ("grabbed", "imported", "failed", "held", "deleted", "blocklisted", "upgraded")
     BLOCKLIST_SORT_KEYS: dict[str, str] = {"date": "b.created_at", "artist": "UPPER(COALESCE(b.artist, ''))"}
     BLOCKLIST_INDEX_SORTS: dict[str, SortDef] = {
         "date": SortDef("b.created_at", "event"),

@@ -1,5 +1,5 @@
 """Tests for release and album title normalization."""
-from trackseerr.lidarr_release import norm_title
+from trackseerr.lidarr_release import norm_title, titles_match
 
 
 def test_norm_title_drops_platinum_edition() -> None:
@@ -24,3 +24,20 @@ def test_norm_title_drops_streaming_qualifiers() -> None:
     assert norm_title("Hotel California (24 bit Remaster)") == base
     assert norm_title("Hotel California (Deluxe)") == base
     assert norm_title("Hotel California (Expanded Edition)") == base
+
+
+def test_mixed_bracket_drops_noise_part() -> None:
+    assert titles_match("Happiest Girl (Jack mix)", "Happiest Girl (Jack Mix; 2006 Remaster)")
+
+
+def test_mixed_bracket_keeps_identity_part() -> None:
+    assert not titles_match("Happiest Girl", "Happiest Girl (Jack Mix; 2006 Remaster)")
+
+
+def test_mixed_bracket_live_and_remaster() -> None:
+    assert titles_match("Song (Live)", "Song (Live, 2011 Remaster)")
+    assert not titles_match("Song", "Song (Live, 2011 Remaster)")
+
+
+def test_all_noise_bracket_still_dropped() -> None:
+    assert titles_match("Song", "Song (2011 Remaster; Explicit)")
