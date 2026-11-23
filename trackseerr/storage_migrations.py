@@ -91,6 +91,7 @@ class MigrationsMixin:
                 (101, self._migration_v101),
                 (102, self._migration_v102),
                 (103, self._migration_v103),
+                (104, self._migration_v104),
             ]
 
             applied = 0
@@ -351,6 +352,15 @@ class MigrationsMixin:
         if "monitored_by_hand" not in existing_cols:
             cur.execute(
                 "ALTER TABLE library_albums ADD COLUMN monitored_by_hand INTEGER NOT NULL DEFAULT 0"
+            )
+
+    def _migration_v104(self, cur: sqlite3.Cursor) -> None:
+        """v104: Add keep_compilations_together flag to media_management_settings."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        existing_cols = {row[1] for row in cur.fetchall()}
+        if "keep_compilations_together" not in existing_cols:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN keep_compilations_together INTEGER NOT NULL DEFAULT 0"
             )
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:

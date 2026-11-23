@@ -213,7 +213,6 @@ def set_album_monitored(
     updated = db.get_library_album(album_id)
     if updated is None:  # deleted between the write and the read
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Album not found")
-    updated.pop("monitored_by_hand", None)
     annotate_exclusions(db, "album", [updated])
     return updated
 

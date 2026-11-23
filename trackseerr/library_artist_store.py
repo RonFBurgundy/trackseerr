@@ -43,7 +43,6 @@ class LibraryArtistStoreMixin:
         res.pop("search_text", None)
         res.pop("search_clean", None)
         res["monitored"] = bool(res.get("monitored", 1))
-        res["monitored_by_hand"] = bool(res.get("monitored_by_hand", 0))
         res["monitor_option"] = str(res.get("monitor_option") or "all")
         for int_field in ("member_count", "begin_year", "end_year", "popularity"):
             if res.get(int_field) is not None:
@@ -84,7 +83,6 @@ class LibraryArtistStoreMixin:
             res.pop(column, None)
         res["has_file"] = has_file
         res["monitored"] = bool(res.get("monitored", 1))
-        res["monitored_by_hand"] = bool(res.get("monitored_by_hand", 0))
         res["track_number"] = int(res.get("track_number", 1))
         res["disc_number"] = int(res.get("disc_number", 1))
         if res.get("duration_seconds") is not None:
