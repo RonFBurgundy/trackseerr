@@ -43,6 +43,8 @@ TrackSeerr links albums in two ways: by the artist's discography, and through th
 
 The **Library Self-Heal** task on the Tasks page does this for you once a week. It runs the MusicBrainz release match (including the artist tidy-up and the AcoustID step), then applies the renames that **Rename Files** marks as safe. It never rewrites tags, and it skips renames it would not pre-select for you: audio that AcoustID says is a different song, and names already taken by another file. Change how often it runs on the Tasks page, start it by hand, or pause it to stop automatic renames. After a restart it waits until the next run is due.
 
+Compilations stay together under Various Artists only when you monitor the compilation album yourself or switch on **Keep compilations together** (Settings → Media Management). Otherwise, Library Self-Heal and new downloads file each song under its own artist's single or album, and songs MusicBrainz only knows from compilations stay on the compilation.
+
 ## Scanning
 
 A scan reads every audio file in the music folder and adds it to the library. Run the first scan after you set the music folder. Click **Scan library** on the **Library** page.

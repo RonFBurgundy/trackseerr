@@ -282,6 +282,20 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
               />
             </div>
           </div>
+
+          <div className="flex flex-col justify-end sm:col-span-3">
+            <div className="flex items-center justify-between pb-2">
+              <span className="text-xs font-mono text-neutral-300">Keep compilations together</span>
+              <TactileSwitch
+                checked={settings?.keep_compilations_together ?? false}
+                onChange={(val) => onChange((prev) => (prev ? { ...prev, keep_compilations_together: val } : null))}
+                label="Keep compilations together"
+              />
+            </div>
+            <p className="text-[11px] font-mono text-neutral-500">
+              Off: each song is filed under its own artist unless you monitor the compilation yourself.
+            </p>
+          </div>
         </div>
 
         <RecycleBinSection settings={settings} onChange={onChange} onToast={onToast} warnings={saveWarnings} />
