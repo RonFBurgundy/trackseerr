@@ -317,6 +317,79 @@ class DelayProfileMixin:
             row = self.conn.execute("SELECT * FROM pending_releases WHERE item_key = ?", (item_key,)).fetchone()
         return self._pending_row(row) if row else None
 
+    def find_pending_release_by_release(self, title: str, protocol: str) -> Optional[dict[str, Any]]:
+        """Earliest-``added_at`` pending row matching ``title`` (trimmed, case-folded) and ``protocol``."""
+        norm_title = (title or "").strip().casefold()
+        if not norm_title:
+            return None
+        norm_proto = (protocol or "").strip().lower()
+        with self._lock:
+            row = self.conn.execute(
+                "SELECT * FROM pending_releases WHERE lower(trim(title)) = ? AND lower(protocol) = ? "
+                "ORDER BY added_at, id LIMIT 1",
+                (norm_title, norm_proto),
+            ).fetchone()
+        return self._pending_row(row) if row else None
+
+    def mark_delay_window_served(
+        self,
+        item_key: str,
+        protocol: str,
+        served_at: str,
+        album_id: Optional[str] = None,
+        track_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> None:
+        """Records that ``item_key`` finished its delay window on ``protocol`` at ``served_at``."""
+        norm_proto = (protocol or "").strip().lower()
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO delay_windows_served (item_key, protocol, album_id, track_id, request_id, served_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(item_key, protocol) DO UPDATE SET
+                    served_at = excluded.served_at,
+                    album_id = COALESCE(excluded.album_id, delay_windows_served.album_id),
+                    track_id = COALESCE(excluded.track_id, delay_windows_served.track_id),
+                    request_id = COALESCE(excluded.request_id, delay_windows_served.request_id)
+                """,
+                (item_key, norm_proto, album_id, track_id, request_id, served_at),
+            )
+            self.conn.commit()
+
+    def delay_window_served_since(
+        self,
+        protocol: str,
+        since: str,
+        item_key: str,
+        album_id: Optional[str] = None,
+        track_id: Optional[str] = None,
+        request_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Newest ``served_at >= since`` for ``protocol`` matching ``item_key`` or any non-empty id."""
+        clauses = ["item_key = ?"]
+        params: list[Any] = [item_key]
+        for column, value in (("album_id", album_id), ("track_id", track_id), ("request_id", request_id)):
+            if value:
+                clauses.append(f"{column} = ?")
+                params.append(str(value))
+        norm_proto = (protocol or "").strip().lower()
+        with self._lock:
+            row = self.conn.execute(
+                f"SELECT served_at FROM delay_windows_served "
+                f"WHERE protocol = ? AND served_at >= ? AND ({' OR '.join(clauses)}) "
+                f"ORDER BY served_at DESC LIMIT 1",
+                [norm_proto, since, *params],
+            ).fetchone()
+        return str(row[0]) if row else None
+
+    def prune_delay_windows_served(self, before: str) -> int:
+        """Deletes served-window records older than ``before``; returns the deleted row count."""
+        with self._lock:
+            cur = self.conn.execute("DELETE FROM delay_windows_served WHERE served_at < ?", (before,))
+            self.conn.commit()
+            return int(cur.rowcount)
+
     def list_pending_releases(self, due_before: Optional[str] = None) -> list[dict[str, Any]]:
         """All pending releases by ``release_at``; with ``due_before`` only those whose window has elapsed and whose retry backoff is over."""
         with self._lock:

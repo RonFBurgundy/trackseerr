@@ -224,6 +224,10 @@ def _requeue_failed(db: Database, claimed: dict[str, Any], count: bool, message:
 def release_due(db: Database, now: Optional[datetime] = None) -> dict[str, int]:
     """One tick: grab every due pending release after re-validating it. Failures back off; stale rows are dropped."""
     now = now or delay_gate.utcnow()
+    try:
+        db.prune_delay_windows_served(delay_gate._iso(now - timedelta(days=30)))
+    except sqlite3.Error as exc:
+        logger.warning("Could not prune served delay windows: %s", exc)
     due = db.list_pending_releases(due_before=delay_gate._iso(now))
     released = failed = dropped = 0
     for row in due:
@@ -233,6 +237,17 @@ def release_due(db: Database, now: Optional[datetime] = None) -> dict[str, int]:
                 if _drop(db, row, reason):
                     dropped += 1
                 continue
+            try:
+                db.mark_delay_window_served(
+                    row["item_key"],
+                    row.get("protocol") or "",
+                    delay_gate._iso(now),
+                    row.get("album_id"),
+                    row.get("track_id"),
+                    row.get("request_id"),
+                )
+            except sqlite3.Error as exc:
+                logger.warning("Could not mark delay window served for %s: %s", row["item_key"], exc)
             result = grab_pending(db, row)
         except ModeChanged:
             logger.debug("Pending release tick: library manager is Lidarr; leaving %d item(s) queued", len(due))

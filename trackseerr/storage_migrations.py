@@ -89,6 +89,7 @@ class MigrationsMixin:
                 (99, self._migration_v99),
                 (100, self._migration_v100),
                 (101, self._migration_v101),
+                (102, self._migration_v102),
             ]
 
             applied = 0
@@ -322,6 +323,25 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_server_settings ADD COLUMN plex_account_username TEXT NOT NULL DEFAULT ''"
             )
+
+    def _migration_v102(self, cur: sqlite3.Cursor) -> None:
+        """v102: delay_windows_served remembers items whose delay window already elapsed."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS delay_windows_served (
+                item_key TEXT NOT NULL,
+                protocol TEXT NOT NULL,
+                album_id TEXT,
+                track_id TEXT,
+                request_id TEXT,
+                served_at TEXT NOT NULL,
+                PRIMARY KEY (item_key, protocol)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_delay_served_served_at ON delay_windows_served(served_at)"
+        )
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:
         """v100: library_match_suggestions keeps the best unsure MusicBrainz match per unlinked album."""
