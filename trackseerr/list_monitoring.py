@@ -681,7 +681,18 @@ def apply_playlist_missing(
         logger.info("Playlist %s: creator is not an admin, treating monitor mode %r as 'track'", playlist_id, mode)
         return _request_as_owner(db, config, playlist)
     actor = list_actor(db, playlist.get("creator_id"))
-    todo = [t for t in db.get_missing_tracks(playlist_id) if not t.get("list_applied_at")]
+    all_missing = db.get_missing_tracks(playlist_id)
+    todo = [t for t in all_missing if not t.get("list_applied_at")]
+    playlist_name = str(playlist.get("name") or "")
+    logger.info(
+        "Playlist %s (%s): %d missing, %d already applied, %d to apply, mode=%s",
+        playlist_id,
+        playlist_name,
+        len(all_missing),
+        len(all_missing) - len(todo),
+        len(todo),
+        mode,
+    )
     for row in todo:
         track_id = int(row["id"])
         try:
@@ -711,6 +722,16 @@ def apply_playlist_missing(
         counts[result.status if result.status in counts else "failed"] += 1
         if result.status == STATUS_APPLIED:
             db.mark_missing_tracks_list_applied([track_id])
+        else:
+            reason = f"{result.status} ({result.error})" if result.error else result.status
+            logger.info(
+                "Playlist %s: '%s – %s' not applied: %s",
+                playlist_id,
+                str(row.get("artist") or ""),
+                str(row.get("title") or ""),
+                reason,
+            )
+    logger.info("Playlist %s (%s): %s", playlist_id, playlist_name, counts)
     return counts
 
 

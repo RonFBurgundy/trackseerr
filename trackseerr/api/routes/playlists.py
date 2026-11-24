@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from trackseerr.api.dependencies import (
     get_config,
     get_current_user,
+    get_current_user_or_api_key,
     get_db,
     get_deezer_client,
     get_media_client,
@@ -336,7 +337,7 @@ def _resolve_targets(
 
 @router.get("", response_model=list[PlaylistRecord], response_model_exclude_unset=True)
 def list_playlists(
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user_or_api_key),
     db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Lists playlists. Admins see all; regular users see only playlists they created or that target them."""
@@ -722,7 +723,7 @@ def _require_visible_playlist(db: Database, playlist_id: str, current_user: dict
 @router.get("/{playlist_id}/tracks", response_model=PlaylistTracksResponse, response_model_exclude_unset=True)
 def get_playlist_tracks_status(
     playlist_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user_or_api_key),
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Every track of a playlist with its sync status. Admins, the creator and target users only (404 otherwise)."""
