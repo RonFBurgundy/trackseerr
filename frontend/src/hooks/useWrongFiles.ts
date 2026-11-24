@@ -11,6 +11,7 @@ import { ApiError, errorMessage } from '@/services/apiClient';
 import { usePolling } from './usePolling';
 
 const POLL_MS = 1500;
+const MISMATCHED_RELOAD_THROTTLE_MS = 30_000;
 
 export interface UseWrongFilesReturn {
   items: WrongFileItem[];
@@ -24,9 +25,14 @@ export interface UseWrongFilesReturn {
   checkError: string | null;
   busyFileId: string | null;
   actionError: string | null;
+  selectedIds: Set<string>;
+  toggleSelect: (fileId: string) => void;
+  selectAll: () => void;
+  selectNone: () => void;
   startCheck: () => Promise<void>;
   remove: (fileId: string) => void;
   deleteFile: (fileId: string) => Promise<boolean>;
+  deleteFiles: (ids: string[]) => Promise<{ deleted: number; failed: string[] }>;
   reload: () => void;
 }
 
@@ -44,8 +50,11 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
   const [checkError, setCheckError] = useState<string | null>(null);
   const [busyFileId, setBusyFileId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
 
   const wasRunning = useRef<boolean>(false);
+  const lastMismatchedRef = useRef<number>(0);
+  const lastMismatchedReloadAtRef = useRef<number>(0);
 
   const reload = useCallback((): void => setReloadTick((n) => n + 1), []);
 
@@ -60,6 +69,16 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
         setItems(res.items);
         setChecked(res.checked);
         setLibraryFiles(res.library_files);
+        const validIds = new Set(res.items.map((item) => item.file_id));
+        setSelectedIds((prev) => {
+          let changed = false;
+          const next = new Set<string>();
+          for (const id of prev) {
+            if (validIds.has(id)) next.add(id);
+            else changed = true;
+          }
+          return changed ? next : prev;
+        });
         setIsLoading(false);
       })
       .catch((err: unknown) => {
@@ -72,7 +91,23 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
 
   const applyStatus = useCallback(
     (next: RenameVerifyStatus): void => {
-      if (wasRunning.current && !next.running) reload();
+      if (wasRunning.current && !next.running) {
+        lastMismatchedRef.current = 0;
+        lastMismatchedReloadAtRef.current = 0;
+        reload();
+      } else if (next.running) {
+        if (!wasRunning.current) {
+          lastMismatchedRef.current = next.mismatched;
+          lastMismatchedReloadAtRef.current = Date.now();
+        } else if (next.mismatched > lastMismatchedRef.current) {
+          const now = Date.now();
+          if (now - lastMismatchedReloadAtRef.current >= MISMATCHED_RELOAD_THROTTLE_MS) {
+            lastMismatchedRef.current = next.mismatched;
+            lastMismatchedReloadAtRef.current = now;
+            reload();
+          }
+        }
+      }
       wasRunning.current = next.running;
       setStatus(next);
     },
@@ -82,9 +117,12 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
   useEffect(() => {
     if (!enabled) {
       wasRunning.current = false;
+      lastMismatchedRef.current = 0;
+      lastMismatchedReloadAtRef.current = 0;
       setStatus(null);
       setCheckError(null);
       setActionError(null);
+      setSelectedIds(new Set());
       return undefined;
     }
     let cancelled = false;
@@ -129,8 +167,31 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
     }
   }, [applyStatus]);
 
+  const toggleSelect = useCallback((fileId: string): void => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(fileId)) next.delete(fileId);
+      else next.add(fileId);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback((): void => {
+    setSelectedIds(new Set(items.map((item) => item.file_id)));
+  }, [items]);
+
+  const selectNone = useCallback((): void => {
+    setSelectedIds(new Set());
+  }, []);
+
   const remove = useCallback((fileId: string): void => {
     setItems((prev) => prev.filter((item) => item.file_id !== fileId));
+    setSelectedIds((prev) => {
+      if (!prev.has(fileId)) return prev;
+      const next = new Set(prev);
+      next.delete(fileId);
+      return next;
+    });
   }, []);
 
   const deleteFile = useCallback(
@@ -151,6 +212,20 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
     [remove]
   );
 
+  const deleteFiles = useCallback(
+    async (ids: string[]): Promise<{ deleted: number; failed: string[] }> => {
+      let deleted = 0;
+      const failed: string[] = [];
+      for (const id of ids) {
+        const ok = await deleteFile(id);
+        if (ok) deleted += 1;
+        else failed.push(id);
+      }
+      return { deleted, failed };
+    },
+    [deleteFile]
+  );
+
   return {
     items,
     total: items.length,
@@ -163,9 +238,14 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
     checkError,
     busyFileId,
     actionError,
+    selectedIds,
+    toggleSelect,
+    selectAll,
+    selectNone,
     startCheck,
     remove,
     deleteFile,
+    deleteFiles,
     reload,
   };
 }
