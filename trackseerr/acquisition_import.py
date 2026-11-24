@@ -1603,7 +1603,12 @@ class ImportPipelineMixin(ImportCatalogMixin):
             )
             tag_track = matched_expected_track
             matched_expected_track = _fingerprint_fallback_match(
-                af, ctx.media_settings, job.remaining_expected_tracks, matched_expected_track, match_strength
+                af,
+                ctx.media_settings,
+                job.remaining_expected_tracks,
+                matched_expected_track,
+                match_strength,
+                file_title=metadata.get("title"),
             )
             if matched_expected_track is not None and matched_expected_track is tag_track and match_strength != MATCH_STRONG:
                 file_weak_strength = match_strength

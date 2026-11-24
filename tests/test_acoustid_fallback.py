@@ -258,7 +258,7 @@ def _seed_album(db: Database, music_dir: Path, staging_dir: Path, *, fp_setting:
     return dl, t1, t2
 
 
-def _run_import(db: Database, dl: Path, staging_dir: Path, meta: dict[str, Any], fp_result: dict[str, Any] | None):
+def _run_import(db: Database, dl: Path, staging_dir: Path, meta: dict[str, Any], fp_result: dict[str, Any]):
     driver = MagicMock()
     driver.get_status.return_value = {
         "status": DownloadStatus.COMPLETED.value, "progress": 100.0, "size_bytes": 1, "speed_bps": 0,
@@ -270,7 +270,7 @@ def _run_import(db: Database, dl: Path, staging_dir: Path, meta: dict[str, Any],
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", return_value=full_meta), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=full_meta), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", fp_mock):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", fp_mock):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging_dir))
     return fp_mock
 
@@ -282,8 +282,13 @@ def test_worker_fingerprint_recording_id_beats_missing_tag_match(tmp_path, test_
     music, staging = tmp_path / "music", tmp_path / "staging"
     music.mkdir(); staging.mkdir()
     dl, t1, t2 = _seed_album(test_db, music, staging, fp_setting=True, api_key="key")
-    fp = _run_import(test_db, dl, staging, WEAK_META,
-                     {"score": 0.95, "recording_id": REC_2, "title": "Aerodynamic", "artist": "Daft Punk"})
+    fp = _run_import(
+        test_db,
+        dl,
+        staging,
+        WEAK_META,
+        {"status": "ok", "matches": [{"score": 0.95, "recording_id": REC_2, "title": "Aerodynamic", "artist": "Daft Punk"}]},
+    )
     assert fp.call_count == 1
     assert test_db.get_library_file_for_track(t2["id"]) is not None
     assert test_db.get_library_file_for_track(t1["id"]) is None
@@ -293,8 +298,13 @@ def test_worker_does_not_fingerprint_on_strong_match(tmp_path, test_db):
     music, staging = tmp_path / "music", tmp_path / "staging"
     music.mkdir(); staging.mkdir()
     dl, t1, t2 = _seed_album(test_db, music, staging, fp_setting=True, api_key="key")
-    fp = _run_import(test_db, dl, staging, {"title": "Aerodynamic", "track_number": 2},
-                     {"score": 0.99, "recording_id": REC_1, "title": "One More Time", "artist": "x"})
+    fp = _run_import(
+        test_db,
+        dl,
+        staging,
+        {"title": "Aerodynamic", "track_number": 2},
+        {"status": "ok", "matches": [{"score": 0.99, "recording_id": REC_1, "title": "One More Time", "artist": "x"}]},
+    )
     fp.assert_not_called()
     assert test_db.get_library_file_for_track(t2["id"]) is not None
 
@@ -304,8 +314,13 @@ def test_worker_does_not_fingerprint_when_disabled_or_keyless(tmp_path, test_db,
     music, staging = tmp_path / "music", tmp_path / "staging"
     music.mkdir(); staging.mkdir()
     dl, t1, t2 = _seed_album(test_db, music, staging, fp_setting=fp_setting, api_key=api_key)
-    fp = _run_import(test_db, dl, staging, WEAK_META,
-                     {"score": 0.99, "recording_id": REC_2, "title": "Aerodynamic", "artist": "x"})
+    fp = _run_import(
+        test_db,
+        dl,
+        staging,
+        WEAK_META,
+        {"status": "ok", "matches": [{"score": 0.99, "recording_id": REC_2, "title": "Aerodynamic", "artist": "x"}]},
+    )
     fp.assert_not_called()
     assert test_db.get_library_file_for_track(t2["id"]) is None
 
@@ -314,8 +329,13 @@ def test_worker_low_score_keeps_tag_result(tmp_path, test_db):
     music, staging = tmp_path / "music", tmp_path / "staging"
     music.mkdir(); staging.mkdir()
     dl, t1, t2 = _seed_album(test_db, music, staging, fp_setting=True, api_key="key")
-    fp = _run_import(test_db, dl, staging, WEAK_META,
-                     {"score": 0.79, "recording_id": REC_2, "title": "Aerodynamic", "artist": "x"})
+    fp = _run_import(
+        test_db,
+        dl,
+        staging,
+        WEAK_META,
+        {"status": "ok", "matches": [{"score": 0.79, "recording_id": REC_2, "title": "Aerodynamic", "artist": "x"}]},
+    )
     assert fp.call_count == 1
     assert test_db.get_library_file_for_track(t2["id"]) is None
     assert test_db.get_library_file_for_track(t1["id"]) is None
@@ -325,17 +345,23 @@ def test_worker_fingerprint_failure_holds_unmatched_file_for_manual_import(tmp_p
     music, staging = tmp_path / "music", tmp_path / "staging"
     music.mkdir(); staging.mkdir()
     dl, _, _ = _seed_album(test_db, music, staging, fp_setting=True, api_key="key")
-    _run_import(test_db, dl, staging, WEAK_META, None)
+    _run_import(test_db, dl, staging, WEAK_META, {"status": "no_result", "matches": []})
     assert not any(music.rglob("*.flac")), "an unmatched file is held, never placed under its tag names"
     assert (dl / "mystery.flac").exists()
     assert test_db.get_active_download("dl-1")["status"] == "warning"
 
 
-def _fallback(settings, tracks, tag_track, strength, fp_result, caplog=None):
+def _fallback(settings, tracks, tag_track, strength, fp_result, caplog=None, file_title=None, side_effect=None):
     from trackseerr.track_matching import _fingerprint_fallback_match
 
-    with patch("trackseerr.track_matching.fingerprint_audio_file", return_value=fp_result) as m:
-        return _fingerprint_fallback_match(Path("f.flac"), settings, tracks, tag_track, strength), m
+    patch_kwargs = {"side_effect": side_effect} if side_effect is not None else {"return_value": fp_result}
+    with patch("trackseerr.track_matching.fingerprint_and_lookup", **patch_kwargs) as m:
+        return (
+            _fingerprint_fallback_match(
+                Path("f.flac"), settings, tracks, tag_track, strength, file_title=file_title
+            ),
+            m,
+        )
 
 
 def test_fallback_title_path_overrides_weak_pick_when_unique():
@@ -344,8 +370,13 @@ def test_fallback_title_path_overrides_weak_pick_when_unique():
         {"id": "b", "title": "Aerodynamic", "mb_recording_id": None},
     ]
     settings = {"fingerprint_on_weak_match": True, "acoustid_api_key": "k"}
-    got, _ = _fallback(settings, tracks, tracks[0], "weak",
-                       {"score": 0.9, "recording_id": "unknown", "title": "Aerodynamic!", "artist": None})
+    got, _ = _fallback(
+        settings,
+        tracks,
+        tracks[0],
+        "weak",
+        {"status": "ok", "matches": [{"score": 0.9, "recording_id": "unknown", "title": "Aerodynamic!", "artist": None}]},
+    )
     assert got["id"] == "b"
 
 
@@ -353,10 +384,87 @@ def test_fallback_title_path_ambiguous_keeps_tag(caplog):
     tracks = [{"id": "a", "title": "Same"}, {"id": "b", "title": "Same"}]
     settings = {"fingerprint_on_weak_match": True, "acoustid_api_key": "k"}
     with caplog.at_level(logging.INFO):
-        got, _ = _fallback(settings, tracks, tracks[0], "weak",
-                           {"score": 0.9, "recording_id": "r", "title": "Same", "artist": None})
+        got, _ = _fallback(
+            settings,
+            tracks,
+            tracks[0],
+            "weak",
+            {"status": "ok", "matches": [{"score": 0.9, "recording_id": "r", "title": "Same", "artist": None}]},
+        )
     assert got is tracks[0]
     assert "tag-weak-kept" in caplog.text
+
+
+def test_fallback_keeps_tag_when_fingerprint_lists_other_song_first(caplog):
+    tracks = [
+        {"id": "bbf", "title": "Black Boy Fly", "mb_recording_id": None},
+        {"id": "bdkmv", "title": "Bitch, Don't Kill My Vibe - Remix", "mb_recording_id": "r-bdkmv"},
+    ]
+    settings = {"fingerprint_on_weak_match": True, "acoustid_api_key": "k"}
+    fp_result = {
+        "status": "ok",
+        "matches": [
+            {"recording_id": "r-bdkmv", "title": "Bitch, Don't Kill My Vibe (remix)", "score": 0.95},
+            {"recording_id": "r-bbf", "title": "Black Boy Fly", "score": 0.93},
+        ],
+    }
+    with caplog.at_level(logging.INFO):
+        got, _ = _fallback(settings, tracks, tracks[0], "weak", fp_result, file_title="Black Boy Fly")
+    assert got is tracks[0]
+    assert "tag-title-kept" in caplog.text
+
+
+def test_fallback_confirms_tag_recording_among_matches(caplog):
+    tracks = [
+        {"id": "t1", "title": "Other Song", "mb_recording_id": "r1"},
+        {"id": "t2", "title": "Target Song", "mb_recording_id": "r2"},
+    ]
+    settings = {"fingerprint_on_weak_match": True, "acoustid_api_key": "k"}
+    fp_result = {
+        "status": "ok",
+        "matches": [
+            {"recording_id": "r1", "title": "Other Song", "score": 0.95},
+            {"recording_id": "r2", "title": "Target Song", "score": 0.91},
+        ],
+    }
+    with caplog.at_level(logging.INFO):
+        got, _ = _fallback(settings, tracks, tracks[1], "weak", fp_result)
+    assert got is tracks[1]
+    assert "fingerprint-confirms-tag" in caplog.text
+
+
+def test_fallback_prefers_title_consistent_rec_hit():
+    tracks = [
+        {"id": "t1", "title": "Other Song", "mb_recording_id": "r1"},
+        {"id": "t2", "title": "Black Boy Fly", "mb_recording_id": "r2"},
+    ]
+    settings = {"fingerprint_on_weak_match": True, "acoustid_api_key": "k"}
+    fp_result = {
+        "status": "ok",
+        "matches": [
+            {"recording_id": "r1", "title": "Other Song", "score": 0.95},
+            {"recording_id": "r2", "title": "Black Boy Fly", "score": 0.91},
+        ],
+    }
+    got, _ = _fallback(settings, tracks, None, "none", fp_result, file_title="Black Boy Fly")
+    assert got is tracks[1]
+
+
+def test_fallback_unavailable_keeps_tag():
+    from trackseerr.library import FingerprintUnavailable
+
+    tracks = [{"id": "t1", "title": "Black Boy Fly", "mb_recording_id": None}]
+    settings = {"fingerprint_on_weak_match": True, "acoustid_api_key": "k"}
+    got, _ = _fallback(
+        settings,
+        tracks,
+        tracks[0],
+        "weak",
+        None,
+        file_title="Black Boy Fly",
+        side_effect=FingerprintUnavailable("fpcalc backend not found"),
+    )
+    assert got is tracks[0]
 
 
 # ------------------------------------------------------------------ manual route

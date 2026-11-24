@@ -8,9 +8,11 @@ from typing import Any, Optional
 
 
 from trackseerr.library import (
-    fingerprint_audio_file,
+    FingerprintUnavailable,
+    fingerprint_and_lookup,
 )
 from trackseerr.lidarr_release import _BRACKETED, _DASH_SPLIT, _fold, _is_noise, _squash, norm_title, titles_match
+from trackseerr.rename_verification import _same_song
 from trackseerr.search_terms import primary_artist
 from trackseerr.storage import Database, clean_library_name
 
@@ -247,17 +249,71 @@ FINGERPRINT_MIN_SCORE = 0.80
 
 
 
+def _title_guard_blocks(
+    file_path: Path,
+    file_title: Optional[str],
+    tag_track: Optional[dict[str, Any]],
+    candidate: dict[str, Any],
+) -> bool:
+    """True when the tag match agrees with file_title and the candidate names a different song."""
+    if not file_title or tag_track is None:
+        return False
+    tag_title = tag_track.get("title") or ""
+    cand_title = candidate.get("title") or ""
+    if _same_song(file_title, tag_title) and not _same_song(file_title, cand_title):
+        logger.info(
+            "Import match for %s decided by tag-title-kept (fingerprint pointed at '%s')",
+            file_path.name,
+            cand_title,
+        )
+        return True
+    return False
+
+
+def _pick_recording_hit(
+    good: list[dict[str, Any]],
+    remaining_tracks: list[dict[str, Any]],
+    file_title: Optional[str],
+) -> Optional[dict[str, Any]]:
+    """Selects the best recording-id match, preferring one whose title matches file_title."""
+    score_rank = {m["recording_id"]: idx for idx, m in enumerate(good) if m.get("recording_id")}
+    rec_hits = [t for t in remaining_tracks if t.get("mb_recording_id") in score_rank]
+    if not rec_hits:
+        return None
+    rec_hits.sort(key=lambda t: score_rank[t["mb_recording_id"]])
+    if file_title:
+        for hit in rec_hits:
+            if _same_song(file_title, hit.get("title") or ""):
+                return hit
+    return rec_hits[0]
+
+
+def _pick_title_hit(
+    good: list[dict[str, Any]],
+    remaining_tracks: list[dict[str, Any]],
+) -> Optional[tuple[dict[str, Any], str]]:
+    """Selects the first unique title match among good AcoustID matches (best first)."""
+    for match in good:
+        fp_title = clean_library_name(match.get("title") or "")
+        if not fp_title:
+            continue
+        title_hits = [t for t in remaining_tracks if clean_library_name(t.get("title") or "") == fp_title]
+        if len(title_hits) == 1:
+            return title_hits[0], fp_title
+    return None
+
+
 def _fingerprint_fallback_match(
     file_path: Path,
     media_settings: dict[str, Any],
     remaining_tracks: list[dict[str, Any]],
     tag_track: Optional[dict[str, Any]],
     strength: str,
+    file_title: Optional[str] = None,
 ) -> Optional[dict[str, Any]]:
     """Resolves a weak or missing tag match via AcoustID fingerprinting; returns the tag result when it cannot improve.
 
     Only runs when the tag match is not strong, fingerprint_on_weak_match is enabled and an AcoustID key is set.
-    fingerprint_audio_file never raises, so a lookup failure leaves the tag result untouched.
     """
     if strength == MATCH_STRONG:
         logger.info("Import match for %s decided by tag-strong", file_path.name)
@@ -267,20 +323,42 @@ def _fingerprint_fallback_match(
         logger.info("Import match for %s decided by tag-weak-kept (fingerprint fallback disabled)", file_path.name)
         return tag_track
 
-    fp = fingerprint_audio_file(file_path, api_key)
-    if fp and float(fp.get("score") or 0.0) >= FINGERPRINT_MIN_SCORE:
-        rec_id = fp.get("recording_id")
-        if rec_id:
-            rec_hits = [t for t in remaining_tracks if t.get("mb_recording_id") == rec_id]
-            if rec_hits:
-                logger.info("Import match for %s decided by fingerprint-recording (%s)", file_path.name, rec_id)
-                return rec_hits[0]
-        fp_title = clean_library_name(fp.get("title") or "")
-        if fp_title:
-            title_hits = [t for t in remaining_tracks if clean_library_name(t.get("title") or "") == fp_title]
-            if len(title_hits) == 1:
-                logger.info("Import match for %s decided by fingerprint-title (%s)", file_path.name, fp_title)
-                return title_hits[0]
+    try:
+        lookup = fingerprint_and_lookup(file_path, api_key)
+    except FingerprintUnavailable as exc:
+        logger.info("Import match for %s decided by tag-weak-kept (%s)", file_path.name, exc)
+        return tag_track
+
+    good = (
+        [m for m in (lookup.get("matches") or []) if float(m.get("score") or 0.0) >= FINGERPRINT_MIN_SCORE]
+        if lookup and lookup.get("status") == "ok"
+        else []
+    )
+    if good:
+        match_ids = {m["recording_id"] for m in good if m.get("recording_id")}
+        if tag_track is not None and tag_track.get("mb_recording_id") in match_ids:
+            logger.info("Import match for %s decided by fingerprint-confirms-tag", file_path.name)
+            return tag_track
+
+        rec_hit = _pick_recording_hit(good, remaining_tracks, file_title)
+        if rec_hit is not None:
+            if _title_guard_blocks(file_path, file_title, tag_track, rec_hit):
+                return tag_track
+            logger.info(
+                "Import match for %s decided by fingerprint-recording (%s)",
+                file_path.name,
+                rec_hit.get("mb_recording_id"),
+            )
+            return rec_hit
+
+        title_hit = _pick_title_hit(good, remaining_tracks)
+        if title_hit is not None:
+            cand, fp_title = title_hit
+            if _title_guard_blocks(file_path, file_title, tag_track, cand):
+                return tag_track
+            logger.info("Import match for %s decided by fingerprint-title (%s)", file_path.name, fp_title)
+            return cand
+
     logger.info("Import match for %s decided by tag-weak-kept (strength=%s)", file_path.name, strength)
     return tag_track
 
