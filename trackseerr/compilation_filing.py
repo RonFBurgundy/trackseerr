@@ -110,7 +110,10 @@ def home_release_group(
     track_title: str,
     allow_own_compilation: bool = False,
 ) -> Optional[dict[str, Any]]:
-    """Canonical non-various release group of a recording (album, then single, then EP; earliest first)."""
+    """Canonical non-various release group of a recording (album, then single, then EP; earliest first).
+
+    When ``allow_own_compilation`` is True, falls back to the artist's own compilation or soundtrack release group.
+    """
     from trackseerr.release_matching import _version_words
 
     words = _version_words(track_title or "")
@@ -128,7 +131,7 @@ def home_release_group(
         group
         for group in groups
         if _group_for_artist(group, mbid)
-        and {str(s).casefold() for s in group.get("secondary_types") or []} == {"compilation"}
+        and {str(s).casefold() for s in group.get("secondary_types") or []} in ({"compilation"}, {"soundtrack"})
     ]
     return min(comp_candidates, key=_group_sort_key) if comp_candidates else None
 
@@ -383,14 +386,19 @@ def _resolve_per_track_target(
     hit, reason = _search_home(db, enricher, track, credit, own_rec=rec)
     if hit is not None:
         return (hit[0], hit[1], "search", None), ""
-    if discovery is not None and target_artist is not None:
-        holder_id = deezer_home_album(db, discovery, target_artist, track, album or {})
+    deezer_artist = target_artist
+    if deezer_artist is None and credit.get("artist_name"):
+        deezer_artist = db.get_library_artist_by_name(str(credit["artist_name"]))
+    if discovery is not None and deezer_artist is not None:
+        holder_id = deezer_home_album(db, discovery, deezer_artist, track, album or {})
         if holder_id is not None:
-            return (target_artist, None, "deezer", holder_id), ""
+            return (deezer_artist, None, "deezer", holder_id), ""
     if target_artist is not None:
         own_comp = home_release_group(groups, target_artist.get("mbid"), title, allow_own_compilation=True)
         if own_comp is not None:
             return (target_artist, own_comp, "own_compilation", None), ""
+    if deezer_artist is None:
+        return None, "no_performer"
     return None, reason
 
 

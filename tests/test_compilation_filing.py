@@ -151,6 +151,12 @@ def test_home_release_group_keeps_live_for_live_track():
     assert home_release_group([live, studio], BOB_MBID, "Song (Live)")["id"] == "rg-live"
 
 
+def test_home_release_group_own_soundtrack_fallback():
+    soundtrack = _group("rg-ost", "Midnight Express", secondary=["Soundtrack"], date="1978-10-06")
+    assert home_release_group([soundtrack], BOB_MBID, "Chase", allow_own_compilation=False) is None
+    assert home_release_group([soundtrack], BOB_MBID, "Chase", allow_own_compilation=True)["id"] == "rg-ost"
+
+
 def test_various_group_for_title_matches_now_44():
     other = _group("rg-x", "Ministry Of Sound", various=True)
     assert various_group_for_title([other, NOW_44], "Now That's What I Call Music! 44")["id"] == "rg-now44"

@@ -12,6 +12,7 @@ from trackseerr.album_track_hydration import clear_negative_cache
 from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, MbidEnricherClient
 from trackseerr.compilation_filing import refile_out_of_various, various_artists_id
+from trackseerr.deezer_home import _soft_titles_close
 from trackseerr.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
 from trackseerr.storage import Database
 
@@ -151,9 +152,11 @@ def _discovery(
     compilations: list[dict[str, Any]] | None = None,
     album_details: dict[str, dict[str, Any]] | None = None,
     search_artist_result: dict[str, Any] | None = None,
+    search_results: list[dict[str, Any]] | None = None,
 ) -> MagicMock:
     client = MagicMock(spec=DiscoveryClient)
     client.search_artist.return_value = search_artist_result
+    client.search.return_value = search_results or []
     client.get_artist_details.return_value = {
         "id": "deezer:artist:1",
         "name": "Bob Marley",
@@ -401,3 +404,277 @@ def test_out_of_various_without_discovery_unchanged(db: Database, tmp_path: Path
     assert counts["filed_home"] == 1
     assert counts["deezer_home"] == 0
     assert db.album_holding_release_group("artist-bob", "rg-best", "") is not None
+
+
+@pytest.mark.parametrize(
+    ("a", "b", "expected"),
+    [
+        ("Impro", "Impro (Instrumental)", True),
+        ("Song (Original Mix)", "Song", True),
+        ("Song - Radio Edit", "Song", True),
+        ("Skumbag (Glitch City remix)", "Skumbag (Glitch City Remix)", True),
+        ("Song", "Song (Live)", False),
+        ("Song", "Song (VIP)", False),
+        ("Song", "Song (X Remix)", False),
+    ],
+)
+def test_soft_titles_close_cases(a: str, b: str, expected: bool):
+    assert _soft_titles_close(a, b) is expected
+
+
+def test_deezer_home_track_search_finds_instrumental_single(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db,
+        tmp_path,
+        "alb-va",
+        "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Impro", "rec_id": "rec-impro", "duration_seconds": 210.0}],
+        rg_id="rg-now44",
+        artist_id=va_id,
+        artist_name="Various Artists",
+        artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    julian_mbid = "33333333-3333-3333-3333-333333333333"
+    db.upsert_library_artist(
+        LibraryArtist(
+            id="artist-julian",
+            name="Julian Convex",
+            mbid=julian_mbid,
+            foreign_artist_id="deezer:artist:77",
+            monitored=True,
+        )
+    )
+    db.replace_track_artists(
+        "alb-va-1",
+        [{"artist_name": "Julian Convex", "artist_mbid": julian_mbid, "role": "primary", "position": 0, "source": "tags"}],
+    )
+    enricher = _enricher({"rec-impro": [NOW_44]}, search_results={("Julian Convex", "Impro"): []})
+    non_matching = [
+        {"id": f"deezer:album:other-{i}", "title": f"Other Single {i}", "record_type": "single", "cover_url": None}
+        for i in range(12)
+    ]
+    details = {
+        f"deezer:album:other-{i}": {
+            "id": f"deezer:album:other-{i}",
+            "title": f"Other Single {i}",
+            "release_date": "2020-01-01",
+            "tracks": [{"title": f"Other Track {i}", "duration_seconds": 180}],
+        }
+        for i in range(12)
+    }
+    details["deezer:album:90778132"] = {
+        "id": "deezer:album:90778132",
+        "title": "Impro (Instrumental)",
+        "artist": "Julian Convex",
+        "record_type": "single",
+        "release_date": "2021-03-01",
+        "tracks": [{"title": "Impro (Instrumental)", "duration_seconds": 210}],
+    }
+    discovery = _discovery(
+        singles_eps=non_matching,
+        album_details=details,
+        search_results=[
+            {
+                "id": "deezer:track:999",
+                "item_type": "track",
+                "title": "Impro (Instrumental)",
+                "artist": "Julian Convex",
+                "album": "Impro (Instrumental)",
+                "album_discovery_id": "deezer:album:90778132",
+            }
+        ],
+    )
+
+    counts = refile_out_of_various(db, enricher, discovery=discovery)
+
+    assert counts["deezer_home"] == 1
+    assert counts["filed_home"] == 1
+    new_album = db.get_library_album_by_foreign_id("deezer:album:90778132")
+    assert new_album is not None
+    assert new_album["artist_id"] == "artist-julian"
+    moved = db.get_library_track("alb-va-1")
+    assert moved is not None and moved["album_id"] == new_album["id"]
+
+
+def test_deezer_home_search_rejects_compilation_and_other_artist_album(db: Database, tmp_path: Path):
+    _seed_va_song(db, tmp_path)
+    enricher = _enricher({"rec-va-only": [NOW_44]}, search_results={("Bob Marley", "Could I Be In Love"): []})
+    discovery = _discovery(
+        search_results=[
+            {
+                "id": "deezer:track:1",
+                "item_type": "track",
+                "title": "Could I Be In Love",
+                "artist": "Bob Marley",
+                "album": "Club Hits",
+                "album_discovery_id": "deezer:album:comp1",
+            },
+            {
+                "id": "deezer:track:2",
+                "item_type": "track",
+                "title": "Could I Be In Love",
+                "artist": "Bob Marley",
+                "album": "Tribute Album",
+                "album_discovery_id": "deezer:album:other-artist",
+            },
+        ],
+        album_details={
+            "deezer:album:comp1": {
+                "id": "deezer:album:comp1",
+                "title": "Club Hits",
+                "artist": "Bob Marley",
+                "record_type": "compile",
+                "release_date": "2010-01-01",
+                "tracks": [{"title": "Could I Be In Love", "duration_seconds": 210}],
+            },
+            "deezer:album:other-artist": {
+                "id": "deezer:album:other-artist",
+                "title": "Tribute Album",
+                "artist": "Someone Else",
+                "record_type": "album",
+                "release_date": "2010-01-01",
+                "tracks": [{"title": "Could I Be In Love", "duration_seconds": 210}],
+            },
+        },
+    )
+
+    counts = refile_out_of_various(db, enricher, discovery=discovery)
+
+    assert counts["deezer_home"] == 0
+    assert counts["left_search_no_results"] == 1
+
+
+def test_deezer_home_prefers_original_over_deluxe(db: Database, tmp_path: Path):
+    _seed_va_song(db, tmp_path)
+    enricher = _enricher({"rec-va-only": [NOW_44]}, search_results={("Bob Marley", "Could I Be In Love"): []})
+    discovery_snacks = _discovery(
+        albums=[{"id": "deezer:album:supersize", "title": "Snacks (Supersize)", "record_type": "album", "cover_url": None}],
+        singles_eps=[{"id": "deezer:album:snacks-ep", "title": "Snacks", "record_type": "ep", "cover_url": None}],
+        album_details={
+            "deezer:album:supersize": {
+                "id": "deezer:album:supersize",
+                "title": "Snacks (Supersize)",
+                "record_type": "album",
+                "release_date": "2019-09-01",
+                "tracks": [{"title": "Could I Be In Love", "duration_seconds": 210}],
+            },
+            "deezer:album:snacks-ep": {
+                "id": "deezer:album:snacks-ep",
+                "title": "Snacks",
+                "record_type": "ep",
+                "release_date": "2019-07-01",
+                "tracks": [{"title": "Could I Be In Love", "duration_seconds": 210}],
+            },
+        },
+    )
+
+    counts = refile_out_of_various(db, enricher, discovery=discovery_snacks)
+
+    assert counts["deezer_home"] == 1
+    assert db.get_library_album_by_foreign_id("deezer:album:snacks-ep") is not None
+    assert db.get_library_album_by_foreign_id("deezer:album:supersize") is None
+
+    # Album "X" vs "X (Deluxe Edition)" -> "X"
+    _seed_va_song(db, tmp_path)
+    discovery_x = _discovery(
+        albums=[
+            {"id": "deezer:album:x-deluxe", "title": "X (Deluxe Edition)", "record_type": "album", "cover_url": None},
+            {"id": "deezer:album:x-orig", "title": "X", "record_type": "album", "cover_url": None},
+        ],
+        album_details={
+            "deezer:album:x-deluxe": {
+                "id": "deezer:album:x-deluxe",
+                "title": "X (Deluxe Edition)",
+                "record_type": "album",
+                "release_date": "2014-01-01",
+                "tracks": [{"title": "Could I Be In Love", "duration_seconds": 210}],
+            },
+            "deezer:album:x-orig": {
+                "id": "deezer:album:x-orig",
+                "title": "X",
+                "record_type": "album",
+                "release_date": "2014-06-01",
+                "tracks": [{"title": "Could I Be In Love", "duration_seconds": 210}],
+            },
+        },
+    )
+
+    counts_x = refile_out_of_various(db, enricher, discovery=discovery_x)
+
+    assert counts_x["deezer_home"] == 1
+    assert db.get_library_album_by_foreign_id("deezer:album:x-orig") is not None
+    assert db.get_library_album_by_foreign_id("deezer:album:x-deluxe") is None
+
+
+def test_deezer_home_no_mbid_credit_uses_library_artist_by_name(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db,
+        tmp_path,
+        "alb-va",
+        "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only", "duration_seconds": 210.0}],
+        rg_id="rg-now44",
+        artist_id=va_id,
+        artist_name="Various Artists",
+        artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.upsert_library_artist(
+        LibraryArtist(
+            id="artist-bob",
+            name="Bob Marley",
+            mbid=None,
+            foreign_artist_id="deezer:artist:1",
+            monitored=True,
+        )
+    )
+    db.replace_track_artists(
+        "alb-va-1",
+        [{"artist_name": "Bob Marley", "artist_mbid": None, "role": "primary", "position": 0, "source": "tags"}],
+    )
+    enricher = _enricher({"rec-va-only": [NOW_44]}, search_results={("Bob Marley", "Could I Be In Love"): []})
+    discovery = _discovery(
+        singles_eps=[{"id": "deezer:album:10", "title": "Could I Be In Love", "record_type": "single", "cover_url": None}],
+        album_details={
+            "deezer:album:10": {
+                "id": "deezer:album:10",
+                "title": "Could I Be In Love",
+                "release_date": "1999-05-01",
+                "tracks": [{"title": "Could I Be In Love", "duration_seconds": 210}],
+            }
+        },
+    )
+
+    counts = refile_out_of_various(db, enricher, discovery=discovery)
+
+    assert counts["deezer_home"] == 1
+    assert counts["filed_home"] == 1
+    new_album = db.get_library_album_by_foreign_id("deezer:album:10")
+    assert new_album is not None and new_album["artist_id"] == "artist-bob"
+
+
+def test_out_of_various_left_reason_no_performer(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db,
+        tmp_path,
+        "alb-va",
+        "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Unknown Artist Song", "rec_id": "rec-va-only", "duration_seconds": 210.0}],
+        rg_id="rg-now44",
+        artist_id=va_id,
+        artist_name="Various Artists",
+        artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists(
+        "alb-va-1",
+        [{"artist_name": "Nobody In Library", "artist_mbid": None, "role": "primary", "position": 0, "source": "tags"}],
+    )
+    enricher = _enricher({"rec-va-only": [NOW_44]}, search_results={("Nobody In Library", "Unknown Artist Song"): []})
+    discovery = _discovery()
+
+    counts = refile_out_of_various(db, enricher, discovery=discovery)
+
+    assert counts["left_no_performer"] == 1
+    assert counts.get("left_search_no_results", 0) == 0
