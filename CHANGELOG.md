@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- **Wrong files** in Library tools: checks every file's audio with AcoustID and lists files that hold a different song from the one they're filed as. Move each one to the song it really is, or delete it. The first check takes about an hour for a large library; later checks only look at new or changed files.
 - **Name compilations by series or label** (Settings → Media Management): compilations kept under Various Artists get their series, film or game, or record label as album artist instead (UKF Drum & Bass, Rocky IV, OWSLA). Each song keeps its own artist and MusicBrainz IDs, and folders don't change. The Various Artists MusicBrainz ID is removed from these albums so players like Plex don't show them as Various Artists. Run Retag to apply.
 - When a requested song downloads but isn't on any album in your library (a bonus track from a reissue, for example), TrackSeerr looks it up on MusicBrainz, adds it to the right album and imports it, instead of leaving it for a manual import. Songs already waiting for a manual import get one try after you update.
 - **Sign in with Plex** under Settings → Media Management → Media Server. Sign in once as the Plex server owner and TrackSeerr uses that account for Plex Home users and other users' playlists. Your `PLEX_TOKEN` is then only used to talk to your own Plex server, so you don't need `PLEX_TOKEN_CONFIRMED`.
@@ -157,6 +158,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Downloads are no longer thrown away as "already own this song" when AcoustID lists a different song first for the same audio (Kendrick Lamar's "Black Boy Fly" kept being discarded as "Bitch, Don't Kill My Vibe – Remix"). TrackSeerr now checks every song AcoustID suggests and keeps a file whose own title matches the song you asked for.
+- When Self-Heal removes a wanted song, the request it came from is searched again instead of disappearing from Wanted. This brings back playlist songs removed from "Unknown Album" folders by the previous update. Removing a song with download history no longer fails, and an "Unknown Album" stuck under Various Artists goes back to the artist its folder is named after.
 - Library Self-Heal no longer links an "Unknown Album" (songs from a playlist with no known album) to a single compilation. That could move the album to Various Artists and add the compilation's whole track list as wanted songs. Self-Heal now files each song under its own release, and repairs albums it already linked this way: the link and the compilation's wanted songs are removed, and the album is deleted once it's empty.
 - **Name compilations by series or label** now uses the film title for soundtracks even when your library doesn't know the album is a soundtrack ("The Harder They Come" was named after its label, Island). Run Self-Heal, then Retag.
 - Retag writes release dates as plain dates (2020-01-24) instead of a full timestamp, so MP3 dates stop showing as changed on every preview. FLAC and Ogg files now also update their older track and disc total tags, so a wrong total no longer comes back after a retag. Run Retag once to clean up files that already have the timestamp.
