@@ -48,6 +48,7 @@ from trackseerr.media_servers import as_media_server
 from trackseerr.media_servers.refresh_scheduler import request_library_refresh
 from trackseerr.library import (
     _extract_year,
+    normalize_tag_date,
     build_tags_to_write,
     embed_album_artwork,
     find_folder_art,
@@ -944,7 +945,7 @@ def _tags_differ(field: str, current_val: Any, proposed_val: Any) -> bool:
 
     if field == "date":
         c_str = str(current_val).strip()
-        p_str = str(proposed_val).strip()
+        p_str = (normalize_tag_date(proposed_val) or "").strip()
         if c_str == p_str:
             return False
         c_year = _extract_year(c_str)
