@@ -13,6 +13,7 @@ from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, MbidEnricherC
 from trackseerr.compilation_filing import (
     home_release_group,
     refile_out_of_various,
+    refile_various_album,
     refile_various_albums,
     various_artists_id,
     various_group_for_title,
@@ -1169,3 +1170,84 @@ def test_out_of_various_own_best_of_when_search_fails(db: Database, tmp_path: Pa
     assert counts["filed_home"] == 1
     assert counts.get("left_search_no_results", 0) == 0
     assert db.album_holding_release_group("artist-bob", "rg-best", "") is not None
+
+
+def test_refile_various_album_moves_song_home(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-home", "duration_seconds": 292.0}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.upsert_library_artist(LibraryArtist(id="artist-bob", name="Bob Marley", mbid=BOB_MBID, monitored=True))
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    home_group = _group("rg-home", "Exodus")
+    enricher = _enricher({"rec-home": [NOW_44, home_group]})
+
+    counts = refile_various_album(db, enricher, "alb-va")
+
+    assert counts["filed_home"] == 1
+    holder = db.album_holding_release_group("artist-bob", "rg-home", "")
+    assert holder is not None
+    moved = [t for t in db.list_library_tracks(album_id=holder, limit=50) if t["has_file"]]
+    assert len(moved) == 1 and moved[0]["mb_recording_id"] == "rec-home"
+
+
+def test_refile_various_album_ignores_non_va_album(db: Database, tmp_path: Path):
+    _seed_album(
+        db, tmp_path, "alb-bob", "Exodus",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-home"}],
+        rg_id="rg-home", artist_id="artist-bob", artist_name="Bob Marley", artist_mbid=BOB_MBID,
+    )
+    enricher = _enricher({})
+
+    counts = refile_various_album(db, enricher, "alb-bob")
+
+    assert counts["albums"] == 0
+    assert counts["filed_home"] == 0
+    enricher.get_recording_release_groups.assert_not_called()
+
+
+def test_refile_various_album_keeps_hand_monitored(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-home"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+        monitored=True,
+    )
+    with db._lock:
+        db.conn.execute("UPDATE library_albums SET monitored_by_hand = 1 WHERE id = ?", ("alb-va",))
+        db.conn.commit()
+    db.upsert_library_artist(LibraryArtist(id="artist-bob", name="Bob Marley", mbid=BOB_MBID, monitored=True))
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    home_group = _group("rg-home", "Exodus")
+    enricher = _enricher({"rec-home": [NOW_44, home_group]})
+
+    counts = refile_various_album(db, enricher, "alb-va")
+
+    assert counts["filed_home"] == 0
+    assert db.album_holding_release_group("artist-bob", "rg-home", "") is None
+    va_tracks = [t for t in db.list_library_tracks(album_id="alb-va", limit=50) if t["has_file"]]
+    assert len(va_tracks) == 1
+
+
+def test_refile_various_album_does_not_create_va_artist(db: Database, tmp_path: Path):
+    _seed_album(
+        db, tmp_path, "alb-bob", "Exodus",
+        [{"num": 1, "title": "Natural Mystic", "rec_id": "rec-1"}],
+        rg_id="rg-exodus", artist_id="artist-bob", artist_name="Bob Marley", artist_mbid=BOB_MBID,
+        monitored=True,
+    )
+    enricher = _enricher({})
+
+    counts = refile_various_album(db, enricher, "alb-bob")
+
+    assert counts["albums"] == 0
+    assert counts["filed_home"] == 0
+    assert db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID) is None
+    enricher.get_recording_release_groups.assert_not_called()
