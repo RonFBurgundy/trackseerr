@@ -296,6 +296,24 @@ export const MediaFoldersPanel: React.FC<MediaFoldersPanelProps> = ({ settings, 
               Off: each song is filed under its own artist unless you monitor the compilation yourself.
             </p>
           </div>
+
+          <div className="flex flex-col justify-end sm:col-span-3">
+            <div className="flex items-center justify-between pb-2">
+              <span className="text-xs font-mono text-neutral-300">Name compilations by series or label</span>
+              <TactileSwitch
+                checked={settings?.compilation_album_artist === 'series_label'}
+                onChange={(val) =>
+                  onChange((prev) =>
+                    prev ? { ...prev, compilation_album_artist: val ? 'series_label' : 'various' } : null
+                  )
+                }
+                label="Name compilations by series or label"
+              />
+            </div>
+            <p className="text-[11px] font-mono text-neutral-500">
+              On: compilations get their series, film or game, or label as album artist (UKF Drum &amp; Bass, Rocky IV, OWSLA) instead of Various Artists. Each song keeps its own artist. Run Retag to apply.
+            </p>
+          </div>
         </div>
 
         <RecycleBinSection settings={settings} onChange={onChange} onToast={onToast} warnings={saveWarnings} />
