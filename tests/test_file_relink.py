@@ -14,7 +14,7 @@ from tests.test_library_api import (  # noqa: F401  (fixtures are used by name)
     test_db,
 )
 from tests.test_rename_verify_api import R1, R2, _cache, _preview, _seed
-from trackseerr.file_relink import RelinkConflict, quality_key, relink_file
+from trackseerr.file_relink import RelinkConflict, quality_key, relink_file, relink_files
 from trackseerr.storage import Database
 
 URL = "/api/library/rename/relink"
@@ -240,3 +240,97 @@ def test_relinked_row_previews_verified(app_and_client, test_db, env):
     assert _post(client, headers).status_code == 200
     _cache(test_db, "fl-1", p1, [R2])
     assert _preview(client, headers)["fl-1"]["verification"]["status"] == "verified"
+
+
+def _three(db: Database, root: Path) -> tuple[Path, Path, Path]:
+    """Three tracks trk-1..3 with files fl-1..3 (fl-2 is MP3 so prefer_quality would recycle it if treated as a conflict)."""
+    _, p1 = _seed(db, root, 1, R1, number=1)
+    _, p2 = _seed(db, root, 2, R2, number=2)
+    _, p3 = _seed(db, root, 3, "33333333-3333-3333-3333-333333333333", number=3)
+    for fid, tid, p, codec in (
+        ("fl-1", "trk-1", p1, "FLAC"),
+        ("fl-2", "trk-2", p2, "MP3"),
+        ("fl-3", "trk-3", p3, "FLAC"),
+    ):
+        db.upsert_library_file({
+            "id": fid, "track_id": tid, "file_path": str(p), "relative_path": f"old/{p.name}", "codec": codec,
+            "bitrate": 320 if codec == "MP3" else None, "size_bytes": 100,
+        })
+    return p1, p2, p3
+
+
+def test_batch_relink_rotation_moves_all_without_recycling(test_db, env):
+    _, root, bin_dir = env
+    p1, p2, p3 = _three(test_db, root)
+    res = relink_files(
+        test_db,
+        [
+            {"file_id": "fl-1", "target_track_id": "trk-2"},
+            {"file_id": "fl-2", "target_track_id": "trk-3"},
+            {"file_id": "fl-3", "target_track_id": "trk-1"},
+        ],
+        conflict="prefer_quality",
+    )
+    assert res["relinked"] == 3
+    assert res["conflicts_skipped"] == 0
+    assert res["errors"] == 0
+    assert _recycled(bin_dir) == []
+    assert p1.exists() and p2.exists() and p3.exists()
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-1")] == ["fl-3"]
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-2")] == ["fl-1"]
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-3")] == ["fl-2"]
+
+
+def test_batch_relink_swap_pair_with_skip(test_db, env):
+    _, root, bin_dir = env
+    p1, p2 = _two(test_db, root)
+    res = relink_files(
+        test_db,
+        [
+            {"file_id": "fl-1", "target_track_id": "trk-2"},
+            {"file_id": "fl-2", "target_track_id": "trk-1"},
+        ],
+        conflict="skip",
+    )
+    assert res["relinked"] == 2
+    assert res["conflicts_skipped"] == 0
+    assert res["errors"] == 0
+    assert _recycled(bin_dir) == []
+    assert p1.exists() and p2.exists()
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-1")] == ["fl-2"]
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-2")] == ["fl-1"]
+
+
+def test_batch_relink_real_conflict_still_conflicts(test_db, env):
+    _, root, bin_dir = env
+    _two(test_db, root)
+    res = relink_files(
+        test_db,
+        [{"file_id": "fl-1", "target_track_id": "trk-2"}],
+        conflict="skip",
+    )
+    assert res["relinked"] == 0
+    assert res["conflicts_skipped"] == 1
+    assert res["results"][0]["status"] == "conflict_skipped"
+    assert _recycled(bin_dir) == []
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-1")] == ["fl-1"]
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-2")] == ["fl-2"]
+
+
+def test_batch_relink_two_items_same_target_still_conflict(test_db, env):
+    _, root, _ = env
+    _three(test_db, root)
+    test_db.delete_library_file("fl-2")
+    res = relink_files(
+        test_db,
+        [
+            {"file_id": "fl-1", "target_track_id": "trk-2"},
+            {"file_id": "fl-3", "target_track_id": "trk-2"},
+        ],
+        conflict="skip",
+    )
+    assert res["relinked"] == 1
+    assert res["conflicts_skipped"] == 1
+    assert res["results"][0]["status"] == "relinked"
+    assert res["results"][1]["status"] == "conflict_skipped"
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-2")] == ["fl-1"]

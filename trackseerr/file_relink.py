@@ -104,7 +104,14 @@ def _record_relink(db: Any, file_row: dict[str, Any], old: dict[str, Any], targe
     )
 
 
-def relink_file(db: Any, file_id: str, target_track_id: str, conflict: Optional[str]) -> dict[str, Any]:
+def relink_file(
+    db: Any,
+    file_id: str,
+    target_track_id: str,
+    conflict: Optional[str],
+    *,
+    ignore_file_ids: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     """Points ``file_id`` at ``target_track_id``. When the target already has a file, ``conflict`` picks the winner
     (``keep_incoming``, ``keep_existing`` or ``prefer_quality``); without it ``RelinkConflict`` is raised."""
     file_row = db.get_library_file(file_id)
@@ -125,7 +132,7 @@ def relink_file(db: Any, file_id: str, target_track_id: str, conflict: Optional[
         "action": "relinked", "kept_file_id": file_id, "recycled_file_id": None,
         "old_track_id": str(old["id"]), "target_track_id": str(target["id"]),
     }
-    existing = db.list_library_files_for_track(target_track_id)
+    existing = [r for r in db.list_library_files_for_track(target_track_id) if str(r["id"]) not in ignore_file_ids]
     choice = _resolve_conflict(conflict, existing, file_row) if existing else None
     mm = db.get_media_management_settings()
     settings = (mm, _library_root(mm), _client_roots(db, mm))
@@ -145,6 +152,23 @@ def relink_file(db: Any, file_id: str, target_track_id: str, conflict: Optional[
     return result
 
 
+def _item_ids(item: Any) -> tuple[str, str]:
+    file_id = item.file_id if hasattr(item, "file_id") else item["file_id"]
+    target_track_id = item.target_track_id if hasattr(item, "target_track_id") else item["target_track_id"]
+    return str(file_id), str(target_track_id)
+
+
+def _moving_file_ids(db: Any, items: list[Any]) -> set[str]:
+    """IDs of batch files whose target track differs from their current track."""
+    moving: set[str] = set()
+    for item in items:
+        file_id, target_track_id = _item_ids(item)
+        row = db.get_library_file(file_id)
+        if row and str(row["track_id"]) != target_track_id:
+            moving.add(file_id)
+    return moving
+
+
 def relink_files(
     db: Any,
     items: list[Any],
@@ -157,23 +181,28 @@ def relink_files(
     """
     results: list[dict[str, Any]] = []
     relinked_count = 0
+    swaps_count = 0
     conflicts_skipped_count = 0
     errors_count = 0
 
     per_file_conflict = None if conflict == "skip" else conflict
+    still_moving = _moving_file_ids(db, items)
 
     for item in items:
-        file_id = item.file_id if hasattr(item, "file_id") else item["file_id"]
-        target_track_id = item.target_track_id if hasattr(item, "target_track_id") else item["target_track_id"]
+        file_id, target_track_id = _item_ids(item)
+        ignore_ids = frozenset(still_moving - {file_id})
+        had_moving_occupant = any(str(r["id"]) in ignore_ids for r in db.list_library_files_for_track(target_track_id))
         res_entry: dict[str, Any] = {"file_id": file_id}
         try:
-            res = relink_file(db, file_id, target_track_id, per_file_conflict)
+            res = relink_file(db, file_id, target_track_id, per_file_conflict, ignore_file_ids=ignore_ids)
             res_entry["status"] = res.get("action", "relinked")
             res_entry["kept_file_id"] = res.get("kept_file_id")
             res_entry["recycled_file_id"] = res.get("recycled_file_id")
             res_entry["old_track_id"] = res.get("old_track_id")
             res_entry["target_track_id"] = res.get("target_track_id")
             relinked_count += 1
+            if had_moving_occupant and res.get("action") == "relinked":
+                swaps_count += 1
         except RelinkConflict:
             res_entry["status"] = "conflict_skipped"
             conflicts_skipped_count += 1
@@ -181,9 +210,14 @@ def relink_files(
             res_entry["status"] = "error"
             res_entry["message"] = str(exc)
             errors_count += 1
+        still_moving.discard(file_id)
 
         results.append(res_entry)
 
+    logger.info(
+        "Batch relink: %d relinked, %d swaps inside the batch, %d conflicts skipped, %d errors",
+        relinked_count, swaps_count, conflicts_skipped_count, errors_count,
+    )
     return {
         "results": results,
         "relinked": relinked_count,

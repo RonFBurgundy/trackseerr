@@ -12,9 +12,18 @@ _NO_KEY_MESSAGE = "Add an AcoustID API key in Settings → Media Management firs
 _STOP_WORDS = frozenset({"the", "a", "an", "and", "of", "pt", "part", "pts", "parts"})
 _ROMAN_MAP = {"i": "1", "ii": "2", "iii": "3", "iv": "4"}
 _FEAT_RE = re.compile(r"\s+(?:feat\.|ft\.|featuring)\s+.*")
-_PARENS_RE = re.compile(r"\([^)]*\)|\[[^\]]*\]")
+_PARENS_RE = re.compile(r"\(([^)]*)\)|\[([^\]]*)\]")
 _DASH_CUT_RE = re.compile(r"\s[-–—]\s.*")
+_APOSTROPHE_RE = re.compile(r"['’‘`]")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> frozenset[str]:
+    text = unicodedata.normalize("NFKD", text).lower()
+    text = _APOSTROPHE_RE.sub("", text)
+    text = text.encode("ascii", "ignore").decode("ascii")
+    tokens = [_ROMAN_MAP.get(tok, tok) for tok in _TOKEN_RE.findall(text)]
+    return frozenset(tok for tok in tokens if tok not in _STOP_WORDS)
 
 
 def _base_tokens(title: str) -> frozenset[str]:
@@ -22,9 +31,12 @@ def _base_tokens(title: str) -> frozenset[str]:
     text = _FEAT_RE.sub("", text)
     text = _PARENS_RE.sub(" ", text)
     text = _DASH_CUT_RE.sub("", text)
-    text = text.encode("ascii", "ignore").decode("ascii")
-    tokens = [_ROMAN_MAP.get(tok, tok) for tok in _TOKEN_RE.findall(text)]
-    return frozenset(tok for tok in tokens if tok not in _STOP_WORDS)
+    return _tokenize(text)
+
+
+def _bracket_tokens(title: str) -> list[frozenset[str]]:
+    groups = [m.group(1) if m.group(1) is not None else m.group(2) for m in _PARENS_RE.finditer(title)]
+    return [toks for g in groups if (toks := _tokenize(g))]
 
 
 def wrong_file_kind(
@@ -37,6 +49,10 @@ def wrong_file_kind(
     a = _base_tokens(track_title)
     b = _base_tokens(actual_title)
     if a and b and (a <= b or b <= a):
+        return "different_version"
+    if (b and any(bt == b for bt in _bracket_tokens(track_title))) or (
+        a and any(bt == a for bt in _bracket_tokens(actual_title))
+    ):
         return "different_version"
     return "different_song"
 
