@@ -157,6 +157,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Library Self-Heal no longer links an "Unknown Album" (songs from a playlist with no known album) to a single compilation. That could move the album to Various Artists and add the compilation's whole track list as wanted songs. Self-Heal now files each song under its own release, and repairs albums it already linked this way: the link and the compilation's wanted songs are removed, and the album is deleted once it's empty.
+- **Name compilations by series or label** now uses the film title for soundtracks even when your library doesn't know the album is a soundtrack ("The Harder They Come" was named after its label, Island). Run Self-Heal, then Retag.
 - Retag writes release dates as plain dates (2020-01-24) instead of a full timestamp, so MP3 dates stop showing as changed on every preview. FLAC and Ogg files now also update their older track and disc total tags, so a wrong total no longer comes back after a retag. Run Retag once to clean up files that already have the timestamp.
 - **Name compilations by series or label** no longer picks a "best of" list or award as the album artist (Saturday Night Fever was showing as "Absolute Radio's The 100 Collection"). Soundtracks now use the film or game title first. Run Retag again after you update.
 - Songs downloaded from a compilation are moved to their artist's own single or album right after import, instead of waiting for the weekly Library Self-Heal.
