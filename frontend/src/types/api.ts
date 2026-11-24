@@ -9787,6 +9787,8 @@ export interface components {
             artist_name?: string | null;
             /** Clean Title */
             clean_title?: string | null;
+            /** Compilation Artist */
+            compilation_artist?: string | null;
             /** Cover Url */
             cover_url?: string | null;
             /** Created At */
@@ -11318,6 +11320,13 @@ export interface components {
              */
             colon_replacement_format: string;
             /**
+             * Compilation Album Artist
+             * @description What to write as the album artist on compilations kept under Various Artists: Various Artists, or the series, soundtrack or label
+             * @default various
+             * @enum {string}
+             */
+            compilation_album_artist: "various" | "series_label";
+            /**
              * Compilation Artist Folder
              * @description Folder name for Various Artists compilations
              * @default Various Artists
@@ -11549,6 +11558,8 @@ export interface components {
             artist_folder_format?: string | null;
             /** Colon Replacement Format */
             colon_replacement_format?: string | null;
+            /** Compilation Album Artist */
+            compilation_album_artist?: ("various" | "series_label") | null;
             /** Compilation Artist Folder */
             compilation_artist_folder?: string | null;
             /** Compilation Track Format */
