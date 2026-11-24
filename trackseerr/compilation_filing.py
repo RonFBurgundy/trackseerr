@@ -631,15 +631,8 @@ def _refile_out_of_various_one(
         file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True, discovery=discovery)
 
 
-def refile_out_of_various(
-    db: Any,
-    enricher: Any,
-    should_stop: Optional[Callable[[], bool]] = None,
-    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
-    discovery: Any = None,
-) -> dict[str, int]:
-    """Moves real-artist albums and small compilations out of Various Artists to their performer."""
-    counts = {
+def _out_of_various_counts() -> dict[str, int]:
+    return {
         "albums": 0,
         "moved_to_artist": 0,
         "filed_home": 0,
@@ -649,6 +642,17 @@ def refile_out_of_various(
         "skipped": 0,
         "errors": 0,
     }
+
+
+def refile_out_of_various(
+    db: Any,
+    enricher: Any,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+    discovery: Any = None,
+) -> dict[str, int]:
+    """Moves real-artist albums and small compilations out of Various Artists to their performer."""
+    counts = _out_of_various_counts()
     va_id = various_artists_id(db)
     candidates = db.list_albums_with_files_for_artist(va_id)
     total = len(candidates)
@@ -666,4 +670,24 @@ def refile_out_of_various(
         if on_progress is not None:
             on_progress(done, total)
     logger.info("Out of Various Artists refile finished: %s", counts)
+    return counts
+
+
+def refile_various_album(
+    db: Any,
+    enricher: Any,
+    album_id: str,
+    discovery: Any = None,
+) -> dict[str, int]:
+    """Refiles a single Various Artists album right after import, returning empty counts for non-VA albums."""
+    counts = _out_of_various_counts()
+    album = db.get_library_album(album_id)
+    if not album or str(album.get("artist_id") or "") != various_artists_id(db):
+        return counts
+    try:
+        _refile_out_of_various_one(db, enricher, album, counts, discovery=discovery)
+    except (sqlite3.Error, requests.RequestException) as exc:
+        counts["errors"] += 1
+        logger.warning("Out of Various Artists refile failed for album %s: %s", album.get("id"), safe_exc(exc))
+    logger.info("Refiled imported Various Artists album %s: %s", album_id, counts)
     return counts

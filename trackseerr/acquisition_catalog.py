@@ -8,6 +8,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import requests
 
 from trackseerr import delay_gate
 from trackseerr.acquisition_coordinator import _to_quality_profile
@@ -23,7 +24,7 @@ from trackseerr.models import (
     LibraryTrack,
 )
 from trackseerr.redaction import safe_exc
-from trackseerr.compilation_filing import ensure_primary_credit
+from trackseerr.compilation_filing import ensure_primary_credit, refile_various_album
 from trackseerr.release_matching import album_for_recording
 from trackseerr.quality import evaluate_release, parse_release_title
 from trackseerr.storage import Database
@@ -354,6 +355,35 @@ class ImportCatalogMixin:
             import_tag_cache: dict[str, list[str]] = {}
             for placed_str in job.imported_paths:
                 self._upsert_catalog_for_file(db, ctx, job, placed_str, import_tag_cache)
+            _refile_imported_various_albums(db, job.imported_paths)
+
+
+def _refile_imported_various_albums(db: Database, imported_paths: list[str]) -> None:
+    """Refile any Various Artists albums touched by an import batch."""
+    try:
+        seen_album_ids: set[str] = set()
+        album_ids: list[str] = []
+        for placed_str in imported_paths:
+            lib_file = db.get_library_file_by_path(placed_str)
+            if not lib_file or not lib_file.get("track_id"):
+                continue
+            track = db.get_library_track(str(lib_file["track_id"]))
+            if not track or not track.get("album_id"):
+                continue
+            album_id = str(track["album_id"])
+            if album_id not in seen_album_ids:
+                seen_album_ids.add(album_id)
+                album_ids.append(album_id)
+        if not album_ids:
+            return
+        from trackseerr.mb_metadata_store import get_shared_discovery_client, get_shared_enricher
+
+        enricher = get_shared_enricher(db)
+        discovery = get_shared_discovery_client(db)
+        for album_id in album_ids:
+            refile_various_album(db, enricher, album_id, discovery=discovery)
+    except (sqlite3.Error, requests.RequestException) as exc:
+        logger.warning("Post-import Various Artists refile failed: %s", safe_exc(exc))
 
 
 
