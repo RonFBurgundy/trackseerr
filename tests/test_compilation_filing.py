@@ -1101,3 +1101,65 @@ def test_out_of_various_files_under_own_best_of_when_only_option(db: Database, t
     assert holder is not None
     moved = [t for t in db.list_library_tracks(album_id=holder, limit=50) if t["has_file"]]
     assert len(moved) == 1 and moved[0]["mb_recording_id"] == "rec-va-only"
+
+
+def test_out_of_various_prefers_searched_studio_over_own_best_of(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.upsert_library_artist(LibraryArtist(id="artist-bob", name="Bob Marley", mbid=BOB_MBID, monitored=True))
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    best_of = _group("rg-best", "Legend", secondary=["Compilation"], artist_ids=[BOB_MBID])
+    home_group = _group("rg-home", "Exodus")
+    enricher = _enricher(
+        {"rec-va-only": [NOW_44, best_of], "rec-studio": [home_group]},
+        search_results={
+            ("Bob Marley", "Could I Be In Love"): [
+                {
+                    "id": "rec-studio",
+                    "title": "Could I Be In Love",
+                    "score": 90,
+                    "artist_ids": [BOB_MBID],
+                    "artist_names": ["Bob Marley"],
+                    "artist_credit": "Bob Marley",
+                    "release_groups": [home_group],
+                },
+            ]
+        },
+    )
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["filed_home"] == 1
+    assert counts["searched_home"] == 1
+    assert db.album_holding_release_group("artist-bob", "rg-home", "") is not None
+    assert db.album_holding_release_group("artist-bob", "rg-best", "") is None
+
+
+def test_out_of_various_own_best_of_when_search_fails(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.upsert_library_artist(LibraryArtist(id="artist-bob", name="Bob Marley", mbid=BOB_MBID, monitored=True))
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    best_of = _group("rg-best", "Legend", secondary=["Compilation"], artist_ids=[BOB_MBID])
+    enricher = _enricher(
+        {"rec-va-only": [NOW_44, best_of]},
+        search_results={("Bob Marley", "Could I Be In Love"): []},
+    )
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["filed_home"] == 1
+    assert counts.get("left_search_no_results", 0) == 0
+    assert db.album_holding_release_group("artist-bob", "rg-best", "") is not None

@@ -369,22 +369,21 @@ def _resolve_per_track_target(
     """Resolves ((artist, home_group, from_search), reason) for a track in per-track mode."""
     title = str(track.get("title") or "")
     target_artist = performer_artist(db, str(track["id"]))
-    home = (
-        home_release_group(
-            per_rec_groups.get(rec, []), target_artist.get("mbid"), title, allow_own_compilation=True
-        )
-        if target_artist is not None
-        else None
-    )
+    groups = per_rec_groups.get(rec, [])
+    home = home_release_group(groups, target_artist.get("mbid"), title) if target_artist is not None else None
     if target_artist is not None and home is not None:
         return (target_artist, home, False), ""
     credit = _primary_track_credit(db, str(track["id"]))
     if credit is None:
         return None, "no_credit"
     hit, reason = _search_home(db, enricher, track, credit, own_rec=rec)
-    if hit is None:
-        return None, reason
-    return (hit[0], hit[1], True), ""
+    if hit is not None:
+        return (hit[0], hit[1], True), ""
+    if target_artist is not None:
+        own_comp = home_release_group(groups, target_artist.get("mbid"), title, allow_own_compilation=True)
+        if own_comp is not None:
+            return (target_artist, own_comp, False), ""
+    return None, reason
 
 
 def _file_one_track_home(

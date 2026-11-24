@@ -156,6 +156,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Library Self-Heal moves far more compilation songs to their own artist. When a song on a compilation only exists on that compilation, Self-Heal now checks several MusicBrainz matches for the same song instead of just one, skips live versions that don't match, and finds the studio album. If the artist has no studio release of the song, it uses their own best-of. The Self-Heal log now says why each song was left under Various Artists.
 - Compilation files no longer get moved into another artist's folder (some had ended up under "Carl Douglas"). Run Rename Files once to put them back under Various Artists.
 - A download that was waiting for a manual import and gets retried now imports from the file on disk, instead of failing because Soulseek had already forgotten the transfer.
 - When adding a missing song from MusicBrainz, a title like "I Miss My Baby - 1972 Version" is also looked up as "I Miss My Baby", and the match is only used when its length is within 3 seconds of your file. Live, remix and other versions are never swapped for the plain song.
