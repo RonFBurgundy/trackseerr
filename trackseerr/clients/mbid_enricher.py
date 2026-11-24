@@ -1479,17 +1479,21 @@ class MbidEnricherClient:
             return []
 
     def get_release_group_identity(self, rg_id: str) -> dict[str, Any]:
-        """Returns MusicBrainz series and label names for a release group (empty lists when unknown)."""
+        """Returns MusicBrainz series, label, and secondary-type names for a release group."""
         if not rg_id or not str(rg_id).strip():
-            return {"series": [], "labels": [], "complete": True}
+            return {"series": [], "labels": [], "secondary_types": [], "complete": True}
 
         clean_id = str(rg_id).strip()
-        cache_key = f"rg_identity:v2:{clean_id.lower()}"
+        cache_key = f"rg_identity:v3:{clean_id.lower()}"
         hit, cached_data = self._lookup(cache_key)
         if hit:
             if isinstance(cached_data, dict):
-                return {**cached_data, "complete": bool(cached_data.get("complete", True))}
-            return {"series": [], "labels": [], "complete": False}
+                return {
+                    **cached_data,
+                    "secondary_types": list(cached_data.get("secondary_types") or []),
+                    "complete": bool(cached_data.get("complete", True)),
+                }
+            return {"series": [], "labels": [], "secondary_types": [], "complete": False}
 
         try:
             from trackseerr.mb_metadata_store import TTL_RG_LOOKUP
@@ -1503,7 +1507,14 @@ class MbidEnricherClient:
                 params={"release-group": clean_id, "inc": "labels", "fmt": "json", "limit": 25},
             )
 
-            series = _parse_rg_series(rg_resp.json()) if (rg_resp is not None and rg_resp.status_code == 200) else []
+            if rg_resp is not None and rg_resp.status_code == 200:
+                rg_json = rg_resp.json()
+                series = _parse_rg_series(rg_json)
+                raw_st = rg_json.get("secondary-types") if isinstance(rg_json, dict) else None
+                secondary_types = [str(t) for t in raw_st if t is not None] if isinstance(raw_st, list) else []
+            else:
+                series = []
+                secondary_types = []
             labels = _parse_rg_labels(rel_resp.json()) if (rel_resp is not None and rel_resp.status_code == 200) else []
 
             transient = any(r is None or r.status_code not in (200, 404) for r in (rg_resp, rel_resp))
@@ -1515,15 +1526,15 @@ class MbidEnricherClient:
                     rel_resp.status_code if rel_resp else "None",
                 )
                 self._set_cached(cache_key, None)
-                return {"series": series, "labels": labels, "complete": False}
+                return {"series": series, "labels": labels, "secondary_types": secondary_types, "complete": False}
 
-            result = {"series": series, "labels": labels, "complete": True}
+            result = {"series": series, "labels": labels, "secondary_types": secondary_types, "complete": True}
             self._remember(cache_key, "rg_identity", result, ttl=TTL_RG_LOOKUP)
             return result
         except (requests.RequestException, ValueError, AttributeError, TypeError) as exc:
             logger.info("MbidEnricherClient: get_release_group_identity failed for '%s': %s", clean_id, exc)
             self._set_cached(cache_key, None)
-            return {"series": [], "labels": [], "complete": False}
+            return {"series": [], "labels": [], "secondary_types": [], "complete": False}
 
     def resolve_release_group(self, rg_id: str) -> Optional[str]:
         """Resolves canonical release group MBID, recording redirects if updated."""

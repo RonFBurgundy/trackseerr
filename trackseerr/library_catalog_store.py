@@ -1028,6 +1028,15 @@ class LibraryCatalogStoreMixin:
             )
             self.conn.commit()
 
+    def clear_album_compilation_artists(self) -> int:
+        """Clears cached compilation_artist values on library_albums and returns the number of rows cleared."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE library_albums SET compilation_artist = NULL WHERE compilation_artist IS NOT NULL"
+            )
+            self.conn.commit()
+            return int(cur.rowcount)
+
     def move_album_to_artist(self, album_id: str, artist_id: str) -> None:
         """Re-files an album and all its tracks under another artist in one transaction (files are not touched)."""
         with self._lock:

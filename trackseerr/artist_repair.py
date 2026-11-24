@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
 from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, artist_name_key
+from trackseerr.compilation_artist import reset_compilation_artist_cache_once
 from trackseerr.library import primary_artist
 from trackseerr.models import LibraryArtist
 from trackseerr.redaction import safe_exc
@@ -795,6 +796,7 @@ def run_repair_and_match(
     if stop():
         return
     run.set_stage(stage_offset + 6, total_stages, REPAIR_STAGES[5])
+    reset_compilation_artist_cache_once(db)
     various = refile_various_albums(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; various: {_format_counts(various)}"
     if stop():

@@ -97,7 +97,10 @@ def work_out_compilation_artist(enricher: Any, album: dict[str, Any]) -> tuple[s
     complete = not rg_id or bool(identity.get("complete", True))
 
     title = str(album.get("title") or "")
-    if _has_secondary_type(album, "soundtrack"):
+    is_soundtrack = _has_secondary_type(album, "soundtrack") or any(
+        str(t).strip().casefold() == "soundtrack" for t in identity.get("secondary_types") or []
+    )
+    if is_soundtrack:
         st = soundtrack_name(title)
         if st:
             return st, complete
@@ -142,3 +145,12 @@ def compilation_display_artist(
             album["compilation_artist"] = worked
         cached = worked
     return str(cached) if cached else None
+
+
+def reset_compilation_artist_cache_once(db: Any) -> bool:
+    """Clears cached compilation_artist values once so soundtrack-typed albums are re-evaluated."""
+    if db.get_kv("compilation_artist_v2") is None:
+        db.clear_album_compilation_artists()
+        db.set_kv("compilation_artist_v2", "1")
+        return True
+    return False
