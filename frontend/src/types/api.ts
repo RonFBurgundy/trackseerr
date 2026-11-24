@@ -15598,6 +15598,11 @@ export interface components {
             artist_name: string;
             /** File Id */
             file_id: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "different_song" | "different_version";
             /** Relative Path */
             relative_path?: string | null;
             /** Score */
@@ -15611,6 +15616,10 @@ export interface components {
         WrongFilesResponse: {
             /** Checked */
             checked: number;
+            /** Different Song */
+            different_song: number;
+            /** Different Version */
+            different_version: number;
             /** Items */
             items: components["schemas"]["WrongFileItem"][];
             /** Library Files */
