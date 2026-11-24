@@ -2,11 +2,43 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+import re
+import unicodedata
+from typing import Any, Callable, Literal, Optional
 
 from trackseerr.rename_verification import MISMATCH, start_verification, verdict_for
 
 _NO_KEY_MESSAGE = "Add an AcoustID API key in Settings → Media Management first"
+_STOP_WORDS = frozenset({"the", "a", "an", "and", "of", "pt", "part", "pts", "parts"})
+_ROMAN_MAP = {"i": "1", "ii": "2", "iii": "3", "iv": "4"}
+_FEAT_RE = re.compile(r"\s+(?:feat\.|ft\.|featuring)\s+.*")
+_PARENS_RE = re.compile(r"\([^)]*\)|\[[^\]]*\]")
+_DASH_CUT_RE = re.compile(r"\s[-–—]\s.*")
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+
+def _base_tokens(title: str) -> frozenset[str]:
+    text = unicodedata.normalize("NFKD", title).lower()
+    text = _FEAT_RE.sub("", text)
+    text = _PARENS_RE.sub(" ", text)
+    text = _DASH_CUT_RE.sub("", text)
+    text = text.encode("ascii", "ignore").decode("ascii")
+    tokens = [_ROMAN_MAP.get(tok, tok) for tok in _TOKEN_RE.findall(text)]
+    return frozenset(tok for tok in tokens if tok not in _STOP_WORDS)
+
+
+def wrong_file_kind(
+    track_title: str,
+    actual_title: Optional[str],
+) -> Literal["different_song", "different_version"]:
+    """Classifies an AcoustID mismatch as a different version of the same song or a different song."""
+    if not actual_title:
+        return "different_song"
+    a = _base_tokens(track_title)
+    b = _base_tokens(actual_title)
+    if a and b and (a <= b or b <= a):
+        return "different_version"
+    return "different_song"
 
 
 def start_wrong_file_check(db: Any) -> bool:
@@ -60,11 +92,13 @@ def _build_item(
     artist_id = track.get("artist_id") or (album or {}).get("artist_id")
     artist = _cached_lookup(artists, db.get_library_artist, artist_id)
     actual_fields = _actual_library_fields(db, verdict.get("actual_track_id"), albums, artists)
+    track_title = str(track.get("title") or "")
+    actual_title = verdict.get("actual_title") or actual_fields.get("actual_track_title")
     return {
         "file_id": row["file_id"],
         "relative_path": row.get("relative_path"),
         "track_id": row["track_id"],
-        "track_title": str(track.get("title") or ""),
+        "track_title": track_title,
         "album_id": track.get("album_id"),
         "album_title": str((album or {}).get("title") or ""),
         "artist_name": str((artist or {}).get("name") or ""),
@@ -73,6 +107,7 @@ def _build_item(
         "actual_track_id": verdict.get("actual_track_id"),
         "actual_album_id": verdict.get("actual_album_id"),
         "score": verdict.get("score"),
+        "kind": wrong_file_kind(track_title, actual_title),
         **actual_fields,
     }
 
@@ -103,9 +138,12 @@ def list_wrong_files(db: Any) -> dict[str, Any]:
             item["track_title"].casefold(),
         )
     )
+    different_version = sum(1 for item in items if item["kind"] == "different_version")
     return {
         "items": items,
         "total": len(items),
+        "different_song": len(items) - different_version,
+        "different_version": different_version,
         "checked": checked,
         "library_files": len(db.list_library_file_ids()),
     }

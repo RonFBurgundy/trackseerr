@@ -238,11 +238,14 @@ class WrongFileItem(ApiModel):
     actual_album_title: Optional[str] = None
     actual_artist_name: Optional[str] = None
     score: Optional[float] = None
+    kind: Literal["different_song", "different_version"]
 
 
 class WrongFilesResponse(ApiModel):
     items: list[WrongFileItem]
     total: int
+    different_song: int
+    different_version: int
     checked: int
     library_files: int
 

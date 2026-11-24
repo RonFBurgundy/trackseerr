@@ -96,11 +96,14 @@ def test_list_wrong_files_returns_only_mismatches(app_and_client, test_db, admin
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 1
+    assert body["different_song"] == 1
+    assert body["different_version"] == 0
     assert body["checked"] == 3
     assert body["library_files"] == 3
     assert len(body["items"]) == 1
     item = body["items"][0]
     assert item["file_id"] == f2
+    assert item["kind"] == "different_song"
     assert item["track_id"] == "trk-2"
     assert item["actual_track_id"] == "trk-1"
     assert item["actual_track_title"] == "Song 1"
@@ -124,6 +127,22 @@ def test_list_wrong_files_mismatch_outside_library(app_and_client, test_db, admi
     assert item["actual_track_title"] is None
     assert item["actual_title"] == "External Song"
     assert item["actual_artist"] == "Other Artist"
+
+
+@pytest.mark.parametrize(
+    ("track_title", "actual_title", "expected"),
+    [
+        ("Iron Man - 2012 - Remaster", "Iron Man", "different_version"),
+        ("Cola (Dario D'Attis remix)", "Cola", "different_version"),
+        ("What a Walk", "One Track Mind", "different_song"),
+        ("Black Boy Fly", "Bitch, Don't Kill My Vibe (remix)", "different_song"),
+        ("Paid In Full (Album Mix)", "Paid in Full (album version)", "different_version"),
+        ("Killing Me Softly With His Song", "Killing Me Softly", "different_version"),
+        ("Sweet Little Sixteen (Demo)", "Sweet Little Sixteen", "different_version"),
+    ],
+)
+def test_wrong_file_kind(track_title: str, actual_title: str, expected: str):
+    assert wf.wrong_file_kind(track_title, actual_title) == expected
 
 
 def test_check_requires_api_key(app_and_client, admin):
