@@ -45,6 +45,8 @@ The **Library Self-Heal** task on the Tasks page does this for you once a week. 
 
 Compilations stay together under Various Artists only when you monitor the compilation album yourself or switch on **Keep compilations together** (Settings → Media Management). Otherwise, Library Self-Heal and new downloads file each song under its own artist's single or album, and songs MusicBrainz only knows from compilations stay on the compilation.
 
+Switch on **Name compilations by series or label** (Settings → Media Management) to write a compilation's series, film or game (for soundtracks), or record label as its album artist tag instead of Various Artists, falling back to Various Artists if none is available. Each song keeps its own track artist, and folder paths do not change. Run **Retag** to apply the setting to existing files.
+
 ## Scanning
 
 A scan reads every audio file in the music folder and adds it to the library. Run the first scan after you set the music folder. Click **Scan library** on the **Library** page.
