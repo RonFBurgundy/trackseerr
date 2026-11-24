@@ -157,6 +157,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- **Name compilations by series or label** no longer picks a "best of" list or award as the album artist (Saturday Night Fever was showing as "Absolute Radio's The 100 Collection"). Soundtracks now use the film or game title first. Run Retag again after you update.
 - Songs downloaded from a compilation are moved to their artist's own single or album right after import, instead of waiting for the weekly Library Self-Heal.
 - Library Self-Heal finds more artist releases for compilation songs: it searches Deezer for the song directly, treats "Instrumental", "Original Mix", "Radio Edit" and similar as the same song, prefers the original release over deluxe editions, and accepts the artist's own soundtrack album as a last resort.
 - TrackSeerr no longer downloads the whole Various Artists "discography" into your library, and Library Self-Heal removes the empty Various Artists albums it added before (only albums with no files, downloads or requests).
