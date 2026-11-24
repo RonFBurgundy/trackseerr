@@ -20,7 +20,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Optional
 
-from trackseerr.clients.mbid_enricher import artist_name_key
+from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, artist_name_key
 from trackseerr.library import primary_artist
 from trackseerr.models import LibraryArtist
 from trackseerr.redaction import safe_exc
@@ -75,7 +75,7 @@ _REMOVABLE_ALBUMS_SQL = f"""
 
 _COUNT_KEYS = (
     "artists_merged", "albums_merged", "ids_kept_alias", "ids_replaced", "ids_cleared",
-    "wrong_albums_removed", "credits_refiled", "lookups_unavailable", "errors",
+    "wrong_albums_removed", "credits_refiled", "va_albums_pruned", "lookups_unavailable", "errors",
 )
 
 StopFn = Optional[Callable[[], bool]]
@@ -510,6 +510,28 @@ def _drop_wrong_discography(db: Any, artist_id: str) -> int:
     return len(doomed)
 
 
+def prune_various_artists_albums(db: Any, counts: dict[str, int]) -> None:
+    """Deletes empty, unrequested, non-hand-monitored albums under Various Artists."""
+    va_artist = db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID)
+    if not va_artist:
+        return
+    artist_id = str(va_artist["id"])
+    sql = f"{_REMOVABLE_ALBUMS_SQL} AND COALESCE(a.monitored_by_hand, 0) = 0"
+    with db._lock:
+        try:
+            cur = db.conn.cursor()
+            doomed = [str(r["id"]) for r in cur.execute(sql, (artist_id,)).fetchall()]
+            for album_id in doomed:
+                cur.execute("DELETE FROM library_tracks WHERE album_id = ?", (album_id,))
+                cur.execute("DELETE FROM library_collection_albums WHERE album_id = ?", (album_id,))
+                cur.execute("DELETE FROM library_albums WHERE id = ?", (album_id,))
+            db.conn.commit()
+        except sqlite3.Error:
+            db.conn.rollback()
+            raise
+    counts["va_albums_pruned"] = counts.get("va_albums_pruned", 0) + len(doomed)
+
+
 def _set_artist_mbid(db: Any, artist_id: str, mbid: Optional[str]) -> None:
     with db._lock:
         try:
@@ -683,6 +705,9 @@ def run_artist_repair(
     if should_stop is not None and should_stop():
         return counts
     refile_joined_credit_artists(db, enricher, counts, should_stop)
+    if should_stop is not None and should_stop():
+        return counts
+    prune_various_artists_albums(db, counts)
     logger.info("Artist repair finished: %s", counts)
     return counts
 

@@ -933,3 +933,77 @@ def test_hydration_new_title_still_added(test_db: Database):
     )
     assert {t["title"] for t in tracks} >= {"Butterflies", "Brand New"}
     assert len([t for t in tracks if t["title"] == "Brand New"]) == 1
+
+
+def test_refresh_skips_discography_for_various_artists(test_db: Database):
+    from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+
+    artist_id = "art-va"
+    test_db.upsert_library_artist(
+        LibraryArtist(
+            id=artist_id,
+            name="Various Artists",
+            mbid=VARIOUS_ARTISTS_MBID,
+            monitored=True,
+            monitor_option="future",
+        )
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.source_available.return_value = True
+    enricher.get_artist_details.return_value = {"id": VARIOUS_ARTISTS_MBID, "name": "Various Artists"}
+    enricher.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+
+    discovery = MagicMock()
+    discovery.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+
+    with patch.object(mediacover_service, "ensure_artwork", return_value=Path("/tmp/cover.jpg")):
+        result = refresh_single_artist(
+            artist_id=artist_id,
+            db=test_db,
+            enricher=enricher,
+            discovery_client=discovery,
+        )
+
+    assert result["success"] is True
+    enricher.get_artist_discography_result.assert_not_called()
+    enricher.get_artist_discography.assert_not_called()
+    discovery.get_artist_details.assert_not_called()
+    assert test_db.list_library_albums(artist_id=artist_id) == []
+
+
+def test_refresh_normal_artist_still_syncs(test_db: Database):
+    artist_id = "art-normal-sync"
+    test_db.upsert_library_artist(
+        LibraryArtist(
+            id=artist_id,
+            name="Normal Artist",
+            mbid="mbid-normal-sync",
+            monitored=True,
+            monitor_option="all",
+        )
+    )
+    enricher = MagicMock(spec=MbidEnricherClient)
+    enricher.source_available.return_value = True
+    enricher.get_artist_details.return_value = {"id": "mbid-normal-sync", "name": "Normal Artist"}
+    disco = [{"id": "rg-norm-1", "title": "Normal Album", "album_type": "album", "year": 2020}]
+    enricher.get_artist_discography.return_value = disco
+    enricher.get_artist_discography_result.return_value = (disco, True)
+    enricher.get_release_group_tracks.return_value = []
+    enricher.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+
+    discovery = MagicMock()
+    discovery.stats.return_value = {"network_requests": 0, "cache_hits": 0}
+
+    with patch.object(mediacover_service, "ensure_artwork", return_value=Path("/tmp/cover.jpg")):
+        result = refresh_single_artist(
+            artist_id=artist_id,
+            db=test_db,
+            enricher=enricher,
+            discovery_client=discovery,
+        )
+
+    assert result["success"] is True
+    enricher.get_artist_discography_result.assert_called_once()
+    albums = test_db.list_library_albums(artist_id=artist_id)
+    assert len(albums) == 1
+    assert albums[0]["title"] == "Normal Album"
