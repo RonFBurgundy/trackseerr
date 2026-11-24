@@ -332,6 +332,12 @@ def test_retag_timestamp_release_date_writes_plain_date_flac(
     )
     assert p1.status_code == 200
     assert len(p1.json()) == 1
+    assert any(
+        c["field"] == "date"
+        and c["current"] == "2020-01-24T00:00:00Z"
+        and c["proposed"] == "2020-01-24"
+        for c in p1.json()[0]["changes"]
+    )
 
     apply_resp = client.post(
         "/api/library/retag/apply",
@@ -596,154 +602,13 @@ def test_retag_client_supplied_values_are_ignored(
     assert meta["artist"] == "Daft Punk"
 
 
-def test_normalize_tag_date_cases():
-    """normalize_tag_date strips timestamps and normalizes date prefixes."""
-    from trackseerr.library import normalize_tag_date
+def test_tags_differ_date_normalizes_proposed_only():
+    """_tags_differ normalizes only proposed_val for date, preserving timestamp diffs on current_val."""
+    from trackseerr.api.routes.library.tagging import _tags_differ
 
-    assert normalize_tag_date("2020-01-24T00:00:00Z") == "2020-01-24"
-    assert normalize_tag_date("2020-01-24 00:00") == "2020-01-24"
-    assert normalize_tag_date("2020-01") == "2020-01"
-    assert normalize_tag_date("1999") == "1999"
-    assert normalize_tag_date(2001) == "2001"
-    assert normalize_tag_date("") == ""
-    assert normalize_tag_date(None) is None
-
-
-def test_retag_timestamp_release_date_writes_plain_date_flac(
-    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
-):
-    """Timestamp release_date is normalized to YYYY-MM-DD in FLAC DATE tag."""
-    from mutagen.flac import FLAC
-
-    app, client = app_and_client
-    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
-    music_dir = tmp_path / "music"
-
-    _setup_library_track(
-        test_db,
-        music_dir,
-        initial_tags={"date": "2020-01-24T00:00:00Z"},
-    )
-    test_db.upsert_library_album({
-        "id": "alb-1",
-        "artist_id": "art-1",
-        "title": "Discovery",
-        "year": 2020,
-        "release_date": "2020-01-24T00:00:00Z",
-        "total_tracks": 14,
-        "mb_release_id": "mbid-album-1",
-        "mb_release_group_id": "mbid-rg-1",
-        "monitored": True,
-    })
-
-    p1 = client.post(
-        "/api/library/retag/preview",
-        json={"album_id": "alb-1"},
-        headers=admin_headers,
-    )
-    assert p1.status_code == 200
-    assert len(p1.json()) == 1
-
-    apply_resp = client.post(
-        "/api/library/retag/apply",
-        json={"file_ids": ["fl-1"]},
-        headers=admin_headers,
-    )
-    assert apply_resp.status_code == 200
-    assert apply_resp.json()["applied_count"] == 1
-
-    audio = FLAC(str(music_dir / "track.flac"))
-    assert audio["date"] == ["2020-01-24"]
-
-    p2 = client.post(
-        "/api/library/retag/preview",
-        json={"album_id": "alb-1"},
-        headers=admin_headers,
-    )
-    assert p2.status_code == 200
-    assert p2.json() == []
-
-
-def test_retag_timestamp_release_date_mp3_second_preview_empty(
-    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
-):
-    """Timestamp release_date on MP3 produces empty second preview after apply."""
-    app, client = app_and_client
-    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
-    music_dir = tmp_path / "music"
-
-    _setup_library_track(
-        test_db,
-        music_dir,
-        initial_tags={"date": "2020-01-24T00:00:00Z"},
-        is_flac=False,
-        file_name="track.mp3",
-    )
-    test_db.upsert_library_album({
-        "id": "alb-1",
-        "artist_id": "art-1",
-        "title": "Discovery",
-        "year": 2020,
-        "release_date": "2020-01-24T00:00:00Z",
-        "total_tracks": 14,
-        "mb_release_id": "mbid-album-1",
-        "mb_release_group_id": "mbid-rg-1",
-        "monitored": True,
-    })
-
-    apply_resp = client.post(
-        "/api/library/retag/apply",
-        json={"file_ids": ["fl-1"]},
-        headers=admin_headers,
-    )
-    assert apply_resp.status_code == 200
-    assert apply_resp.json()["applied_count"] == 1
-
-    p2 = client.post(
-        "/api/library/retag/preview",
-        json={"album_id": "alb-1"},
-        headers=admin_headers,
-    )
-    assert p2.status_code == 200
-    assert p2.json() == []
-
-
-def test_retag_flac_stale_tracktotal_overwritten(
-    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
-):
-    """Stale TRACKTOTAL/DISCTOTAL on FLAC are overwritten on retag apply."""
-    from mutagen.flac import FLAC
-
-    app, client = app_and_client
-    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
-    music_dir = tmp_path / "music"
-
-    _, file_path = _setup_library_track(test_db, music_dir)
-    audio = FLAC(str(file_path))
-    audio["tracktotal"] = ["1"]
-    audio["disctotal"] = ["2"]
-    audio.save()
-
-    apply_resp = client.post(
-        "/api/library/retag/apply",
-        json={"file_ids": ["fl-1"]},
-        headers=admin_headers,
-    )
-    assert apply_resp.status_code == 200
-    assert apply_resp.json()["applied_count"] == 1
-
-    meta = inspect_audio_file(file_path)
-    assert meta["total_tracks"] == 14
-
-    p2 = client.post(
-        "/api/library/retag/preview",
-        json={"album_id": "alb-1"},
-        headers=admin_headers,
-    )
-    assert p2.status_code == 200
-    assert p2.json() == []
-    assert meta["title"] == "One More Time"
-    assert meta["artist"] != "Hacker Artist"
+    assert _tags_differ("date", "2020-01-24T00:00:00Z", "2020-01-24T00:00:00Z") is True
+    assert _tags_differ("date", "2020-01-24", "2020-01-24T00:00:00Z") is False
+    assert _tags_differ("date", "2020", "2020-01-24") is False
 
 
 def test_retag_non_admin_forbidden_403(

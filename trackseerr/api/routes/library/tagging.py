@@ -944,7 +944,7 @@ def _tags_differ(field: str, current_val: Any, proposed_val: Any) -> bool:
             return str(current_val).strip() != str(proposed_val).strip()
 
     if field == "date":
-        c_str = (normalize_tag_date(current_val) or "").strip()
+        c_str = str(current_val).strip()
         p_str = (normalize_tag_date(proposed_val) or "").strip()
         if c_str == p_str:
             return False
