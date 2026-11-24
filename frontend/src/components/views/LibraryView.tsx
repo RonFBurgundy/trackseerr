@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { CheckSquare, Disc, Eye, FileText, Copy, FolderInput, Layers, Loader2, Music, RefreshCw, SlidersHorizontal, Tag, User, UserPlus, X } from 'lucide-react';
+import { CheckSquare, Disc, Eye, FileText, FileWarning, Copy, FolderInput, Layers, Loader2, Music, RefreshCw, SlidersHorizontal, Tag, User, UserPlus, X } from 'lucide-react';
 import type { UseLibraryReturn, LibraryTab } from '@/hooks/useLibrary';
 import type { AppRoute, LibraryRoute, NavigateOptions } from '@/hooks/useAppRoute';
 import { useLibraryDrilldown } from '@/hooks/useLibraryDrilldown';
@@ -41,6 +41,7 @@ import {
   type RetagScope,
   SmartCollectionDetail,
   TracksPanel,
+  WrongFilesModal,
 } from '@/components/library';
 import { SmartCollectionModal } from '@/components/playlists';
 import { ManualImportModal } from '@/components/manualImport';
@@ -141,6 +142,7 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   const [renameScope, setRenameScope] = useState<RenameScope | null>(null);
   const [retagScope, setRetagScope] = useState<RetagScope | null>(null);
   const [isDuplicatesOpen, setIsDuplicatesOpen] = useState<boolean>(false);
+  const [isWrongFilesOpen, setIsWrongFilesOpen] = useState<boolean>(false);
   const [duplicateCount, setDuplicateCount] = useState<number>(0);
   // After a suggested match is applied: show the proposed file names, then the proposed tags for the same album.
   const [retagAfterRename, setRetagAfterRename] = useState<RetagScope | null>(null);
@@ -318,6 +320,12 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
           onCountChange={setDuplicateCount}
           onResolved={() => void reloadCatalog()}
           onToast={showToast}
+        />
+      )}
+      {isAdmin && (
+        <WrongFilesModal
+          isOpen={isWrongFilesOpen}
+          onClose={() => setIsWrongFilesOpen(false)}
         />
       )}
       <AlbumDetailModal
@@ -507,6 +515,13 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
       icon: <Copy className="h-3.5 w-3.5" />,
       disabled: lidarrMode,
       onSelect: () => setIsDuplicatesOpen(true),
+    });
+    toolItems.push({
+      key: 'wrong-files',
+      label: 'Wrong files…',
+      icon: <FileWarning className="h-3.5 w-3.5" />,
+      disabled: lidarrMode,
+      onSelect: () => setIsWrongFilesOpen(true),
     });
   }
   if (pagedTab && isAdmin && !lidarrMode) {

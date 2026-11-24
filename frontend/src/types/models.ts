@@ -463,3 +463,5 @@ export type DuplicatePair = Schema<'DuplicatePair'>;
 export type DuplicateFileRef = Schema<'DuplicateFileRef'>;
 export type DuplicateResolveResponse = Schema<'DuplicateResolveResponse'>;
 export type DuplicateResolveChoice = Schema<'DuplicateResolveRequest'>['choice'];
+export type WrongFileItem = Schema<'WrongFileItem'>;
+export type WrongFilesResponse = Schema<'WrongFilesResponse'>;
