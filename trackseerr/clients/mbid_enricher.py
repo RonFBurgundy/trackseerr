@@ -1461,16 +1461,18 @@ class MbidEnricherClient:
             self._set_cached(cache_key, None)
             return []
 
-    def get_release_group_identity(self, rg_id: str) -> dict[str, list[str]]:
+    def get_release_group_identity(self, rg_id: str) -> dict[str, Any]:
         """Returns MusicBrainz series and label names for a release group (empty lists when unknown)."""
         if not rg_id or not str(rg_id).strip():
-            return {"series": [], "labels": []}
+            return {"series": [], "labels": [], "complete": True}
 
         clean_id = str(rg_id).strip()
         cache_key = f"rg_identity:v1:{clean_id.lower()}"
         hit, cached_data = self._lookup(cache_key)
         if hit:
-            return cached_data if isinstance(cached_data, dict) else {"series": [], "labels": []}
+            if isinstance(cached_data, dict):
+                return {**cached_data, "complete": bool(cached_data.get("complete", True))}
+            return {"series": [], "labels": [], "complete": False}
 
         try:
             from trackseerr.mb_metadata_store import TTL_RG_LOOKUP
@@ -1486,7 +1488,6 @@ class MbidEnricherClient:
 
             series = _parse_rg_series(rg_resp.json()) if (rg_resp is not None and rg_resp.status_code == 200) else []
             labels = _parse_rg_labels(rel_resp.json()) if (rel_resp is not None and rel_resp.status_code == 200) else []
-            result = {"series": series, "labels": labels}
 
             transient = any(r is None or r.status_code not in (200, 404) for r in (rg_resp, rel_resp))
             if transient:
@@ -1497,13 +1498,15 @@ class MbidEnricherClient:
                     rel_resp.status_code if rel_resp else "None",
                 )
                 self._set_cached(cache_key, None)
-            else:
-                self._remember(cache_key, "rg_identity", result, ttl=TTL_RG_LOOKUP)
+                return {"series": series, "labels": labels, "complete": False}
+
+            result = {"series": series, "labels": labels, "complete": True}
+            self._remember(cache_key, "rg_identity", result, ttl=TTL_RG_LOOKUP)
             return result
         except (requests.RequestException, ValueError, AttributeError, TypeError) as exc:
             logger.info("MbidEnricherClient: get_release_group_identity failed for '%s': %s", clean_id, exc)
             self._set_cached(cache_key, None)
-            return {"series": [], "labels": []}
+            return {"series": [], "labels": [], "complete": False}
 
     def resolve_release_group(self, rg_id: str) -> Optional[str]:
         """Resolves canonical release group MBID, recording redirects if updated."""

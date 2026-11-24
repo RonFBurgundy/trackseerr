@@ -79,7 +79,7 @@ def test_work_out_compilation_artist_precedence_and_no_rg_id() -> None:
                 "mb_release_group_id": "rg-1",
             },
         )
-        == "UKF Drum & Bass"
+        == ("UKF Drum & Bass", True)
     )
 
     # 2. Soundtrack beats title series and label (handles JSON string secondary_types)
@@ -96,7 +96,7 @@ def test_work_out_compilation_artist_precedence_and_no_rg_id() -> None:
                 "mb_release_group_id": "rg-2",
             },
         )
-        == "Grand Theft Auto V"
+        == ("Grand Theft Auto V", True)
     )
 
     # 3. Title series beats label
@@ -113,7 +113,7 @@ def test_work_out_compilation_artist_precedence_and_no_rg_id() -> None:
                 "mb_release_group_id": "rg-3",
             },
         )
-        == "we are friends"
+        == ("we are friends", True)
     )
 
     # 4. Label used when nothing else matches
@@ -130,7 +130,7 @@ def test_work_out_compilation_artist_precedence_and_no_rg_id() -> None:
                 "mb_release_group_id": "rg-4",
             },
         )
-        == "Technique Recordings"
+        == ("Technique Recordings", True)
     )
 
     # 5. "" when nothing matches and no mb_release_group_id skips enricher
@@ -144,7 +144,7 @@ def test_work_out_compilation_artist_precedence_and_no_rg_id() -> None:
                 "mb_release_group_id": None,
             },
         )
-        == ""
+        == ("", True)
     )
     enricher.get_release_group_identity.assert_not_called()
 
@@ -283,6 +283,7 @@ def test_get_release_group_identity_parsing_filtering_and_caching(tmp_path: Path
         assert identity == {
             "series": ["UKF Drum & Bass", "UKF Compilations"],
             "labels": ["Technique Recordings", "Beta Label", "OWSLA"],
+            "complete": True,
         }
         assert enricher._request.call_count == 2
 
@@ -298,7 +299,93 @@ def test_get_release_group_identity_parsing_filtering_and_caching(tmp_path: Path
 
         # Transient failure is not persisted to L2 store
         enricher2._request = MagicMock(side_effect=requests.ConnectionError("boom"))
-        assert enricher2.get_release_group_identity("rg-transient") == {"series": [], "labels": []}
+        assert enricher2.get_release_group_identity("rg-transient") == {
+            "series": [],
+            "labels": [],
+            "complete": False,
+        }
         assert store.get("rg_identity:v1:rg-transient") == (False, None)
     finally:
         db.close()
+
+
+def test_identity_transient_marks_incomplete(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "mb_transient.db"))
+    try:
+        store = MbMetadataStore(db)
+        enricher = MbidEnricherClient(base_url="https://api.brainzmash.cc", store=store)
+        enricher._request = MagicMock(
+            side_effect=[_resp(200, {"relations": []}), _resp(503, {})]
+        )
+        identity = enricher.get_release_group_identity("rg-503")
+        assert identity["complete"] is False
+    finally:
+        db.close()
+
+
+def test_identity_success_marks_complete(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "mb_success.db"))
+    try:
+        store = MbMetadataStore(db)
+        enricher = MbidEnricherClient(base_url="https://api.brainzmash.cc", store=store)
+        enricher._request = MagicMock(
+            side_effect=[_resp(200, {"relations": []}), _resp(404, {})]
+        )
+        identity = enricher.get_release_group_identity("rg-ok")
+        assert identity["complete"] is True
+    finally:
+        db.close()
+
+
+def test_display_artist_not_cached_after_failed_lookup() -> None:
+    db = MagicMock()
+    enricher = MagicMock()
+    enricher.get_release_group_identity.return_value = {
+        "series": [],
+        "labels": [],
+        "complete": False,
+    }
+    album: dict[str, Any] = {
+        "id": "alb-retry",
+        "title": "we are friends, vol. 9",
+        "mb_release_group_id": "rg-retry",
+        "compilation_artist": None,
+    }
+    artist = {"mbid": VARIOUS_ARTISTS_MBID}
+    settings = {"compilation_album_artist": "series_label"}
+
+    first = compilation_display_artist(db, enricher, album, artist, settings)
+    assert first == "we are friends"
+    db.set_album_compilation_artist.assert_not_called()
+    assert album["compilation_artist"] is None
+
+    second = compilation_display_artist(db, enricher, album, artist, settings)
+    assert second == "we are friends"
+    assert enricher.get_release_group_identity.call_count == 2
+
+
+def test_display_artist_cached_after_complete_lookup() -> None:
+    db = MagicMock()
+    enricher = MagicMock()
+    enricher.get_release_group_identity.return_value = {
+        "series": ["UKF Drum & Bass"],
+        "labels": [],
+        "complete": True,
+    }
+    album: dict[str, Any] = {
+        "id": "alb-ok",
+        "title": "UKF Drum & Bass 2013",
+        "mb_release_group_id": "rg-ok",
+        "compilation_artist": None,
+    }
+    artist = {"mbid": VARIOUS_ARTISTS_MBID}
+    settings = {"compilation_album_artist": "series_label"}
+
+    first = compilation_display_artist(db, enricher, album, artist, settings)
+    assert first == "UKF Drum & Bass"
+    db.set_album_compilation_artist.assert_called_once_with("alb-ok", "UKF Drum & Bass")
+    assert album["compilation_artist"] == "UKF Drum & Bass"
+
+    second = compilation_display_artist(db, enricher, album, artist, settings)
+    assert second == "UKF Drum & Bass"
+    assert enricher.get_release_group_identity.call_count == 1

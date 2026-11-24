@@ -88,34 +88,35 @@ def _has_secondary_type(album: dict[str, Any], target: str) -> bool:
     return any(str(item).strip().casefold() == target for item in raw if item is not None)
 
 
-def work_out_compilation_artist(enricher: Any, album: dict[str, Any]) -> str:
+def work_out_compilation_artist(enricher: Any, album: dict[str, Any]) -> tuple[str, bool]:
     """Resolves a display album artist for a compilation via MB series -> soundtrack -> title series -> label."""
     rg_id = str(album.get("mb_release_group_id") or "").strip()
     identity: dict[str, Any] = (
         enricher.get_release_group_identity(rg_id) if (rg_id and enricher is not None) else {}
     ) or {}
+    complete = not rg_id or bool(identity.get("complete", True))
 
     for raw_series in identity.get("series") or []:
         cleaned = re.sub(r"\s+series$", "", str(raw_series or "").strip(), flags=re.IGNORECASE).strip()
         if cleaned:
-            return cleaned
+            return cleaned, complete
 
     title = str(album.get("title") or "")
     if _has_secondary_type(album, "soundtrack"):
         st = soundtrack_name(title)
         if st:
-            return st
+            return st, complete
 
     title_series = series_from_title(title)
     if title_series:
-        return title_series
+        return title_series, complete
 
     for raw_label in identity.get("labels") or []:
         label = str(raw_label or "").strip()
         if label:
-            return label
+            return label, complete
 
-    return ""
+    return "", complete
 
 
 def compilation_display_artist(
@@ -133,10 +134,11 @@ def compilation_display_artist(
 
     cached = album.get("compilation_artist")
     if cached is None:
-        worked = work_out_compilation_artist(enricher, album)
-        album_id = album.get("id")
-        if album_id:
-            db.set_album_compilation_artist(str(album_id), worked)
-        album["compilation_artist"] = worked
+        worked, complete = work_out_compilation_artist(enricher, album)
+        if complete:
+            album_id = album.get("id")
+            if album_id:
+                db.set_album_compilation_artist(str(album_id), worked)
+            album["compilation_artist"] = worked
         cached = worked
     return str(cached) if cached else None
