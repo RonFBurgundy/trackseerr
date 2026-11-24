@@ -8,6 +8,7 @@ import logging
 import re
 import sqlite3
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Optional
 
 import requests
@@ -502,6 +503,31 @@ def _list_placeholder_albums_to_repair(db: Any) -> list[dict[str, Any]]:
     return candidates
 
 
+def _move_va_placeholder_to_folder_artist(
+    db: Any, album: dict[str, Any], album_id: str, counts: dict[str, int]
+) -> dict[str, Any]:
+    """Moves a Various Artists placeholder album back to the artist named by its parent folder."""
+    raw_path = album.get("path")
+    if not raw_path or not _album_is_various_artists(db, album):
+        return album
+    folder_artist = Path(str(raw_path)).parent.name.strip()
+    if not folder_artist:
+        return album
+    matches = [
+        a
+        for a in db.list_library_artists(query=folder_artist, limit=100)
+        if str(a.get("name") or "").strip().casefold() == folder_artist.casefold()
+    ]
+    if len(matches) != 1:
+        return album
+    target = matches[0]
+    if str(target.get("mbid") or "").lower() == VARIOUS_ARTISTS_MBID:
+        return album
+    db.move_album_to_artist(album_id, str(target["id"]))
+    counts["moved_to_artist"] += 1
+    return db.get_library_album(album_id) or album
+
+
 def _repair_one_placeholder_album(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
     from trackseerr.compilation_filing import (
         _per_recording_groups,
@@ -522,6 +548,8 @@ def _repair_one_placeholder_album(db: Any, enricher: Any, album: dict[str, Any],
         if not track.get("has_file"):
             db.delete_library_track(str(track["id"]))
             counts["wanted_removed"] += 1
+
+    album = _move_va_placeholder_to_folder_artist(db, album, album_id, counts)
 
     owned_tracks = [t for t in tracks if t.get("has_file")]
     if owned_tracks:
@@ -548,8 +576,10 @@ def repair_placeholder_albums(
         "unlinked": 0,
         "wanted_removed": 0,
         "emptied": 0,
+        "moved_to_artist": 0,
         "filed_home": 0,
         "merge_conflict": 0,
+        "requests_requeued": 0,
         "errors": 0,
     }
     for album in _list_placeholder_albums_to_repair(db):
@@ -561,6 +591,7 @@ def repair_placeholder_albums(
         except (sqlite3.Error, requests.RequestException) as exc:
             counts["errors"] += 1
             logger.warning("Placeholder album repair failed for album %s: %s", album.get("id"), safe_exc(exc))
+    counts["requests_requeued"] = db.reset_requests_with_missing_catalog_track()
     logger.info("Placeholder album repair finished: %s", counts)
     return counts
 

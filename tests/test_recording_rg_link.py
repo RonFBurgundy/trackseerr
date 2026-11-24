@@ -243,3 +243,76 @@ def test_repair_placeholder_leaves_normal_albums(db: Database, tmp_path: Path) -
     assert _rg_of(db, "a-ok") == "rg-hc"
     assert len(db.list_library_tracks(album_id="a-ok", limit=100)) == 2
     assert enricher.calls == []
+
+
+def test_repair_placeholder_deletes_track_with_download_history(db: Database, tmp_path: Path) -> None:
+    _album(db, tmp_path, "a-ph-dl", "Unknown Album", "rec1", rg="rg-va")
+    db.upsert_library_track(
+        LibraryTrack(id="a-ph-dl-wanted", album_id="a-ph-dl", artist_id="ar1", title="Wanted", track_number=2)
+    )
+    db.conn.execute(
+        "INSERT INTO download_clients (id, name, driver_type, host_url) VALUES ('c1', 'Client', 'qbittorrent', 'http://x')"
+    )
+    db.conn.execute(
+        "INSERT INTO active_downloads (id, client_id, title, artist, album_id, track_id) "
+        "VALUES ('d1', 'c1', 'Wanted', 'Eagles', 'a-ph-dl', 'a-ph-dl-wanted')"
+    )
+    db.conn.commit()
+
+    counts = repair_placeholder_albums(db, FakeEnricher({}))
+
+    assert counts["errors"] == 0
+    assert counts["wanted_removed"] == 1
+    assert db.get_library_track("a-ph-dl-wanted") is None
+    dl_row = db.conn.execute("SELECT track_id FROM active_downloads WHERE id = 'd1'").fetchone()
+    assert dl_row is not None and dl_row[0] is None
+
+
+def test_repair_placeholder_moves_va_album_back_to_folder_artist(db: Database, tmp_path: Path) -> None:
+    db.upsert_library_artist(
+        LibraryArtist(id="ar-va", name="Various Artists", mbid=VARIOUS_ARTISTS_MBID, monitored=False)
+    )
+    db.upsert_library_artist(LibraryArtist(id="ar-xx", name="The xx", monitored=False))
+    album_dir = tmp_path / "music" / "The xx" / "Unknown Album"
+    album_dir.mkdir(parents=True)
+    db.upsert_library_album(
+        LibraryAlbum(id="a-va-ph", artist_id="ar-va", title="Unknown Album", path=str(album_dir))
+    )
+    db.upsert_library_track(
+        LibraryTrack(id="a-va-ph-t1", album_id="a-va-ph", artist_id="ar-va", title="Intro", track_number=1)
+    )
+    f = album_dir / "Intro.flac"
+    f.write_bytes(b"x")
+    db.upsert_library_file(
+        LibraryFile(id="file-a-va-ph-t1", track_id="a-va-ph-t1", file_path=str(f), relative_path=f.name, codec="FLAC")
+    )
+
+    counts = repair_placeholder_albums(db, FakeEnricher({}))
+
+    assert counts["errors"] == 0
+    assert counts["moved_to_artist"] == 1
+    moved = db.get_library_album("a-va-ph")
+    assert moved is not None
+    assert moved["artist_id"] == "ar-xx"
+
+
+def test_repair_requeues_orphaned_request(db: Database) -> None:
+    db.upsert_user("u1", "user", "u@example.com")
+    db.conn.execute(
+        "INSERT INTO music_requests (id, user_id, item_type, title, artist, status, "
+        "catalog_track_id, catalog_album_id, catalog_seeded_at, catalog_seed_status) "
+        "VALUES ('req-orphan', 'u1', 'track', 'Lost Song', 'Eagles', 'processing', "
+        "'missing-trk', 'missing-alb', '2026-01-01T00:00:00+00:00', 'seeded')"
+    )
+    db.conn.commit()
+
+    counts = repair_placeholder_albums(db, FakeEnricher({}))
+
+    assert counts["requests_requeued"] == 1
+    due_ids = [r["id"] for r in db.list_requests_needing_catalog()]
+    assert "req-orphan" in due_ids
+    row = db.conn.execute(
+        "SELECT catalog_track_id, catalog_album_id, catalog_seeded_at, catalog_seed_status "
+        "FROM music_requests WHERE id = 'req-orphan'"
+    ).fetchone()
+    assert tuple(row) == (None, None, None, None)
