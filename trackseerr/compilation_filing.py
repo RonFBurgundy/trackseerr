@@ -682,7 +682,8 @@ def refile_various_album(
     """Refiles a single Various Artists album right after import, returning empty counts for non-VA albums."""
     counts = _out_of_various_counts()
     album = db.get_library_album(album_id)
-    if not album or str(album.get("artist_id") or "") != various_artists_id(db):
+    va = db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID)
+    if not album or va is None or str(album.get("artist_id") or "") != str(va["id"]):
         return counts
     try:
         _refile_out_of_various_one(db, enricher, album, counts, discovery=discovery)

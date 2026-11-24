@@ -1234,3 +1234,20 @@ def test_refile_various_album_keeps_hand_monitored(db: Database, tmp_path: Path)
     assert db.album_holding_release_group("artist-bob", "rg-home", "") is None
     va_tracks = [t for t in db.list_library_tracks(album_id="alb-va", limit=50) if t["has_file"]]
     assert len(va_tracks) == 1
+
+
+def test_refile_various_album_does_not_create_va_artist(db: Database, tmp_path: Path):
+    _seed_album(
+        db, tmp_path, "alb-bob", "Exodus",
+        [{"num": 1, "title": "Natural Mystic", "rec_id": "rec-1"}],
+        rg_id="rg-exodus", artist_id="artist-bob", artist_name="Bob Marley", artist_mbid=BOB_MBID,
+        monitored=True,
+    )
+    enricher = _enricher({})
+
+    counts = refile_various_album(db, enricher, "alb-bob")
+
+    assert counts["albums"] == 0
+    assert counts["filed_home"] == 0
+    assert db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID) is None
+    enricher.get_recording_release_groups.assert_not_called()
