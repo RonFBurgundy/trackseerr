@@ -139,6 +139,8 @@ def test_list_wrong_files_mismatch_outside_library(app_and_client, test_db, admi
         ("Paid In Full (Album Mix)", "Paid in Full (album version)", "different_version"),
         ("Killing Me Softly With His Song", "Killing Me Softly", "different_version"),
         ("Sweet Little Sixteen (Demo)", "Sweet Little Sixteen", "different_version"),
+        ("Baba O'Riley - Remix", "Baba O’Riley (ConfidentialMX remix)", "different_version"),
+        ("Bang a Gong (Get It On) [2003 Remaster]", "Get It On", "different_version"),
     ],
 )
 def test_wrong_file_kind(track_title: str, actual_title: str, expected: str):
