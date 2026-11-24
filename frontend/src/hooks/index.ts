@@ -135,6 +135,7 @@ export * from './useAddArtist';
 export * from './useMbSubmit';
 export * from './useMatchSuggestions';
 export * from './useDuplicateChoices';
+export * from './useWrongFiles';
 export * from './useMbReturn';
 export * from './useSystemHealth';
 export * from './useExclusions';

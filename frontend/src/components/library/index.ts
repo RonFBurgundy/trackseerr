@@ -43,3 +43,5 @@ export * from './ExcludeConfirm';
 export * from './LibrarySearchResults';
 export * from './MatchSuggestionsPanel';
 export * from './DuplicatesModal';
+export * from './RelinkConflictModal';
+export * from './WrongFilesModal';

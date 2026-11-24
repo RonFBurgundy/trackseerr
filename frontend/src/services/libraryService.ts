@@ -8,8 +8,10 @@ import type {
   MatchSuggestionsResponse,
   StoredMatchApplyResponse,
   StoredMatchSuggestionsPage,
+  WrongFilesResponse,
 } from '@/types/models';
 import { apiRequest } from './apiClient';
+import type { RenameVerifyStatus } from './renameService';
 import { buildIndexUrl, buildListUrl } from './listUrl';
 import type { GroupIndexResponse, IndexQuery, ListQuery, PagedResponse } from '@/types/activity';
 import type {
@@ -435,4 +437,22 @@ export async function linkMbRelease(albumId: string | number, releaseMbid: strin
 
 export async function getAcoustidContributions(signal?: AbortSignal): Promise<Schema<'AcoustidContributionsResponse'>> {
   return apiRequest<Schema<'AcoustidContributionsResponse'>>('/api/library/acoustid/contributions', { signal });
+}
+
+export async function getWrongFiles(signal?: AbortSignal): Promise<WrongFilesResponse> {
+  return apiRequest<WrongFilesResponse>('/api/library/wrong-files', { signal });
+}
+
+export async function startWrongFileCheck(): Promise<RenameVerifyStatus> {
+  return apiRequest<RenameVerifyStatus>('/api/library/wrong-files/check', { method: 'POST' });
+}
+
+export async function getWrongFileCheckStatus(): Promise<RenameVerifyStatus> {
+  return apiRequest<RenameVerifyStatus>('/api/library/wrong-files/check');
+}
+
+export async function deleteLibraryFile(fileId: string): Promise<void> {
+  await apiRequest<void>(`/api/library/files/${encodeURIComponent(fileId)}?delete_file_from_disk=true`, {
+    method: 'DELETE',
+  });
 }
