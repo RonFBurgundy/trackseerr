@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 
 from trackseerr.api.response_models import ApiModel
+from trackseerr.api.schemas.library import RenameVerifyStatus
 from trackseerr.library_monitoring import (
     NATIVE_MONITOR_OPTIONS,
     accept_deprecated_profile_keys,
@@ -219,6 +220,31 @@ class DuplicateChoice(ApiModel):
 class DuplicateChoicesResponse(ApiModel):
     items: list[DuplicateChoice]
     total: int
+
+
+class WrongFileItem(ApiModel):
+    file_id: str
+    relative_path: Optional[str] = None
+    track_id: str
+    track_title: str
+    album_id: Optional[str] = None
+    album_title: str
+    artist_name: str
+    actual_title: Optional[str] = None
+    actual_artist: Optional[str] = None
+    actual_track_id: Optional[str] = None
+    actual_album_id: Optional[str] = None
+    actual_track_title: Optional[str] = None
+    actual_album_title: Optional[str] = None
+    actual_artist_name: Optional[str] = None
+    score: Optional[float] = None
+
+
+class WrongFilesResponse(ApiModel):
+    items: list[WrongFileItem]
+    total: int
+    checked: int
+    library_files: int
 
 
 class DuplicateResolveRequest(BaseModel):

@@ -7,10 +7,10 @@ and Arr-grade token-template preview and batch-renaming engine.
 """
 
 from fastapi import APIRouter
-from . import albums, artists, browse, collections, duplicates, manual_import, scan, tagging, tracks
+from . import albums, artists, browse, collections, duplicates, manual_import, scan, tagging, tracks, wrong_files
 
 router = APIRouter()
-for _module in (browse, artists, albums, tracks, scan, manual_import, tagging, collections, duplicates):
+for _module in (browse, artists, albums, tracks, scan, manual_import, tagging, collections, duplicates, wrong_files):
     router.include_router(_module.router)
 
 __all__ = ["router"]
