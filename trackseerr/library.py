@@ -192,6 +192,17 @@ def _parse_num_total(val: Any) -> tuple[int | None, int | None]:
     return _parse_int(s), None
 
 
+def normalize_tag_date(val: Any) -> str | None:
+    """Normalize a date tag value to YYYY, YYYY-MM, or YYYY-MM-DD when possible."""
+    if val is None or val == "":
+        return val
+    if isinstance(val, int):
+        return str(val)
+    s = str(val).strip()
+    m = re.match(r"^(\d{4})(?:-(\d{2})(?:-(\d{2}))?)?", s)
+    return m.group(0) if m else s
+
+
 def _extract_year(date_val: Any) -> int | None:
     """Extracts 4-digit year from date strings like '2023-05-12' or '2023'."""
     if not date_val:
@@ -538,7 +549,7 @@ def build_tags_to_write(
         "artist": artist if artist is not None else ((req.get("artist") if req else None) or meta.get("artist")),
         "album": album if album is not None else ((req.get("album") or req.get("title") if req else None) or meta.get("album")),
         "title": title if title is not None else (meta.get("title") if audio_files_count > 1 else ((req.get("title") if req else None) or meta.get("title"))),
-        "date": date if date is not None else ((req.get("release_date") if req else None) or meta.get("year")),
+        "date": normalize_tag_date(date if date is not None else ((req.get("release_date") if req else None) or meta.get("year"))),
         "tracknumber": track_number if track_number is not None else meta.get("track_number"),
         "totaltracks": total_tracks if total_tracks is not None else meta.get("total_tracks"),
         "discnumber": disc_number if disc_number is not None else meta.get("disc_number"),
@@ -608,10 +619,12 @@ def _write_flac_tags(  # noqa: C901
         audio["tracknumber"] = [str(vals.track)]
     if vals.total_tracks is not None:
         audio["totaltracks"] = [str(vals.total_tracks)]
+        audio["tracktotal"] = [str(vals.total_tracks)]
     if vals.disc is not None:
         audio["discnumber"] = [str(vals.disc)]
     if vals.total_discs is not None:
         audio["totaldiscs"] = [str(vals.total_discs)]
+        audio["disctotal"] = [str(vals.total_discs)]
     if vals.mb_artist is not None:
         audio["musicbrainz_artistid"] = [str(vals.mb_artist)]
     if vals.mb_albumartist == "":
@@ -787,10 +800,12 @@ def _write_ogg_tags(  # noqa: C901
         audio["tracknumber"] = [str(vals.track)]
     if vals.total_tracks is not None:
         audio["totaltracks"] = [str(vals.total_tracks)]
+        audio["tracktotal"] = [str(vals.total_tracks)]
     if vals.disc is not None:
         audio["discnumber"] = [str(vals.disc)]
     if vals.total_discs is not None:
         audio["totaldiscs"] = [str(vals.total_discs)]
+        audio["disctotal"] = [str(vals.total_discs)]
     if vals.mb_artist is not None:
         audio["musicbrainz_artistid"] = [str(vals.mb_artist)]
     if vals.mb_albumartist == "":
