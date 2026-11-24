@@ -1,6 +1,6 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Loader2 } from 'lucide-react';
+import { ChevronDown, Loader2 } from 'lucide-react';
 import type { WrongFileItem } from '@/types/models';
 import { relinkRenameBatch, type RenameRelinkBatchItem } from '@/services/renameService';
 import { errorMessage } from '@/services/apiClient';
@@ -88,6 +88,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
   const [pendingDelete, setPendingDelete] = useState<WrongFileItem | null>(null);
   const [pendingBatchDelete, setPendingBatchDelete] = useState<boolean>(false);
   const [batchDeleting, setBatchDeleting] = useState<boolean>(false);
+  const [noteExpanded, setNoteExpanded] = useState<boolean>(false);
   const [batchDeleteSummary, setBatchDeleteSummary] = useState<{
     deleted: number;
     failedLabels: string[];
@@ -261,10 +262,10 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
         maxWidth="sm:max-w-4xl"
         footer={footer}
       >
-        <div className="flex flex-col gap-3 min-h-0 h-full">
-          <div className="flex flex-col gap-1.5 shrink-0">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-col gap-0.5 text-xs font-mono text-neutral-300">
+        <div className="space-y-3">
+          <div className="flex flex-col gap-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-col gap-0.5 text-xs font-mono text-neutral-300 min-w-0 truncate">
                 {running ? (
                   <span>
                     Checking files&hellip; {status.done} of {status.total}
@@ -288,60 +289,70 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                 variant="amber"
                 disabled={checkDisabled}
                 onClick={() => void startCheck()}
+                className="shrink-0"
                 icon={running || starting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : undefined}
               >
                 Check all files
               </TapeDeckButton>
             </div>
-            <p className="text-xs text-neutral-400 font-mono">
-              The first check listens to every file, about 100 a minute, so a large library takes several hours. You can close this window while it runs. Later checks only look at new or changed files.
-            </p>
+            <div>
+              <TapeDeckButton
+                size="sm"
+                onClick={() => setNoteExpanded((prev) => !prev)}
+                aria-expanded={noteExpanded}
+                icon={<ChevronDown className={`h-3.5 w-3.5 transition-transform ${noteExpanded ? 'rotate-180' : ''}`} />}
+              >
+                How long does this take?
+              </TapeDeckButton>
+            </div>
+            {noteExpanded && (
+              <p className="text-xs text-neutral-400 font-mono">
+                The first check listens to every file, about 100 a minute, so a large library takes several hours. You can close this window while it runs. Later checks only look at new or changed files.
+              </p>
+            )}
           </div>
 
           {items.length > 0 && (
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono shrink-0">
-              <div className="flex items-center gap-2">
-                <SelectionCheckbox
-                  name="wrong-files-select-all"
-                  checked={allSelected}
-                  onChange={() => {
-                    if (allSelected) selectNone();
-                    else selectAll();
-                  }}
-                  label="Select all"
-                  inline
-                />
-                <span className="text-neutral-300">Select all</span>
-                <span className="text-neutral-500">•</span>
-                <button
-                  type="button"
-                  onClick={selectNone}
-                  className="text-neutral-400 hover:text-white transition-colors"
-                >
-                  None
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 text-neutral-400">
-                <TactileSwitch
-                  name="wrong-files-prefer-quality"
-                  label="Keep the higher-quality file when the right song already has one"
-                  checked={preferQuality}
-                  onChange={setPreferQuality}
-                  className="max-w-[18rem] text-[11px] leading-tight"
-                />
-                <span>
-                  <strong className="text-white">{selectedCount}</strong> of {items.length} selected
-                </span>
-              </div>
+            <div className="flex items-center gap-2 whitespace-nowrap overflow-x-auto border-b border-[#222222] pb-2 text-xs font-mono">
+              <SelectionCheckbox
+                name="wrong-files-select-all"
+                checked={allSelected}
+                onChange={() => {
+                  if (allSelected) selectNone();
+                  else selectAll();
+                }}
+                label="Select all"
+                inline
+              />
+              <span className="text-neutral-300">All</span>
+              <span className="text-neutral-500">•</span>
+              <button
+                type="button"
+                onClick={selectNone}
+                className="text-neutral-400 hover:text-white transition-colors"
+              >
+                None
+              </button>
+              <TactileSwitch
+                name="wrong-files-prefer-quality"
+                label="Keep better quality"
+                title="Keep the higher-quality file when the right song already has one"
+                checked={preferQuality}
+                onChange={setPreferQuality}
+                className="text-[11px] leading-tight text-neutral-400"
+              />
+              <span className="text-neutral-400">
+                <strong className="text-white">{selectedCount}</strong>/{items.length} selected
+              </span>
             </div>
           )}
 
-          {inlineError && <p className="text-xs text-[var(--status-error)] shrink-0">{inlineError}</p>}
+          {inlineError && <p className="text-xs text-[var(--status-error)]">{inlineError}</p>}
 
           {batchMoveSummary && (
             <div
               role="status"
-              className="p-2.5 rounded-[3px] border border-[#2a2a2a] bg-[#161616] text-xs font-mono text-neutral-200 space-y-1 shrink-0"
+              className="p-2.5 rounded-[3px] border border-[#2a2a2a] bg-[#161616] text-xs font-mono text-neutral-200 space-y-1"
             >
               <p>
                 Moved {batchMoveSummary.moved}. {batchMoveSummary.conflictsSkipped} skipped because the right song already has a file.
@@ -392,7 +403,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
           )}
 
           {!isLoading && !error && total === 0 && !running && (
-            <p className="text-xs text-neutral-400 py-4 shrink-0">No wrong files found.</p>
+            <p className="text-xs text-neutral-400 py-4">No wrong files found.</p>
           )}
 
           {items.length > 0 && (
@@ -401,8 +412,8 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
               tabIndex={0}
               role="region"
               aria-label="Wrong files (scrollable)"
-              className="virtual-scroll flex-1 min-h-0 overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
-              style={{ maxHeight: 'min(500px, 60vh)' }}
+              className="virtual-scroll overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
+              style={{ maxHeight: 'min(450px, 55vh)' }}
             >
               <div
                 style={{
