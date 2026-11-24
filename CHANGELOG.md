@@ -13,6 +13,7 @@ heading becomes the version and date.
 
 ### Added
 
+- **Name compilations by series or label** (Settings → Media Management): compilations kept under Various Artists get their series, film or game, or record label as album artist instead (UKF Drum & Bass, Rocky IV, OWSLA). Each song keeps its own artist and all MusicBrainz IDs, and folders don't change. Run Retag to apply.
 - When a requested song downloads but isn't on any album in your library (a bonus track from a reissue, for example), TrackSeerr looks it up on MusicBrainz, adds it to the right album and imports it, instead of leaving it for a manual import. Songs already waiting for a manual import get one try after you update.
 - **Sign in with Plex** under Settings → Media Management → Media Server. Sign in once as the Plex server owner and TrackSeerr uses that account for Plex Home users and other users' playlists. Your `PLEX_TOKEN` is then only used to talk to your own Plex server, so you don't need `PLEX_TOKEN_CONFIRMED`.
 - Plex playlist sync matches songs by ID before guessing by name. Spotify songs (and Deezer songs when Deezer includes it) carry their ISRC, which leads straight to the exact file in your library and its Plex track, so a remaster or live copy is no longer picked by mistake. Songs that name matching can't find are looked up on MusicBrainz by artist, title and length, up to 40 per sync.
@@ -156,6 +157,9 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Songs downloaded from a compilation are moved to their artist's own single or album right after import, instead of waiting for the weekly Library Self-Heal.
+- Library Self-Heal finds more artist releases for compilation songs: it searches Deezer for the song directly, treats "Instrumental", "Original Mix", "Radio Edit" and similar as the same song, prefers the original release over deluxe editions, and accepts the artist's own soundtrack album as a last resort.
+- TrackSeerr no longer downloads the whole Various Artists "discography" into your library, and Library Self-Heal removes the empty Various Artists albums it added before (only albums with no files, downloads or requests).
 - Library Self-Heal moves far more compilation songs to their own artist. When a song on a compilation only exists on that compilation, Self-Heal now checks several MusicBrainz matches for the same song instead of just one, skips live versions that don't match, and finds the studio album. If the artist has no studio release of the song, it uses their own best-of. The Self-Heal log now says why each song was left under Various Artists.
 - When MusicBrainz only knows a song from a compilation, Library Self-Heal now looks for the artist's own single, EP or album on Deezer and files the song there (for example Julian Convex's "Impro" single instead of The Jazz Hop Conspiracy). These albums show in Library tools → Not on MusicBrainz with the add-to-MusicBrainz form already filled in from Deezer.
 - Compilation files no longer get moved into another artist's folder (some had ended up under "Carl Douglas"). Run Rename Files once to put them back under Various Artists.
