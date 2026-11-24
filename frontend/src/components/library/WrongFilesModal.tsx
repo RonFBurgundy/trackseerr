@@ -25,6 +25,27 @@ function formatScore(score: number): string {
   return `${pct}%`;
 }
 
+function formatRemainingEstimate(
+  done: number,
+  total: number,
+  startedAt: number | null | undefined,
+  nowSeconds: number = Date.now() / 1000,
+): string {
+  if (done < 50 || startedAt == null || startedAt <= 0) {
+    return '';
+  }
+  const elapsed = Math.max(1, nowSeconds - startedAt);
+  const rate = done / elapsed;
+  if (rate <= 0) {
+    return '';
+  }
+  const remaining = Math.max(0, total - done);
+  const totalMinutes = Math.round(remaining / rate / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return ` \u2014 about ${hours} h ${minutes} min left`;
+}
+
 export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClose }) => {
   const {
     items,
@@ -247,6 +268,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                 {running ? (
                   <span>
                     Checking files&hellip; {status.done} of {status.total}
+                    {formatRemainingEstimate(status.done, status.total, status.started_at)}
                   </span>
                 ) : (
                   <>
@@ -272,7 +294,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
               </TapeDeckButton>
             </div>
             <p className="text-xs text-neutral-400 font-mono">
-              The first check fingerprints every file and can take about an hour for a large library. Later checks only look at new or changed files.
+              The first check listens to every file, about 100 a minute, so a large library takes several hours. You can close this window while it runs. Later checks only look at new or changed files.
             </p>
           </div>
 
