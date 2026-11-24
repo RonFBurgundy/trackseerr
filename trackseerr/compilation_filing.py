@@ -22,6 +22,8 @@ from trackseerr.redaction import safe_exc
 logger = logging.getLogger(__name__)
 
 _PRIMARY_RANK = {"album": 0, "single": 1, "ep": 2}
+_HOME_SEARCH_MIN_SCORE = 60
+_HOME_SEARCH_MAX_TRIES = 5
 
 
 def various_artists_id(db: Any) -> str:
@@ -96,24 +98,39 @@ def _secondary_allowed(group: dict[str, Any], version_words: set[str]) -> bool:
     return secondary <= allowed
 
 
+def _group_for_artist(group: dict[str, Any], mbid: str) -> bool:
+    if group.get("is_various") or not group.get("id"):
+        return False
+    return not mbid or mbid in {str(a).lower() for a in group.get("artist_ids") or []}
+
+
 def home_release_group(
-    groups: list[dict[str, Any]], artist_mbid: Optional[str], track_title: str
+    groups: list[dict[str, Any]],
+    artist_mbid: Optional[str],
+    track_title: str,
+    allow_own_compilation: bool = False,
 ) -> Optional[dict[str, Any]]:
     """Canonical non-various release group of a recording (album, then single, then EP; earliest first)."""
     from trackseerr.release_matching import _version_words
 
     words = _version_words(track_title or "")
     mbid = str(artist_mbid or "").strip().lower()
-    candidates = []
-    for group in groups:
-        if group.get("is_various") or not group.get("id"):
-            continue
-        if mbid and mbid not in {str(a).lower() for a in group.get("artist_ids") or []}:
-            continue
-        if not _secondary_allowed(group, words):
-            continue
-        candidates.append(group)
-    return min(candidates, key=_group_sort_key) if candidates else None
+    candidates = [
+        group
+        for group in groups
+        if _group_for_artist(group, mbid) and _secondary_allowed(group, words)
+    ]
+    if candidates:
+        return min(candidates, key=_group_sort_key)
+    if not allow_own_compilation:
+        return None
+    comp_candidates = [
+        group
+        for group in groups
+        if _group_for_artist(group, mbid)
+        and {str(s).casefold() for s in group.get("secondary_types") or []} == {"compilation"}
+    ]
+    return min(comp_candidates, key=_group_sort_key) if comp_candidates else None
 
 
 def various_group_for_title(groups: list[dict[str, Any]], album_title: Optional[str]) -> Optional[dict[str, Any]]:
@@ -245,12 +262,49 @@ def performer_artist(db: Any, track_id: str) -> Optional[dict[str, Any]]:
     return _artist_for_mbid(db, str(credit.get("artist_mbid") or ""), str(credit.get("artist_name") or ""))
 
 
+def _home_search_candidates(
+    candidates: list[dict[str, Any]],
+    title: str,
+    name: str,
+    track_duration: Optional[float],
+    own_rec: str,
+    credit_mbid: str,
+) -> list[dict[str, Any]]:
+    """Filters and ranks MusicBrainz recording search hits for home release lookup."""
+    from trackseerr.recording_search import _artist_ok, _duration_gap, _has_studio_release, search_title
+    from trackseerr.release_matching import _titles_close
+
+    wanted = search_title(title, name)
+    mbid_lower = credit_mbid.lower()
+    kept: list[dict[str, Any]] = []
+    for cand in candidates:
+        cid = str(cand.get("id") or "").strip()
+        if not cid or cid == own_rec:
+            continue
+        if int(cand.get("score") or 0) < _HOME_SEARCH_MIN_SCORE:
+            continue
+        if mbid_lower:
+            cand_ids = {str(a).strip().lower() for a in cand.get("artist_ids") or [] if str(a).strip()}
+            if mbid_lower not in cand_ids:
+                continue
+        elif not _artist_ok(cand, name):
+            continue
+        if not _titles_close(search_title(str(cand.get("title") or "")), wanted):
+            continue
+        kept.append(cand)
+
+    def _rank_key(cand: dict[str, Any]) -> tuple[bool, int, float]:
+        gap = _duration_gap(cand, track_duration)
+        return (not _has_studio_release(cand), -int(cand.get("score") or 0), float("inf") if gap is None else gap)
+
+    kept.sort(key=_rank_key)
+    return kept[:_HOME_SEARCH_MAX_TRIES]
+
+
 def _search_home(
-    db: Any, enricher: Any, track: dict[str, Any], credit: dict[str, Any]
+    db: Any, enricher: Any, track: dict[str, Any], credit: dict[str, Any], own_rec: str = ""
 ) -> tuple[Optional[tuple[dict[str, Any], dict[str, Any]]], str]:
     """Finds a track's performer artist and home release group via MusicBrainz recording search."""
-    from trackseerr import recording_search
-
     name = str(credit.get("artist_name") or "").strip()
     title = str(track.get("title") or "")
     if not name or not title:
@@ -258,32 +312,31 @@ def _search_home(
     candidates = enricher.search_recordings(name, title)
     if not candidates:
         return None, "search_no_results"
-    cand = recording_search.pick_search_recording(candidates, title, name, track.get("duration_seconds"), set())
-    if cand is None:
-        return None, "search_no_pick"
     credit_mbid = str(credit.get("artist_mbid") or "").strip()
-    cand_ids = [str(a).strip() for a in cand.get("artist_ids") or [] if str(a).strip()]
-    if credit_mbid:
-        if credit_mbid.lower() not in {a.lower() for a in cand_ids}:
+    picks = _home_search_candidates(candidates, title, name, track.get("duration_seconds"), own_rec, credit_mbid)
+    if not picks:
+        if credit_mbid and not any(
+            credit_mbid.lower() in {str(a).strip().lower() for a in c.get("artist_ids") or [] if str(a).strip()}
+            for c in candidates
+        ):
             return None, "search_artist_mismatch"
-        mbid = credit_mbid
-    elif cand_ids:
-        mbid = cand_ids[0]
-    else:
-        return None, "search_no_artist"
-    cand_id = str(cand.get("id") or "").strip()
-    if not cand_id:
         return None, "search_no_pick"
-    groups = enricher.get_recording_release_groups(cand_id)
-    home = home_release_group(groups or [], mbid, title)
-    if home is None:
-        return None, "search_no_home"
-    cand_names = [str(n).strip() for n in cand.get("artist_names") or [] if str(n).strip()]
-    artist_name = name if credit_mbid else (cand_names[0] if cand_names else name)
-    artist = _artist_for_mbid(db, mbid, artist_name)
-    if artist is None:
-        return None, "no_performer_artist"
-    return (artist, home), ""
+    for cand in picks:
+        cand_ids = [str(a).strip() for a in cand.get("artist_ids") or [] if str(a).strip()]
+        mbid = credit_mbid or (cand_ids[0] if cand_ids else "")
+        if not mbid:
+            continue
+        groups = enricher.get_recording_release_groups(str(cand["id"]).strip())
+        home = home_release_group(groups or [], mbid, title, allow_own_compilation=True)
+        if home is None:
+            continue
+        cand_names = [str(n).strip() for n in cand.get("artist_names") or [] if str(n).strip()]
+        artist_name = name if credit_mbid else (cand_names[0] if cand_names else name)
+        artist = _artist_for_mbid(db, mbid, artist_name)
+        if artist is None:
+            return None, "no_performer_artist"
+        return (artist, home), ""
+    return None, "search_no_home"
 
 
 def file_album_under_various(
@@ -317,7 +370,9 @@ def _resolve_per_track_target(
     title = str(track.get("title") or "")
     target_artist = performer_artist(db, str(track["id"]))
     home = (
-        home_release_group(per_rec_groups.get(rec, []), target_artist.get("mbid"), title)
+        home_release_group(
+            per_rec_groups.get(rec, []), target_artist.get("mbid"), title, allow_own_compilation=True
+        )
         if target_artist is not None
         else None
     )
@@ -326,7 +381,7 @@ def _resolve_per_track_target(
     credit = _primary_track_credit(db, str(track["id"]))
     if credit is None:
         return None, "no_credit"
-    hit, reason = _search_home(db, enricher, track, credit)
+    hit, reason = _search_home(db, enricher, track, credit, own_rec=rec)
     if hit is None:
         return None, reason
     return (hit[0], hit[1], True), ""
