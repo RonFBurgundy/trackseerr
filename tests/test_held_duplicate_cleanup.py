@@ -138,7 +138,7 @@ def _run_worker(db: Database, dl: Path, staging: Path, metas: dict[str, dict[str
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         stats = AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     return stats, driver
 
@@ -258,7 +258,7 @@ def test_parked_warning_with_duplicate_file_is_cleared_on_poll(tmp_path: Path, d
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -302,7 +302,7 @@ def test_parked_warning_with_missing_file_and_owned_track_is_cleared(tmp_path: P
 
     driver = MagicMock()
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -355,7 +355,7 @@ def test_gone_file_not_owned_fails_row(tmp_path: Path, db: Database):
 
     driver = MagicMock()
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -452,7 +452,7 @@ def test_parked_partial_resolution_updates_remaining(tmp_path: Path, db: Databas
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -546,7 +546,7 @@ def test_wrong_song_owned_elsewhere_clears_row_but_keeps_wanted_track(tmp_path: 
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -592,7 +592,7 @@ def test_gone_file_resolved_by_request_title(tmp_path: Path, db: Database):
 
     driver = MagicMock()
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -687,7 +687,7 @@ def test_unmonitor_respects_duration(tmp_path: Path, db: Database):
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -795,7 +795,7 @@ def test_combined_title_owned_satisfies_wanted_track(tmp_path: Path, db: Databas
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -903,7 +903,7 @@ def test_article_less_owned_satisfies_wanted_track(tmp_path: Path, db: Database)
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -1001,7 +1001,7 @@ def test_request_only_wanted_with_zero_duration_owned_is_satisfied(tmp_path: Pat
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -1110,7 +1110,7 @@ def test_request_only_article_less_owned_is_satisfied(tmp_path: Path, db: Databa
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -1207,7 +1207,7 @@ def test_importer_match_with_different_title_stays_unsatisfied(tmp_path: Path, d
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -1314,7 +1314,7 @@ def test_alias_rejected_when_durations_conflict(tmp_path: Path, db: Database):
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")

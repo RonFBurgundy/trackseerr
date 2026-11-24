@@ -438,7 +438,7 @@ def test_compilation_tagged_file_files_under_catalog_artist(test_db: Database, w
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
     assert stats["imported"] == 1
     placed = list(music_dir.rglob("*.flac"))
@@ -860,7 +860,7 @@ def _import_one_for_mumford(test_db: Database, workspace_dirs, rename_artist_fol
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
     assert stats["imported"] == 1
     placed = list(music_dir.rglob("*.flac"))
@@ -938,7 +938,7 @@ def test_import_lands_in_artist_observed_folder(test_db: Database, workspace_dir
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
     assert stats["imported"] == 1
     placed = [p for p in music_dir.rglob("*.flac") if p != old_file]
@@ -1026,7 +1026,7 @@ def _import_uncatalogued(
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
     assert stats["imported"] == 1
     placed = list(music_dir.rglob("*.flac"))
@@ -1136,7 +1136,7 @@ def test_import_disc1_only_for_multidisc_album_lands_without_disc_folder(test_db
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
          patch("trackseerr.acquisition_import.inspect_audio_file", return_value=dict(meta)), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", return_value=dict(meta)), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         stats = AcquisitionWorker().poll_once(db=test_db, staging_dir=str(downloads_dir))
     assert stats["imported"] == 1
     placed = list(music_dir.rglob("*.flac"))
