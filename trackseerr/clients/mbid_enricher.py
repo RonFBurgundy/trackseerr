@@ -82,6 +82,19 @@ def _credit_artist_ids(credit: Any) -> list[str]:
     return ids
 
 
+_RANKED_LIST_SERIES_RE = re.compile(
+    r"\b(?:best|greatest|top|charts?|nominees?|winners?|awards?|essential|must\s+hear|decade-end|record\s+guide|all\s+time)\b"
+    r"|\b\d{2,4}\s+(?:best|greatest|albums|records|collection)\b"
+    r"|\bthe\s+\d{2,4}\b",
+    re.IGNORECASE,
+)
+
+
+def _is_ranked_list_series(name: str) -> bool:
+    """Returns True when a MusicBrainz series name looks like a ranked list or award."""
+    return bool(_RANKED_LIST_SERIES_RE.search(name))
+
+
 def _parse_rg_series(data: Any) -> list[str]:
     """Extracts unique non-empty series names from a release-group series-rels response."""
     if not isinstance(data, dict):
@@ -94,10 +107,14 @@ def _parse_rg_series(data: Any) -> list[str]:
         target = rel.get("series")
         if not isinstance(target, dict):
             continue
+        rel_type = target.get("type")
+        if rel_type and rel_type != "Release group series":
+            continue
         name = str(target.get("name") or "").strip()
-        if name and name not in seen:
-            seen.add(name)
-            series.append(name)
+        if not name or _is_ranked_list_series(name) or name in seen:
+            continue
+        seen.add(name)
+        series.append(name)
     return series
 
 
@@ -1467,7 +1484,7 @@ class MbidEnricherClient:
             return {"series": [], "labels": [], "complete": True}
 
         clean_id = str(rg_id).strip()
-        cache_key = f"rg_identity:v1:{clean_id.lower()}"
+        cache_key = f"rg_identity:v2:{clean_id.lower()}"
         hit, cached_data = self._lookup(cache_key)
         if hit:
             if isinstance(cached_data, dict):

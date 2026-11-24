@@ -93,6 +93,7 @@ class MigrationsMixin:
                 (103, self._migration_v103),
                 (104, self._migration_v104),
                 (105, self._migration_v105),
+                (106, self._migration_v106),
             ]
 
             applied = 0
@@ -376,6 +377,10 @@ class MigrationsMixin:
         album_cols = {row[1] for row in cur.fetchall()}
         if "compilation_artist" not in album_cols:
             cur.execute("ALTER TABLE library_albums ADD COLUMN compilation_artist TEXT")
+
+    def _migration_v106(self, cur: sqlite3.Cursor) -> None:
+        """v106: Clear cached compilation album artists so they are worked out again without ranked-list series."""
+        cur.execute("UPDATE library_albums SET compilation_artist = NULL")
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:
         """v100: library_match_suggestions keeps the best unsure MusicBrainz match per unlinked album."""
