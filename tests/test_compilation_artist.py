@@ -305,6 +305,7 @@ def test_get_release_group_identity_parsing_filtering_and_caching(tmp_path: Path
         assert identity == {
             "series": ["UKF Drum & Bass", "UKF Compilations"],
             "labels": ["Technique Recordings", "Beta Label", "OWSLA"],
+            "secondary_types": [],
             "complete": True,
         }
         assert enricher._request.call_count == 2
@@ -324,6 +325,7 @@ def test_get_release_group_identity_parsing_filtering_and_caching(tmp_path: Path
         assert enricher2.get_release_group_identity("rg-transient") == {
             "series": [],
             "labels": [],
+            "secondary_types": [],
             "complete": False,
         }
         assert store.get("rg_identity:v1:rg-transient") == (False, None)
@@ -501,3 +503,75 @@ def test_cached_ranked_list_series_is_skipped() -> None:
         "mb_release_group_id": "rg",
     }
     assert work_out_compilation_artist(enricher, album) == ("Island", True)
+
+
+def test_soundtrack_from_identity_secondary_types() -> None:
+    enricher = MagicMock()
+    enricher.get_release_group_identity.return_value = {
+        "series": [],
+        "labels": ["Island"],
+        "secondary_types": ["Soundtrack"],
+        "complete": True,
+    }
+    album = {
+        "title": "The Harder They Come",
+        "secondary_types": None,
+        "mb_release_group_id": "rg-harder",
+    }
+    assert work_out_compilation_artist(enricher, album) == ("The Harder They Come", True)
+
+
+def test_identity_returns_secondary_types(tmp_path: Path) -> None:
+    db = Database(str(tmp_path / "mb_cache_st.db"))
+    try:
+        store = MbMetadataStore(db)
+        enricher = MbidEnricherClient(base_url="https://api.brainzmash.cc", store=store)
+
+        rg_resp = MagicMock(status_code=200)
+        rg_resp.json.return_value = {
+            "id": "rg-st",
+            "relations": [],
+            "secondary-types": ["Soundtrack"],
+        }
+        rel_resp = MagicMock(status_code=200)
+        rel_resp.json.return_value = {"releases": []}
+
+        enricher._request = MagicMock(side_effect=[rg_resp, rel_resp])
+        result = enricher.get_release_group_identity("rg-st")
+
+        assert result["secondary_types"] == ["Soundtrack"]
+        assert result["complete"] is True
+    finally:
+        db.close()
+
+
+def test_reset_compilation_artist_cache_once(tmp_path: Path) -> None:
+    from trackseerr.compilation_artist import reset_compilation_artist_cache_once
+
+    db = Database(str(tmp_path / "reset_comp.db"))
+    try:
+        db.upsert_library_artist(
+            LibraryArtist(id="va-1", name="Various Artists", mbid=VARIOUS_ARTISTS_MBID, monitored=True)
+        )
+        db.upsert_library_album(
+            LibraryAlbum(
+                id="alb-1",
+                artist_id="va-1",
+                title="The Harder They Come",
+                mb_release_group_id="rg-harder",
+            )
+        )
+        db.set_album_compilation_artist("alb-1", "Island")
+
+        assert reset_compilation_artist_cache_once(db) is True
+        alb = db.get_library_album("alb-1")
+        assert alb is not None
+        assert alb["compilation_artist"] is None
+
+        db.set_album_compilation_artist("alb-1", "The Harder They Come")
+        assert reset_compilation_artist_cache_once(db) is False
+        alb_after = db.get_library_album("alb-1")
+        assert alb_after is not None
+        assert alb_after["compilation_artist"] == "The Harder They Come"
+    finally:
+        db.close()
