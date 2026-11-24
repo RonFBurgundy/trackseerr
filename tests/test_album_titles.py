@@ -7,6 +7,7 @@ import pytest
 from trackseerr.album_titles import (
     album_titles_match,
     clean_new_album_title,
+    is_placeholder_album_title,
     strip_album_junk,
     strip_edition,
 )
@@ -102,3 +103,18 @@ def test_clean_new_album_title() -> None:
     )
     assert clean_new_album_title("1999", 1999) == "1999"
     assert clean_new_album_title("(1999)", 1999) == "(1999)"
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("Unknown Album", True),
+        ("unknown album (2001)", True),
+        ("Unknown", True),
+        ("", True),
+        (None, True),
+        ("Unknown Pleasures", False),
+    ],
+)
+def test_is_placeholder_album_title(title: object, expected: bool) -> None:
+    assert is_placeholder_album_title(title) is expected

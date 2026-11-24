@@ -13,8 +13,9 @@ from typing import Any, Optional
 import requests
 
 from trackseerr import mb_metadata_store
-from trackseerr.album_titles import album_titles_match
+from trackseerr.album_titles import album_titles_match, is_placeholder_album_title
 from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+from trackseerr.redaction import safe_exc
 from trackseerr.storage_common import clean_library_name
 
 logger = logging.getLogger(__name__)
@@ -379,6 +380,8 @@ def _link_unmatched_album(
 
 def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
     from trackseerr.compilation_filing import (
+        album_artist_credit,
+        ensure_primary_credit,
         file_album_under_various,
         file_tracks_under_home,
         keeps_compilation,
@@ -398,6 +401,14 @@ def _link_one_album_by_recording(db: Any, enricher: Any, album: dict[str, Any], 
 
     groups, per_rec = _recording_groups(enricher, rec_ids)
     under_various = _album_is_various_artists(db, album)
+    if is_placeholder_album_title(album["title"]):
+        if not under_various:
+            name, mbid = album_artist_credit(db, album)
+            for track in tracks:
+                ensure_primary_credit(db, str(track["id"]), name, mbid)
+        file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True)
+        counts["placeholder"] = counts.get("placeholder", 0) + 1
+        return
     va_group = None if under_various else various_group_for_title(list(groups.values()), album["title"])
     if va_group is not None:
         if not keeps_compilation(db, album) and file_tracks_under_home(db, enricher, album, per_rec, counts):
@@ -467,6 +478,90 @@ def link_albums_by_recording(
                 on_progress(processed, total)
 
     logger.info("Recording release-group link finished: %s", counts)
+    return counts
+
+
+def _list_placeholder_albums_to_repair(db: Any) -> list[dict[str, Any]]:
+    """Collects placeholder-titled albums that are linked to a release group or sit under Various Artists."""
+    candidates: list[dict[str, Any]] = []
+    offset = 0
+    batch = 500
+    while True:
+        page = db.list_library_albums(limit=batch, offset=offset)
+        if not page:
+            break
+        for album in page:
+            if not is_placeholder_album_title(album.get("title")):
+                continue
+            has_rg = bool(str(album.get("mb_release_group_id") or "").strip())
+            if has_rg or _album_is_various_artists(db, album):
+                candidates.append(album)
+        offset += len(page)
+        if len(page) < batch:
+            break
+    return candidates
+
+
+def _repair_one_placeholder_album(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
+    from trackseerr.compilation_filing import (
+        _per_recording_groups,
+        album_artist_credit,
+        ensure_primary_credit,
+        file_tracks_under_home,
+    )
+
+    album_id = str(album["id"])
+    counts["albums"] += 1
+    if str(album.get("mb_release_group_id") or "").strip() or str(album.get("mb_release_id") or "").strip():
+        db.set_album_mb_release_group_id(album_id, "")
+        db.set_album_mb_release_id(album_id, "")
+        counts["unlinked"] += 1
+
+    tracks = db.list_library_tracks(album_id=album_id, limit=1000)
+    for track in tracks:
+        if not track.get("has_file"):
+            db.delete_library_track(str(track["id"]))
+            counts["wanted_removed"] += 1
+
+    owned_tracks = [t for t in tracks if t.get("has_file")]
+    if owned_tracks:
+        if not _album_is_various_artists(db, album):
+            name, mbid = album_artist_credit(db, album)
+            for track in owned_tracks:
+                ensure_primary_credit(db, str(track["id"]), name, mbid)
+        per_rec = _per_recording_groups(enricher, owned_tracks)
+        file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True)
+
+    if not db.list_library_tracks(album_id=album_id, limit=1):
+        db.delete_library_album(album_id)
+        counts["emptied"] += 1
+
+
+def repair_placeholder_albums(
+    db: Any,
+    enricher: Any,
+    should_stop: Optional[Callable[[], bool]] = None,
+) -> dict[str, int]:
+    """Unlinks placeholder albums, drops their unowned wanted tracks, and files owned songs per track."""
+    counts = {
+        "albums": 0,
+        "unlinked": 0,
+        "wanted_removed": 0,
+        "emptied": 0,
+        "filed_home": 0,
+        "merge_conflict": 0,
+        "errors": 0,
+    }
+    for album in _list_placeholder_albums_to_repair(db):
+        if should_stop is not None and should_stop():
+            logger.info("Placeholder album repair stopped early: %s", counts)
+            return counts
+        try:
+            _repair_one_placeholder_album(db, enricher, album, counts)
+        except (sqlite3.Error, requests.RequestException) as exc:
+            counts["errors"] += 1
+            logger.warning("Placeholder album repair failed for album %s: %s", album.get("id"), safe_exc(exc))
+    logger.info("Placeholder album repair finished: %s", counts)
     return counts
 
 

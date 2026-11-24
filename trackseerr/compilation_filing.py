@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 import requests
 
-from trackseerr.album_titles import album_titles_match
+from trackseerr.album_titles import album_titles_match, is_placeholder_album_title
 from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
 from trackseerr.models import LibraryAlbum, LibraryArtist
 from trackseerr.redaction import safe_exc
@@ -517,6 +517,13 @@ def _refile_one_album(db: Any, enricher: Any, album: dict[str, Any], va_id: str,
     rg_id = str(album.get("mb_release_group_id") or "").strip()
     tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
     per_rec = _per_recording_groups(enricher, tracks)
+    if is_placeholder_album_title(album.get("title")):
+        counts["albums"] += 1
+        name, mbid = album_artist_credit(db, album)
+        for track in tracks:
+            ensure_primary_credit(db, str(track["id"]), name, mbid)
+        file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True)
+        return
     group = _various_group_of_album(rg_id, per_rec)
     if group is None:
         return
@@ -619,6 +626,10 @@ def _refile_out_of_various_one(
     tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
     owned_tracks = [t for t in tracks if t.get("has_file")]
     per_rec = _per_recording_groups(enricher, owned_tracks)
+    if is_placeholder_album_title(album.get("title")):
+        counts["albums"] += 1
+        file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True, discovery=discovery)
+        return
     rg_id = str(album.get("mb_release_group_id") or "").strip()
     if rg_id:
         group = _group_by_id(rg_id, per_rec)

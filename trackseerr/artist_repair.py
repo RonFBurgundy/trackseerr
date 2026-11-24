@@ -751,6 +751,7 @@ def run_repair_and_match(
         link_albums_by_recording,
         match_album_releases,
         merge_title_duplicates,
+        repair_placeholder_albums,
     )
 
     total_stages = stage_count or len(REPAIR_STAGES)
@@ -785,6 +786,10 @@ def run_repair_and_match(
     if stop():
         return
     run.set_stage(stage_offset + 4, total_stages, REPAIR_STAGES[3])
+    placeholders = repair_placeholder_albums(db, enricher, should_stop=stop)
+    run.message = f"{run.message}; placeholders: {_format_counts(placeholders)}"
+    if stop():
+        return
     linked = link_albums_by_recording(db, enricher, should_stop=stop, on_progress=run.set_progress)
     run.message = f"{run.message}; link: {_format_counts(linked)}"
     if stop():
