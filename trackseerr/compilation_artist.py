@@ -1,4 +1,4 @@
-"""Compilation album-artist derivation (MusicBrainz series, soundtrack, title series, label)."""
+"""Compilation album-artist derivation (soundtrack, MusicBrainz series, title series, label)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, Optional
 
-from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, _is_ranked_list_series
 
 _MIN_SERIES_LEN = 3
 
@@ -89,23 +89,23 @@ def _has_secondary_type(album: dict[str, Any], target: str) -> bool:
 
 
 def work_out_compilation_artist(enricher: Any, album: dict[str, Any]) -> tuple[str, bool]:
-    """Resolves a display album artist for a compilation via MB series -> soundtrack -> title series -> label."""
+    """Resolves a display album artist for a compilation via soundtrack -> MB series -> title series -> label."""
     rg_id = str(album.get("mb_release_group_id") or "").strip()
     identity: dict[str, Any] = (
         enricher.get_release_group_identity(rg_id) if (rg_id and enricher is not None) else {}
     ) or {}
     complete = not rg_id or bool(identity.get("complete", True))
 
-    for raw_series in identity.get("series") or []:
-        cleaned = re.sub(r"\s+series$", "", str(raw_series or "").strip(), flags=re.IGNORECASE).strip()
-        if cleaned:
-            return cleaned, complete
-
     title = str(album.get("title") or "")
     if _has_secondary_type(album, "soundtrack"):
         st = soundtrack_name(title)
         if st:
             return st, complete
+
+    for raw_series in identity.get("series") or []:
+        cleaned = re.sub(r"\s+series$", "", str(raw_series or "").strip(), flags=re.IGNORECASE).strip()
+        if cleaned and not _is_ranked_list_series(cleaned):
+            return cleaned, complete
 
     title_series = series_from_title(title)
     if title_series:

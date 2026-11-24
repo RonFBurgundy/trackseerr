@@ -8,7 +8,12 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, MbidEnricherClient
+from trackseerr.clients.mbid_enricher import (
+    VARIOUS_ARTISTS_MBID,
+    MbidEnricherClient,
+    _is_ranked_list_series,
+    _parse_rg_series,
+)
 from trackseerr.compilation_artist import (
     compilation_display_artist,
     series_from_title,
@@ -65,7 +70,7 @@ def test_soundtrack_name(title: str, expected: str) -> None:
 def test_work_out_compilation_artist_precedence_and_no_rg_id() -> None:
     enricher = MagicMock()
 
-    # 1. MB series beats soundtrack, title series, and label (and strips trailing " series")
+    # 1. Soundtrack beats MB series, title series, and label
     enricher.get_release_group_identity.return_value = {
         "series": ["UKF Drum & Bass series"],
         "labels": ["UKF Music"],
@@ -77,6 +82,23 @@ def test_work_out_compilation_artist_precedence_and_no_rg_id() -> None:
                 "title": "Rocky IV: Original Motion Picture Soundtrack 2013",
                 "secondary_types": ["Soundtrack", "Compilation"],
                 "mb_release_group_id": "rg-1",
+            },
+        )
+        == ("Rocky IV", True)
+    )
+
+    # 2. MB series beats title series and label (and strips trailing " series")
+    enricher.get_release_group_identity.return_value = {
+        "series": ["UKF Drum & Bass series"],
+        "labels": ["UKF Music"],
+    }
+    assert (
+        work_out_compilation_artist(
+            enricher,
+            {
+                "title": "UKF Drum & Bass 2013",
+                "secondary_types": ["Compilation"],
+                "mb_release_group_id": "rg-1b",
             },
         )
         == ("UKF Drum & Bass", True)
@@ -389,3 +411,93 @@ def test_display_artist_cached_after_complete_lookup() -> None:
     second = compilation_display_artist(db, enricher, album, artist, settings)
     assert second == "UKF Drum & Bass"
     assert enricher.get_release_group_identity.call_count == 1
+
+
+def test_parse_rg_series_skips_awards_and_ranked_lists() -> None:
+    payload = {
+        "relations": [
+            {
+                "type": "part of",
+                "target-type": "series",
+                "series": {"name": "Grammy Award: Album of the Year nominees", "type": "Release group award"},
+            },
+            {
+                "type": "part of",
+                "target-type": "series",
+                "series": {
+                    "name": "Rolling Stone: 500 Greatest Albums of All Time: 2003 edition",
+                    "type": "Release group series",
+                },
+            },
+            {
+                "type": "part of",
+                "target-type": "series",
+                "series": {"name": "Absolute Radio’s The 100 Collection", "type": "Release group series"},
+            },
+            {
+                "type": "part of",
+                "target-type": "series",
+                "series": {
+                    "name": "Pitchfork: The 50 Best Movie Soundtracks of All Time",
+                    "type": "Release group series",
+                },
+            },
+            {
+                "type": "part of",
+                "target-type": "series",
+                "series": {"name": "Now That’s What I Call Music!", "type": "Release group series"},
+            },
+        ]
+    }
+    assert _parse_rg_series(payload) == ["Now That’s What I Call Music!"]
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("Now That’s What I Call Music!", False),
+        ("UKF Drum & Bass", False),
+        ("20 Years of Technique", False),
+        ("Ministry of Sound: The Chillout Sessions", False),
+        ("Liquicity Drum & Bass Yearly Compilations", False),
+        ("Toolroom Longplayer", False),
+        ("Savage Selects", False),
+        ("Pitchfork: The 50 Best Movie Soundtracks of All Time", True),
+        ("Billboard 200 Decade-End Chart 1970s", True),
+        ("The Guardian 100 Best Albums Ever", True),
+        ("Absolute Radio’s The 100 Collection", True),
+        ("Ampex Golden Reel Award winners", True),
+    ],
+)
+def test_is_ranked_list_series(name: str, expected: bool) -> None:
+    assert _is_ranked_list_series(name) is expected
+
+
+def test_soundtrack_name_beats_series() -> None:
+    enricher = MagicMock()
+    enricher.get_release_group_identity.return_value = {
+        "series": ["Some Series"],
+        "labels": ["RSO"],
+        "complete": True,
+    }
+    album = {
+        "title": "Saturday Night Fever: The Original Movie Sound Track",
+        "secondary_types": '["soundtrack"]',
+        "mb_release_group_id": "rg",
+    }
+    assert work_out_compilation_artist(enricher, album) == ("Saturday Night Fever", True)
+
+
+def test_cached_ranked_list_series_is_skipped() -> None:
+    enricher = MagicMock()
+    enricher.get_release_group_identity.return_value = {
+        "series": ["Pitchfork: The 50 Best Movie Soundtracks of All Time"],
+        "labels": ["Island"],
+        "complete": True,
+    }
+    album = {
+        "title": "The Harder They Come",
+        "secondary_types": ["Compilation"],
+        "mb_release_group_id": "rg",
+    }
+    assert work_out_compilation_artist(enricher, album) == ("Island", True)
