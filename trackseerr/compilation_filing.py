@@ -365,24 +365,32 @@ def _resolve_per_track_target(
     track: dict[str, Any],
     per_rec_groups: dict[str, list[dict[str, Any]]],
     rec: str,
-) -> tuple[Optional[tuple[dict[str, Any], dict[str, Any], bool]], str]:
-    """Resolves ((artist, home_group, from_search), reason) for a track in per-track mode."""
+    album: Optional[dict[str, Any]] = None,
+    discovery: Any = None,
+) -> tuple[Optional[tuple[dict[str, Any], Optional[dict[str, Any]], str, Optional[str]]], str]:
+    """Resolves ((artist, home_group, source, holder_id), reason) for a track in per-track mode."""
+    from trackseerr.deezer_home import deezer_home_album
+
     title = str(track.get("title") or "")
     target_artist = performer_artist(db, str(track["id"]))
     groups = per_rec_groups.get(rec, [])
     home = home_release_group(groups, target_artist.get("mbid"), title) if target_artist is not None else None
     if target_artist is not None and home is not None:
-        return (target_artist, home, False), ""
+        return (target_artist, home, "recording", None), ""
     credit = _primary_track_credit(db, str(track["id"]))
     if credit is None:
         return None, "no_credit"
     hit, reason = _search_home(db, enricher, track, credit, own_rec=rec)
     if hit is not None:
-        return (hit[0], hit[1], True), ""
+        return (hit[0], hit[1], "search", None), ""
+    if discovery is not None and target_artist is not None:
+        holder_id = deezer_home_album(db, discovery, target_artist, track, album or {})
+        if holder_id is not None:
+            return (target_artist, None, "deezer", holder_id), ""
     if target_artist is not None:
         own_comp = home_release_group(groups, target_artist.get("mbid"), title, allow_own_compilation=True)
         if own_comp is not None:
-            return (target_artist, own_comp, False), ""
+            return (target_artist, own_comp, "own_compilation", None), ""
     return None, reason
 
 
@@ -393,6 +401,7 @@ def _file_one_track_home(
     track: dict[str, Any],
     per_rec_groups: dict[str, list[dict[str, Any]]],
     counts: dict[str, int],
+    discovery: Any = None,
 ) -> bool:
     """Files one track in per-track-artist mode; returns True when moved or conflict recorded."""
     from trackseerr.artist_repair import move_track_into_album
@@ -403,21 +412,25 @@ def _file_one_track_home(
     if not rec:
         _note_left(counts, album, track, "no_recording")
         return False
-    resolved, reason = _resolve_per_track_target(db, enricher, track, per_rec_groups, rec)
+    resolved, reason = _resolve_per_track_target(
+        db, enricher, track, per_rec_groups, rec, album=album, discovery=discovery
+    )
     if resolved is None:
         groups = per_rec_groups.get(rec, [])
         own_count = sum(1 for g in groups if not g.get("is_various"))
         _note_left(counts, album, track, reason, f"release groups={len(groups)}, own-artist groups={own_count}")
         return False
-    target_artist, home, from_search = resolved
-    holder = ensure_release_group_album(db, enricher, str(target_artist["id"]), home)
+    target_artist, home, source, holder_id = resolved
+    holder = holder_id or ensure_release_group_album(db, enricher, str(target_artist["id"]), home or {})
     if holder == str(album["id"]):
         _note_left(counts, album, track, "already_home")
         return False
-    if from_search:
+    if source == "search":
         counts["searched_home"] = counts.get("searched_home", 0) + 1
     if move_track_into_album(db, str(track["id"]), holder) == "merged":
         counts["filed_home"] = counts.get("filed_home", 0) + 1
+        if source == "deezer":
+            counts["deezer_home"] = counts.get("deezer_home", 0) + 1
     else:
         db.record_merge_conflict(str(album["id"]), holder, "duplicate_files")
         counts["merge_conflict"] += 1
@@ -433,6 +446,7 @@ def file_tracks_under_home(
     counts: dict[str, int],
     *,
     per_track_artist: bool = False,
+    discovery: Any = None,
 ) -> bool:
     """Moves each recording-known track of a small album into the album of its canonical release.
 
@@ -444,7 +458,7 @@ def file_tracks_under_home(
     if per_track_artist:
         acted = False
         for track in tracks:
-            if _file_one_track_home(db, enricher, album, track, per_rec_groups, counts):
+            if _file_one_track_home(db, enricher, album, track, per_rec_groups, counts, discovery=discovery):
                 acted = True
         return acted
 
@@ -591,7 +605,9 @@ def _move_wrongly_linked_album(
     counts["moved_to_artist"] += 1
 
 
-def _refile_out_of_various_one(db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int]) -> None:
+def _refile_out_of_various_one(
+    db: Any, enricher: Any, album: dict[str, Any], counts: dict[str, int], discovery: Any = None
+) -> None:
     tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
     owned_tracks = [t for t in tracks if t.get("has_file")]
     per_rec = _per_recording_groups(enricher, owned_tracks)
@@ -604,7 +620,7 @@ def _refile_out_of_various_one(db: Any, enricher: Any, album: dict[str, Any], co
             return
     if not rg_id or not keeps_compilation(db, album):
         counts["albums"] += 1
-        file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True)
+        file_tracks_under_home(db, enricher, album, per_rec, counts, per_track_artist=True, discovery=discovery)
 
 
 def refile_out_of_various(
@@ -612,6 +628,7 @@ def refile_out_of_various(
     enricher: Any,
     should_stop: Optional[Callable[[], bool]] = None,
     on_progress: Optional[Callable[[int, Optional[int]], None]] = None,
+    discovery: Any = None,
 ) -> dict[str, int]:
     """Moves real-artist albums and small compilations out of Various Artists to their performer."""
     counts = {
@@ -619,6 +636,7 @@ def refile_out_of_various(
         "moved_to_artist": 0,
         "filed_home": 0,
         "searched_home": 0,
+        "deezer_home": 0,
         "merge_conflict": 0,
         "skipped": 0,
         "errors": 0,
@@ -633,7 +651,7 @@ def refile_out_of_various(
             logger.info("Out of Various Artists refile stopped early: %s", counts)
             return counts
         try:
-            _refile_out_of_various_one(db, enricher, album, counts)
+            _refile_out_of_various_one(db, enricher, album, counts, discovery=discovery)
         except (sqlite3.Error, requests.RequestException) as exc:
             counts["errors"] += 1
             logger.warning("Out of Various Artists refile failed for album %s: %s", album.get("id"), safe_exc(exc))
