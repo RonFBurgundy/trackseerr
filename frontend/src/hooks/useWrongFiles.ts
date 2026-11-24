@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WrongFileItem } from '@/types/models';
 import type { RenameVerifyStatus } from '@/services/renameService';
 import {
@@ -13,8 +13,15 @@ import { usePolling } from './usePolling';
 const POLL_MS = 1500;
 const MISMATCHED_RELOAD_THROTTLE_MS = 30_000;
 
+export type WrongFileKind = WrongFileItem['kind'];
+
 export interface UseWrongFilesReturn {
   items: WrongFileItem[];
+  filteredItems: WrongFileItem[];
+  kindCounts: Record<WrongFileKind, number>;
+  activeKinds: Set<WrongFileKind>;
+  toggleKind: (kind: WrongFileKind) => void;
+  clearKinds: () => void;
   total: number;
   checked: number;
   libraryFiles: number;
@@ -28,6 +35,7 @@ export interface UseWrongFilesReturn {
   selectedIds: Set<string>;
   toggleSelect: (fileId: string) => void;
   selectAll: () => void;
+  selectSafe: () => void;
   selectNone: () => void;
   startCheck: () => Promise<void>;
   remove: (fileId: string) => void;
@@ -51,6 +59,9 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
   const [busyFileId, setBusyFileId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [activeKinds, setActiveKinds] = useState<Set<WrongFileKind>>(
+    () => new Set<WrongFileKind>(['different_song'])
+  );
 
   const wasRunning = useRef<boolean>(false);
   const lastMismatchedRef = useRef<number>(0);
@@ -123,6 +134,7 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
       setCheckError(null);
       setActionError(null);
       setSelectedIds(new Set());
+      setActiveKinds(new Set<WrongFileKind>(['different_song']));
       return undefined;
     }
     let cancelled = false;
@@ -167,6 +179,35 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
     }
   }, [applyStatus]);
 
+  const kindCounts = useMemo<Record<WrongFileKind, number>>(() => {
+    const counts: Record<WrongFileKind, number> = {
+      different_song: 0,
+      different_version: 0,
+    };
+    for (const item of items) {
+      counts[item.kind] += 1;
+    }
+    return counts;
+  }, [items]);
+
+  const filteredItems = useMemo(
+    () => (activeKinds.size === 0 ? items : items.filter((item) => activeKinds.has(item.kind))),
+    [items, activeKinds]
+  );
+
+  const toggleKind = useCallback((kind: WrongFileKind): void => {
+    setActiveKinds((prev) => {
+      const next = new Set(prev);
+      if (next.has(kind)) next.delete(kind);
+      else next.add(kind);
+      return next;
+    });
+  }, []);
+
+  const clearKinds = useCallback((): void => {
+    setActiveKinds(new Set());
+  }, []);
+
   const toggleSelect = useCallback((fileId: string): void => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -177,12 +218,30 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
   }, []);
 
   const selectAll = useCallback((): void => {
-    setSelectedIds(new Set(items.map((item) => item.file_id)));
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const item of filteredItems) next.add(item.file_id);
+      return next;
+    });
+  }, [filteredItems]);
+
+  const selectSafe = useCallback((): void => {
+    setSelectedIds(
+      new Set(
+        items
+          .filter((item) => item.kind === 'different_song' && Boolean(item.actual_track_id))
+          .map((item) => item.file_id)
+      )
+    );
   }, [items]);
 
   const selectNone = useCallback((): void => {
-    setSelectedIds(new Set());
-  }, []);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const item of filteredItems) next.delete(item.file_id);
+      return next;
+    });
+  }, [filteredItems]);
 
   const remove = useCallback((fileId: string): void => {
     setItems((prev) => prev.filter((item) => item.file_id !== fileId));
@@ -228,6 +287,11 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
 
   return {
     items,
+    filteredItems,
+    kindCounts,
+    activeKinds,
+    toggleKind,
+    clearKinds,
     total: items.length,
     checked,
     libraryFiles,
@@ -241,6 +305,7 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
     selectedIds,
     toggleSelect,
     selectAll,
+    selectSafe,
     selectNone,
     startCheck,
     remove,
