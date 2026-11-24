@@ -200,7 +200,7 @@ def _run_worker(
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         stats = AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     return stats, driver
 
@@ -432,7 +432,7 @@ def test_parked_row_requeued_once_then_imported(tmp_path: Path, db: Database):
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker()._poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -449,7 +449,7 @@ def test_parked_row_requeued_once_then_imported(tmp_path: Path, db: Database):
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker()._poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -464,7 +464,7 @@ def test_parked_row_requeued_once_then_imported(tmp_path: Path, db: Database):
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker()._poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -512,7 +512,7 @@ def test_wrong_song_not_requeued(tmp_path: Path, db: Database):
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker()._poll_once(db=db, staging_dir=str(staging))
 
     dl_row = db.get_active_download("dl-1")
@@ -581,7 +581,7 @@ def test_twin_rows_requeue_only_one(tmp_path: Path, db: Database):
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         AcquisitionWorker()._resolve_parked_duplicates(
             db=db,
             ctx=MagicMock(media_settings=db.get_media_management_settings()),

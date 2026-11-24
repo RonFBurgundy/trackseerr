@@ -150,7 +150,7 @@ def _run_worker(
             "error_message": None,
         }
     with patch("trackseerr.acquisition_worker.get_acquisition_driver", return_value=driver), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         return AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
 
 

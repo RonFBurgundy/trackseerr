@@ -188,7 +188,7 @@ def _run_worker(
          patch("trackseerr.acquisition_import.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_catalog.inspect_audio_file", side_effect=inspect), \
          patch("trackseerr.acquisition_worker.inspect_audio_file", side_effect=inspect), \
-         patch("trackseerr.track_matching.fingerprint_audio_file", return_value=None):
+         patch("trackseerr.track_matching.fingerprint_and_lookup", return_value={"status": "no_result", "matches": []}):
         stats = AcquisitionWorker().poll_once(db=db, staging_dir=str(staging))
     return stats, driver
 
