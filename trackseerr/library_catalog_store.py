@@ -1019,6 +1019,15 @@ class LibraryCatalogStoreMixin:
             )
             self.conn.commit()
 
+    def set_album_compilation_artist(self, album_id: str, compilation_artist: str) -> None:
+        """Caches the resolved compilation display artist (or '' when none found) on library_albums."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE library_albums SET compilation_artist = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                (str(compilation_artist).strip(), str(album_id)),
+            )
+            self.conn.commit()
+
     def move_album_to_artist(self, album_id: str, artist_id: str) -> None:
         """Re-files an album and all its tracks under another artist in one transaction (files are not touched)."""
         with self._lock:

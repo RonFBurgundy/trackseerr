@@ -92,6 +92,7 @@ class MigrationsMixin:
                 (102, self._migration_v102),
                 (103, self._migration_v103),
                 (104, self._migration_v104),
+                (105, self._migration_v105),
             ]
 
             applied = 0
@@ -362,6 +363,19 @@ class MigrationsMixin:
             cur.execute(
                 "ALTER TABLE media_management_settings ADD COLUMN keep_compilations_together INTEGER NOT NULL DEFAULT 0"
             )
+
+    def _migration_v105(self, cur: sqlite3.Cursor) -> None:
+        """v105: Add compilation_album_artist setting and library_albums.compilation_artist cache."""
+        cur.execute("PRAGMA table_info(media_management_settings)")
+        mm_cols = {row[1] for row in cur.fetchall()}
+        if "compilation_album_artist" not in mm_cols:
+            cur.execute(
+                "ALTER TABLE media_management_settings ADD COLUMN compilation_album_artist TEXT NOT NULL DEFAULT 'various'"
+            )
+        cur.execute("PRAGMA table_info(library_albums)")
+        album_cols = {row[1] for row in cur.fetchall()}
+        if "compilation_artist" not in album_cols:
+            cur.execute("ALTER TABLE library_albums ADD COLUMN compilation_artist TEXT")
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:
         """v100: library_match_suggestions keeps the best unsure MusicBrainz match per unlinked album."""

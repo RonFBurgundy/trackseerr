@@ -80,6 +80,8 @@ from trackseerr.rename_verification import (
     verdict_for,
 )
 from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+from trackseerr.compilation_artist import compilation_display_artist
+from trackseerr.mb_metadata_store import get_shared_enricher
 from trackseerr.storage import Database
 
 
@@ -796,6 +798,7 @@ def _evaluate_file_retag(
     album_cache: dict[str, dict[str, Any]],
     discs_cache: Optional[dict[str, int]] = None,
     media_settings: Optional[dict[str, Any]] = None,
+    enricher: Optional[Any] = None,
 ) -> Optional[dict[str, Any]]:
     current_path_str = f.get("file_path")
     if not current_path_str:
@@ -835,7 +838,7 @@ def _evaluate_file_retag(
 
     proposed_tags = build_tags_to_write(
         artist=track_artist or artist["name"],
-        album_artist=artist["name"],
+        album_artist=compilation_display_artist(db, enricher, album, artist, media_settings or {}) or artist["name"],
         album=album["title"],
         title=t["title"],
         date=album.get("release_date") or album.get("year"),
@@ -973,6 +976,7 @@ def retag_preview(  # noqa: C901, PLR0915
     artist_cache: dict[str, dict[str, Any]] = {}
     album_cache: dict[str, dict[str, Any]] = {}
     discs_cache: dict[str, int] = {}
+    enricher = get_shared_enricher(db)
 
     preview_items: list[dict[str, Any]] = []
 
@@ -992,6 +996,7 @@ def retag_preview(  # noqa: C901, PLR0915
             album_cache=album_cache,
             discs_cache=discs_cache,
             media_settings=media_settings,
+            enricher=enricher,
         )
         if not res:
             continue
@@ -1019,6 +1024,7 @@ class _RetagRun:
     write_tags_setting: bool
     embed_art_requested: bool
     total: int
+    enricher: Optional[Any] = None
     results: list[dict[str, Any]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     retagged_count: int = 0
@@ -1110,7 +1116,7 @@ def _retag_one_file(
 
         tags_to_write = build_tags_to_write(
             artist=track_artist or artist["name"],
-            album_artist=artist["name"],
+            album_artist=compilation_display_artist(run.db, run.enricher, album, artist, run.media_settings) or artist["name"],
             album=album["title"],
             title=track["title"],
             date=album.get("release_date") or album.get("year"),
@@ -1250,6 +1256,7 @@ def retag_apply(
             write_tags_setting=bool(media_settings.get("write_audio_tags", True)),
             embed_art_requested=bool(body.embed_art),
             total=len(file_ids),
+            enricher=get_shared_enricher(db),
         )
 
         for idx, fid in enumerate(file_ids):
@@ -1289,6 +1296,7 @@ def retag_library(
     artist_cache: dict[str, dict[str, Any]] = {}
     album_cache: dict[str, dict[str, Any]] = {}
     discs_cache: dict[str, int] = {}
+    enricher = get_shared_enricher(db)
 
     scanned = 0
     retagged = 0
@@ -1304,6 +1312,7 @@ def retag_library(
         write_tags_setting=True,
         embed_art_requested=False,
         total=0,
+        enricher=enricher,
     )
 
     for t, f in db.iter_library_files_for_rename(1000):
@@ -1325,6 +1334,7 @@ def retag_library(
             album_cache=album_cache,
             discs_cache=discs_cache,
             media_settings=media_settings,
+            enricher=enricher,
         )
 
         if not res:

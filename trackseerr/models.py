@@ -903,6 +903,7 @@ class MediaManagementSettings:
     acoustid_user_key: Optional[str] = None
     fingerprint_on_weak_match: bool = False
     keep_compilations_together: bool = False
+    compilation_album_artist: str = "various"
     mb_mirror_url: str = "https://api.brainzmash.cc"
     prefer_local_artwork: bool = True
     scan_monitor_option: str = "existing"
@@ -935,6 +936,7 @@ class MediaManagementSettings:
             "acoustid_user_key": self.acoustid_user_key,
             "fingerprint_on_weak_match": bool(self.fingerprint_on_weak_match),
             "keep_compilations_together": bool(self.keep_compilations_together),
+            "compilation_album_artist": self.compilation_album_artist,
             "mb_mirror_url": self.mb_mirror_url,
             "prefer_local_artwork": bool(self.prefer_local_artwork),
             "scan_monitor_option": self.scan_monitor_option,

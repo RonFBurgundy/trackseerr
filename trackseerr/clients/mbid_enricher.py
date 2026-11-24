@@ -82,6 +82,49 @@ def _credit_artist_ids(credit: Any) -> list[str]:
     return ids
 
 
+def _parse_rg_series(data: Any) -> list[str]:
+    """Extracts unique non-empty series names from a release-group series-rels response."""
+    if not isinstance(data, dict):
+        return []
+    seen: set[str] = set()
+    series: list[str] = []
+    for rel in data.get("relations") or []:
+        if not isinstance(rel, dict) or rel.get("target-type") != "series":
+            continue
+        target = rel.get("series")
+        if not isinstance(target, dict):
+            continue
+        name = str(target.get("name") or "").strip()
+        if name and name not in seen:
+            seen.add(name)
+            series.append(name)
+    return series
+
+
+def _parse_rg_labels(data: Any) -> list[str]:
+    """Collects label names across releases ordered by frequency descending then name."""
+    if not isinstance(data, dict):
+        return []
+    counts: collections.Counter[str] = collections.Counter()
+    for release in data.get("releases") or []:
+        if not isinstance(release, dict):
+            continue
+        for info in release.get("label-info") or []:
+            if not isinstance(info, dict):
+                continue
+            label = info.get("label")
+            if not isinstance(label, dict):
+                continue
+            name = str(label.get("name") or "").strip()
+            if not name:
+                continue
+            cf = name.casefold()
+            if cf == "not on label" or "no label" in cf:
+                continue
+            counts[name] += 1
+    return [name for name, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))]
+
+
 def _credit_text(credit: Any) -> tuple[str, list[str]]:
     """Joined credit text ('A feat. B') and the credited artist names of an ``artist-credit`` list."""
     text = ""
@@ -1417,6 +1460,53 @@ class MbidEnricherClient:
             logger.info("MbidEnricherClient: get_recording_release_groups failed for '%s': %s", clean_id, exc)
             self._set_cached(cache_key, None)
             return []
+
+    def get_release_group_identity(self, rg_id: str) -> dict[str, Any]:
+        """Returns MusicBrainz series and label names for a release group (empty lists when unknown)."""
+        if not rg_id or not str(rg_id).strip():
+            return {"series": [], "labels": [], "complete": True}
+
+        clean_id = str(rg_id).strip()
+        cache_key = f"rg_identity:v1:{clean_id.lower()}"
+        hit, cached_data = self._lookup(cache_key)
+        if hit:
+            if isinstance(cached_data, dict):
+                return {**cached_data, "complete": bool(cached_data.get("complete", True))}
+            return {"series": [], "labels": [], "complete": False}
+
+        try:
+            from trackseerr.mb_metadata_store import TTL_RG_LOOKUP
+
+            rg_resp = self._request(
+                f"{self.base_url}/ws/2/release-group/{clean_id}",
+                params={"inc": "series-rels", "fmt": "json"},
+            )
+            rel_resp = self._request(
+                f"{self.base_url}/ws/2/release",
+                params={"release-group": clean_id, "inc": "labels", "fmt": "json", "limit": 25},
+            )
+
+            series = _parse_rg_series(rg_resp.json()) if (rg_resp is not None and rg_resp.status_code == 200) else []
+            labels = _parse_rg_labels(rel_resp.json()) if (rel_resp is not None and rel_resp.status_code == 200) else []
+
+            transient = any(r is None or r.status_code not in (200, 404) for r in (rg_resp, rel_resp))
+            if transient:
+                logger.info(
+                    "Release group %s identity lookup had transient status (%s, %s)",
+                    clean_id,
+                    rg_resp.status_code if rg_resp else "None",
+                    rel_resp.status_code if rel_resp else "None",
+                )
+                self._set_cached(cache_key, None)
+                return {"series": series, "labels": labels, "complete": False}
+
+            result = {"series": series, "labels": labels, "complete": True}
+            self._remember(cache_key, "rg_identity", result, ttl=TTL_RG_LOOKUP)
+            return result
+        except (requests.RequestException, ValueError, AttributeError, TypeError) as exc:
+            logger.info("MbidEnricherClient: get_release_group_identity failed for '%s': %s", clean_id, exc)
+            self._set_cached(cache_key, None)
+            return {"series": [], "labels": [], "complete": False}
 
     def resolve_release_group(self, rg_id: str) -> Optional[str]:
         """Resolves canonical release group MBID, recording redirects if updated."""

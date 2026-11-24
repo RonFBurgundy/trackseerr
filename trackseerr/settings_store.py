@@ -34,6 +34,8 @@ from trackseerr.track_credits import (
     REMIX_CREDIT_MODES,
 )
 
+COMPILATION_ALBUM_ARTIST_MODES = ("various", "series_label")
+
 logger = logging.getLogger(__name__)
 
 
@@ -137,6 +139,8 @@ class SettingsStoreMixin:
             )
             res["fingerprint_on_weak_match"] = bool(res.get("fingerprint_on_weak_match", 0))
             res["keep_compilations_together"] = bool(res.get("keep_compilations_together", 0))
+            caa = str(res.get("compilation_album_artist") or "various")
+            res["compilation_album_artist"] = caa if caa in COMPILATION_ALBUM_ARTIST_MODES else "various"
             res["mb_mirror_url"] = str(res.get("mb_mirror_url") or "https://api.brainzmash.cc")
             env_url = env_mb_mirror_url()
             if env_url:
@@ -195,6 +199,7 @@ class SettingsStoreMixin:
             "acoustid_user_key",
             "fingerprint_on_weak_match",
             "keep_compilations_together",
+            "compilation_album_artist",
             "mb_mirror_url",
             "prefer_local_artwork",
             "scan_monitor_option",
@@ -227,6 +232,13 @@ class SettingsStoreMixin:
             raise ValueError("remix_credit must be one of: " + ", ".join(REMIX_CREDIT_MODES))
         if settings.get("featured_artists") is not None and settings["featured_artists"] not in FEATURED_ARTIST_MODES:
             raise ValueError("featured_artists must be one of: " + ", ".join(FEATURED_ARTIST_MODES))
+        if (
+            settings.get("compilation_album_artist") is not None
+            and settings["compilation_album_artist"] not in COMPILATION_ALBUM_ARTIST_MODES
+        ):
+            raise ValueError(
+                "compilation_album_artist must be one of: " + ", ".join(COMPILATION_ALBUM_ARTIST_MODES)
+            )
         if settings.get("compilation_artist_folder") is not None:
             caf = str(settings["compilation_artist_folder"]).strip()
             if not caf:

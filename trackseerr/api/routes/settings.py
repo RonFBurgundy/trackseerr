@@ -226,6 +226,10 @@ class MediaManagementSettingsModel(ApiModel):
         False,
         description="Keep songs from compilations together under Various Artists instead of filing each under its own artist",
     )
+    compilation_album_artist: Literal["various", "series_label"] = Field(
+        "various",
+        description="What to write as the album artist on compilations kept under Various Artists: Various Artists, or the series, soundtrack or label",
+    )
     mb_mirror_url: str = Field("https://api.brainzmash.cc", description="MusicBrainz / BrainzMash API mirror base URL")
     mb_mirror_url_from_env: bool = Field(
         False, description="True when MUSICBRAINZ_URL or MUSICBRAINZ_MIRROR_URL sets the server; the saved value is then ignored"
@@ -283,6 +287,7 @@ class MediaManagementUpdateModel(BaseModel):
     acoustid_user_key: str | None = None
     fingerprint_on_weak_match: bool | None = None
     keep_compilations_together: bool | None = None
+    compilation_album_artist: Literal["various", "series_label"] | None = None
     mb_mirror_url: str | None = None
     prefer_local_artwork: bool | None = None
     scan_monitor_option: str | None = None
