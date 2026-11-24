@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 import requests
 
-from trackseerr.album_titles import album_titles_match, strip_edition
+from trackseerr.album_titles import album_titles_match, is_placeholder_album_title, strip_edition
 from trackseerr.compilation_filing import (
     ensure_release_group_album,
     file_album_under_various,
@@ -358,6 +358,11 @@ def apply_match(
     album = db.get_library_album(album_id)
     if album is None:
         raise ValueError("Album not found")
+    if is_placeholder_album_title(album.get("title")):
+        raise ValueError(
+            "Albums named Unknown Album hold songs from different releases and can't be linked as one; "
+            "Library Self-Heal files each song on its own"
+        )
     if str(album.get("mb_release_group_id") or "").strip():
         raise ValueError("Album already has a MusicBrainz release group")
     rg_id = str(group.get("id") or "").strip()
@@ -422,6 +427,11 @@ def _recordings_from(candidate: dict[str, Any]) -> dict[str, str]:
 
 def _auto_one(db: Any, enricher: Any, album_id: str, counts: dict[str, int]) -> bool:
     """Handles one album; returns True when MusicBrainz was unavailable for it."""
+    album = db.get_library_album(album_id)
+    if album is not None and is_placeholder_album_title(album.get("title")):
+        db.delete_match_suggestion(album_id)
+        counts["no_candidates"] += 1
+        return False
     result = suggest_matches(db, enricher, album_id, limit=3)
     if result.get("unavailable"):
         counts["unavailable"] += 1

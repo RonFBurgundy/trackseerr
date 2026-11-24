@@ -14,7 +14,7 @@ from tests.test_recording_search import _resp
 from trackseerr.album_track_hydration import clear_negative_cache
 from trackseerr.api.dependencies import get_mbid_enricher
 from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, MbidEnricherClient
-from trackseerr.match_suggestions import apply_match, suggest_matches
+from trackseerr.match_suggestions import apply_match, auto_match_unlinked, suggest_matches
 from trackseerr.storage import Database
 
 BOB = "Bob Marley vs. Funkstar De Luxe"
@@ -485,3 +485,28 @@ def test_apply_route_links_album(app_and_client, test_db, test_config, seeded_us
     assert res.status_code == 200
     assert res.json() == {"album_id": "alb-un", "merged": False, "conflict": False}
     assert test_db.get_library_album("alb-un")["mb_release_group_id"] == "rg-hits"
+
+
+def test_apply_match_rejects_placeholder_album(db: Database, tmp_path: Path) -> None:
+    _seed_album(db, tmp_path, "alb-ph", "Unknown Album", [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    enricher = _enricher({"rec-bob": [HITS]}, {"rg-hits": HITS_TRACKS})
+
+    with pytest.raises(ValueError, match="Unknown Album"):
+        apply_match(db, enricher, "alb-ph", HITS, {"alb-ph-1": "rec-bob"})
+
+    assert db.get_library_album("alb-ph")["mb_release_group_id"] in (None, "")
+
+
+def test_auto_match_skips_placeholder_album(db: Database, tmp_path: Path) -> None:
+    _seed_album(db, tmp_path, "alb-ph", "Unknown Album", [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    enricher = _enricher({"rec-bob": [HITS]}, {"rg-hits": HITS_TRACKS})
+
+    counts = auto_match_unlinked(db, enricher)
+
+    assert counts["albums"] == 1
+    assert counts["no_candidates"] == 1
+    assert counts["applied"] == 0
+    assert counts["suggested"] == 0
+    enricher.get_recording_release_groups.assert_not_called()
+    enricher.search_release_groups.assert_not_called()
+    enricher.search_recordings.assert_not_called()

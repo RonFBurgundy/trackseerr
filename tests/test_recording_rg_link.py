@@ -10,7 +10,7 @@ import pytest
 
 from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID, MbidEnricherClient
 from trackseerr.models import LibraryAlbum, LibraryArtist, LibraryFile, LibraryTrack
-from trackseerr.release_matching import link_albums_by_recording
+from trackseerr.release_matching import link_albums_by_recording, repair_placeholder_albums
 from trackseerr.storage import Database
 
 
@@ -32,6 +32,9 @@ class FakeEnricher:
     def get_recording_release_groups(self, recording_id: str) -> list[dict[str, Any]]:
         self.calls.append(recording_id)
         return self.by_recording.get(recording_id, [])
+
+    def search_recordings(self, artist: str, title: str, limit: int = 10) -> list[dict[str, Any]]:
+        return []
 
 
 @pytest.fixture
@@ -171,3 +174,72 @@ def test_get_recording_release_groups_parses_and_dedupes() -> None:
     assert params["recording"] == "rec-1" and params["inc"] == "release-groups+artist-credits" and params["limit"] == 100
     client.get_recording_release_groups("rec-1")
     assert client._request.call_count == 1
+
+
+def test_placeholder_album_never_linked(db: Database, tmp_path: Path) -> None:
+    _album(db, tmp_path, "a1", "Unknown Album", "rec1")
+    db.upsert_library_track(
+        LibraryTrack(id="a1-t2", album_id="a1", artist_id="ar1", title="Song 2", track_number=2, mb_recording_id="rec2")
+    )
+    f2 = tmp_path / "a1-t2.flac"
+    f2.write_bytes(b"x")
+    db.upsert_library_file(LibraryFile(id="file-a1-t2", track_id="a1-t2", file_path=str(f2), relative_path=f2.name, codec="FLAC"))
+
+    va_group = {
+        "id": "rg-va",
+        "title": "Love Island Australia: The Pool Party",
+        "primary_type": "Album",
+        "secondary_types": ["Compilation"],
+        "first_release_date": "2020",
+        "is_various": True,
+        "artist_ids": [VARIOUS_ARTISTS_MBID],
+    }
+    enricher = FakeEnricher({"rec1": [va_group], "rec2": [va_group]})
+    counts = link_albums_by_recording(db, enricher)
+
+    assert counts["placeholder"] == 1
+    assert counts["linked"] == 0
+    assert counts["linked_by_agreement"] == 0
+    assert _rg_of(db, "a1") is None
+
+
+def test_repair_placeholder_album_unlinks_and_removes_wanted(db: Database, tmp_path: Path) -> None:
+    _album(db, tmp_path, "a-ph", "Unknown Album", "rec1", rg="rg-va")
+    for n in range(2, 5):
+        db.upsert_library_track(
+            LibraryTrack(id=f"a-ph-t{n}", album_id="a-ph", artist_id="ar1", title=f"Wanted {n}", track_number=n)
+        )
+    va_group = {
+        "id": "rg-va",
+        "title": "Love Island Australia",
+        "primary_type": "Album",
+        "secondary_types": ["Compilation"],
+        "first_release_date": "2020",
+        "is_various": True,
+        "artist_ids": [VARIOUS_ARTISTS_MBID],
+    }
+    enricher = FakeEnricher({"rec1": [va_group]})
+    counts = repair_placeholder_albums(db, enricher)
+
+    assert counts["albums"] == 1
+    assert counts["unlinked"] == 1
+    assert counts["wanted_removed"] == 3
+    assert _rg_of(db, "a-ph") is None
+    remaining_tracks = db.list_library_tracks(album_id="a-ph", limit=100)
+    assert len(remaining_tracks) == 1
+    assert remaining_tracks[0]["id"] == "a-ph-t1"
+    assert remaining_tracks[0]["has_file"]
+
+
+def test_repair_placeholder_leaves_normal_albums(db: Database, tmp_path: Path) -> None:
+    _album(db, tmp_path, "a-ok", "Hotel California", "rec1", rg="rg-hc")
+    db.upsert_library_track(
+        LibraryTrack(id="a-ok-t2", album_id="a-ok", artist_id="ar1", title="Wanted 2", track_number=2)
+    )
+    enricher = FakeEnricher({})
+    counts = repair_placeholder_albums(db, enricher)
+
+    assert counts["albums"] == 0
+    assert _rg_of(db, "a-ok") == "rg-hc"
+    assert len(db.list_library_tracks(album_id="a-ok", limit=100)) == 2
+    assert enricher.calls == []

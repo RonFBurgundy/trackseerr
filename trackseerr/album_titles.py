@@ -22,6 +22,13 @@ _TRAILING_JUNK = re.compile(
 
 _TRAILING_SINGLE_EP = re.compile(r"\s+[-–—]\s*(?:single|ep)\s*$", re.IGNORECASE)
 _TRAILING_YEAR = re.compile(r"\s*[\(\[]\s*(\d{4})\s*[\)\]]\s*$")
+_PLACEHOLDER_ALBUM_TITLES = frozenset({"", "unknown album", "unknown"})
+
+
+def is_placeholder_album_title(title: object) -> bool:
+    """Return True when title is empty or a generic placeholder like 'Unknown Album'."""
+    cleaned = _TRAILING_YEAR.sub("", str(title or "").strip()).strip()
+    return cleaned.casefold() in _PLACEHOLDER_ALBUM_TITLES
 
 _EDITION_WORDS = frozenset(
     {
