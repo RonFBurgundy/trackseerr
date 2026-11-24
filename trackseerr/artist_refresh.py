@@ -18,7 +18,7 @@ from trackseerr.track_matching import (
 )
 from trackseerr.clients.discovery import DiscoveryClient
 from trackseerr.album_track_hydration import album_hydration_lock
-from trackseerr.clients.mbid_enricher import MbidEnricherClient
+from trackseerr.clients.mbid_enricher import MbidEnricherClient, VARIOUS_ARTISTS_MBID
 from trackseerr.library_monitoring import (
     album_monitored_for_option,
     normalize_secondary_types,
@@ -976,43 +976,53 @@ def refresh_single_artist(  # noqa: C901
         source_unavailable=not enricher.source_available(),
     )
 
-    # 1. Enrich with MusicBrainz metadata and discography
-    if not st.source_unavailable and not st.mbid and not st.foreign_artist_id and st.artist_name:
-        _lookup_and_store_mbid(st, check_breaker=False)
-
-    if not st.source_unavailable and st.mbid:
-        try:
-            _apply_mb_artist_details(st)
-            if not st.source_unavailable:
-                _sync_mb_discography(st)
-            if st.discography_complete and not st.source_unavailable:
-                _apply_release_group_redirects(st)
-        except Exception as exc:
-            logger.warning("Error enriching artist %s via MusicBrainz: %s", st.artist_id, exc)
-        else:
-            st.db.finish_pending_profile_recompute(st.artist_id)
-
-    # 2. Retrieve discography and artwork from Deezer only if MusicBrainz discography was not found
-    if not st.mb_discography_found:
-        if not st.foreign_artist_id and st.artist_name:
-            _resolve_deezer_artist(st)
-
-        if st.foreign_artist_id:
-            _sync_deezer_discography(st)
-
-        # 3. Post-Deezer MusicBrainz metadata enrichment (bio, country, genres, and album release groups)
-        if not st.source_unavailable and not st.mbid and st.artist_name:
-            _lookup_and_store_mbid(st, check_breaker=True)
+    if str(st.mbid or "").lower() == VARIOUS_ARTISTS_MBID:
+        logger.info("Skipping discography for Various Artists")
+        if not st.source_unavailable:
+            try:
+                _apply_mb_artist_details(st)
+            except Exception as exc:
+                logger.warning("Error enriching artist %s via MusicBrainz: %s", st.artist_id, exc)
+            else:
+                st.db.finish_pending_profile_recompute(st.artist_id)
+    else:
+        # 1. Enrich with MusicBrainz metadata and discography
+        if not st.source_unavailable and not st.mbid and not st.foreign_artist_id and st.artist_name:
+            _lookup_and_store_mbid(st, check_breaker=False)
 
         if not st.source_unavailable and st.mbid:
             try:
                 _apply_mb_artist_details(st)
                 if not st.source_unavailable:
-                    _link_mb_release_groups(st)
+                    _sync_mb_discography(st)
+                if st.discography_complete and not st.source_unavailable:
+                    _apply_release_group_redirects(st)
             except Exception as exc:
                 logger.warning("Error enriching artist %s via MusicBrainz: %s", st.artist_id, exc)
             else:
                 st.db.finish_pending_profile_recompute(st.artist_id)
+
+        # 2. Retrieve discography and artwork from Deezer only if MusicBrainz discography was not found
+        if not st.mb_discography_found:
+            if not st.foreign_artist_id and st.artist_name:
+                _resolve_deezer_artist(st)
+
+            if st.foreign_artist_id:
+                _sync_deezer_discography(st)
+
+            # 3. Post-Deezer MusicBrainz metadata enrichment (bio, country, genres, and album release groups)
+            if not st.source_unavailable and not st.mbid and st.artist_name:
+                _lookup_and_store_mbid(st, check_breaker=True)
+
+            if not st.source_unavailable and st.mbid:
+                try:
+                    _apply_mb_artist_details(st)
+                    if not st.source_unavailable:
+                        _link_mb_release_groups(st)
+                except Exception as exc:
+                    logger.warning("Error enriching artist %s via MusicBrainz: %s", st.artist_id, exc)
+                else:
+                    st.db.finish_pending_profile_recompute(st.artist_id)
 
     # Cache artist poster & banner
     _cache_artist_artwork(st)

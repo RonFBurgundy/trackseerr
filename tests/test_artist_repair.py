@@ -540,3 +540,67 @@ def test_leading_the_does_not_make_an_id_look_wrong(db: Database):
     assert not _changes(counts) and enricher.lookup_calls == []
     assert db.conn.execute("SELECT mbid FROM library_artists WHERE id = 'bt'").fetchone()[0] == "beatles-id"
     assert _count(db, "SELECT COUNT(*) FROM library_albums WHERE id = 'wanted'") == 1
+
+
+def test_prune_va_albums_deletes_empty_unrequested(db: Database):
+    from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+    from trackseerr.models import LibraryFile, LibraryTrack
+
+    _artist(db, "va", "Various Artists", VARIOUS_ARTISTS_MBID)
+    _album(db, "va-empty", "va", "Empty Compilation")
+    _album(db, "va-owned", "va", "Owned Compilation")
+    db.upsert_library_track(
+        LibraryTrack(id="t-owned", album_id="va-owned", artist_id="va", title="Track 1", track_number=1)
+    )
+    db.upsert_library_file(
+        LibraryFile(
+            id="f-owned",
+            track_id="t-owned",
+            file_path="/m/t1.flac",
+            relative_path="t1.flac",
+            codec="FLAC",
+            quality_name="FLAC",
+            size_bytes=1,
+        )
+    )
+    _album(db, "va-req", "va", "Requested Compilation")
+    db.upsert_library_track(
+        LibraryTrack(id="t-req", album_id="va-req", artist_id="va", title="Track 2", track_number=1)
+    )
+    db.conn.execute("INSERT INTO users (id, username) VALUES ('u-1', 'tester')")
+    db.conn.execute(
+        "INSERT INTO music_requests (id, user_id, item_type, title, artist, catalog_track_id, status) "
+        "VALUES ('req-1', 'u-1', 'track', 'Track 2', 'Various Artists', 't-req', 'pending')"
+    )
+    _album(db, "va-hand", "va", "Hand Monitored Compilation")
+    db.conn.execute("UPDATE library_albums SET monitored_by_hand = 1 WHERE id = 'va-hand'")
+    db.conn.commit()
+
+    counts: dict[str, int] = {"va_albums_pruned": 0}
+    artist_repair.prune_various_artists_albums(db, counts)
+
+    assert counts["va_albums_pruned"] == 1
+    assert _count(db, "SELECT COUNT(*) FROM library_albums WHERE id = 'va-empty'") == 0
+    assert _count(db, "SELECT COUNT(*) FROM library_albums WHERE id = 'va-owned'") == 1
+    assert _count(db, "SELECT COUNT(*) FROM library_albums WHERE id = 'va-req'") == 1
+    assert _count(db, "SELECT COUNT(*) FROM library_albums WHERE id = 'va-hand'") == 1
+
+
+def test_prune_va_albums_ignores_other_artists(db: Database):
+    from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+
+    _artist(db, "va", "Various Artists", VARIOUS_ARTISTS_MBID)
+    _artist(db, "normal", "Normal Artist", "mbid-normal")
+    _album(db, "norm-empty", "normal", "Normal Empty Album")
+
+    counts: dict[str, int] = {"va_albums_pruned": 0}
+    artist_repair.prune_various_artists_albums(db, counts)
+
+    assert counts["va_albums_pruned"] == 0
+    assert _count(db, "SELECT COUNT(*) FROM library_albums WHERE id = 'norm-empty'") == 1
+
+
+def test_prune_va_albums_no_va_artist_noop(db: Database):
+    counts: dict[str, int] = {"va_albums_pruned": 0}
+    artist_repair.prune_various_artists_albums(db, counts)
+    assert counts["va_albums_pruned"] == 0
