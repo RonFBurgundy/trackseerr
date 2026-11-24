@@ -3494,6 +3494,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/library/wrong-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Wrong Files
+         * @description Lists fingerprinted library files whose audio mismatches their linked track.
+         */
+        get: operations["list_wrong_files_api_library_wrong_files_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/library/wrong-files/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Wrong Files Check Status
+         * @description Reports the progress of the current or last library-wide AcoustID check.
+         */
+        get: operations["wrong_files_check_status_api_library_wrong_files_check_get"];
+        put?: never;
+        /**
+         * Start Wrong Files Check
+         * @description Starts a background AcoustID check across every file in the library.
+         */
+        post: operations["start_wrong_files_check_api_library_wrong_files_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/library/{entity}/{entity_id}/history": {
         parameters: {
             query?: never;
@@ -15530,6 +15574,50 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /** WrongFileItem */
+        WrongFileItem: {
+            /** Actual Album Id */
+            actual_album_id?: string | null;
+            /** Actual Album Title */
+            actual_album_title?: string | null;
+            /** Actual Artist */
+            actual_artist?: string | null;
+            /** Actual Artist Name */
+            actual_artist_name?: string | null;
+            /** Actual Title */
+            actual_title?: string | null;
+            /** Actual Track Id */
+            actual_track_id?: string | null;
+            /** Actual Track Title */
+            actual_track_title?: string | null;
+            /** Album Id */
+            album_id?: string | null;
+            /** Album Title */
+            album_title: string;
+            /** Artist Name */
+            artist_name: string;
+            /** File Id */
+            file_id: string;
+            /** Relative Path */
+            relative_path?: string | null;
+            /** Score */
+            score?: number | null;
+            /** Track Id */
+            track_id: string;
+            /** Track Title */
+            track_title: string;
+        };
+        /** WrongFilesResponse */
+        WrongFilesResponse: {
+            /** Checked */
+            checked: number;
+            /** Items */
+            items: components["schemas"]["WrongFileItem"][];
+            /** Library Files */
+            library_files: number;
+            /** Total */
+            total: number;
+        };
         /** DeletedResponse */
         trackseerr__api__schemas__delay_profiles__DeletedResponse: {
             /** Id */
@@ -21711,6 +21799,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_wrong_files_api_library_wrong_files_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WrongFilesResponse"];
+                };
+            };
+        };
+    };
+    wrong_files_check_status_api_library_wrong_files_check_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenameVerifyStatus"];
+                };
+            };
+        };
+    };
+    start_wrong_files_check_api_library_wrong_files_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RenameVerifyStatus"];
                 };
             };
         };
