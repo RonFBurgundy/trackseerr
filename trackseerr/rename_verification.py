@@ -6,6 +6,7 @@ No FastAPI imports: the (later) routes call ``start_verification`` and poll ``ge
 
 from __future__ import annotations
 
+import concurrent.futures
 import logging
 import os
 import re
@@ -47,6 +48,7 @@ def _same_song(a: str, b: str) -> bool:
 RISKY_REASONS = frozenset({TRACK_NUMBER, FILE_TITLE, ALBUM_TITLE, ALBUM_YEAR, DISC_LAYOUT, COLLISION})
 KEY_REJECTED_MESSAGE = "AcoustID rejected the API key"
 UNAVAILABLE_MESSAGE = "Audio fingerprinting is unavailable (fpcalc / pyacoustid missing)"
+VERIFY_WORKERS = 3
 
 
 def is_risky(reasons: list[str]) -> bool:
@@ -219,28 +221,68 @@ def _key_rejected(fp_row: Optional[dict[str, Any]]) -> bool:
     return "invalid api key" in str(fp_row.get("error") or "").lower()
 
 
+def _verify_rest_parallel(
+    db: Any,
+    file_ids: list[str],
+    api_key: str,
+    should_stop: Optional[Callable[[], bool]],
+) -> None:
+    """Verifies remaining files with a bounded thread pool and lazy submission."""
+    if not file_ids:
+        return
+    max_in_flight = VERIFY_WORKERS * 2
+    pending_ids = iter(file_ids)
+    in_flight: set[concurrent.futures.Future[Any]] = set()
+    stop_submitting = False
+    unavailable = False
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=VERIFY_WORKERS) as executor:
+        while True:
+            while not stop_submitting and len(in_flight) < max_in_flight:
+                if should_stop and should_stop():
+                    stop_submitting = True
+                    break
+                next_id = next(pending_ids, None)
+                if next_id is None:
+                    stop_submitting = True
+                    break
+                in_flight.add(executor.submit(_verify_one, db, next_id, api_key))
+
+            if not in_flight:
+                break
+
+            done, in_flight = concurrent.futures.wait(
+                in_flight, return_when=concurrent.futures.FIRST_COMPLETED
+            )
+            for fut in done:
+                try:
+                    fut.result()
+                except FingerprintUnavailable:
+                    unavailable = True
+                    stop_submitting = True
+
+    if unavailable:
+        raise FingerprintUnavailable()
+
+
 def run_verification(
     db: Any,
     file_ids: list[str],
     api_key: str,
     should_stop: Optional[Callable[[], bool]] = None,
 ) -> dict[str, Any]:
-    """Verifies the given files one by one (blocking) and returns the final counts."""
+    """Verifies the given files (first synchronously for key validation, rest in parallel) and returns final counts."""
     with _state_lock:
         _state.clear()
         _state.update(_fresh_state(total=len(file_ids), running=True))
     try:
-        first_lookup_pending = True
-        for file_id in file_ids:
-            if should_stop and should_stop():
-                break
-            fp_row = _verify_one(db, file_id, api_key)
-            if first_lookup_pending and fp_row and not fp_row.get("cached") and fp_row.get("error") != "file missing":
-                first_lookup_pending = False
-                if _key_rejected(fp_row):
-                    with _state_lock:
-                        _state["message"] = KEY_REJECTED_MESSAGE
-                    break
+        if file_ids and not (should_stop and should_stop()):
+            fp_row = _verify_one(db, file_ids[0], api_key)
+            if fp_row and not fp_row.get("cached") and fp_row.get("error") != "file missing" and _key_rejected(fp_row):
+                with _state_lock:
+                    _state["message"] = KEY_REJECTED_MESSAGE
+            else:
+                _verify_rest_parallel(db, file_ids[1:], api_key, should_stop)
     except FingerprintUnavailable:
         with _state_lock:
             _state["message"] = UNAVAILABLE_MESSAGE

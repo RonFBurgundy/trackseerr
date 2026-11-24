@@ -329,3 +329,39 @@ def test_sync_youtube_music_loads_source_tracks(test_db, test_config):
     stored = json.loads(test_db.get_playlist(yt_id)["tracks_json"])
     assert len(stored) == 1
     assert stored[0]["title"] == "Live YT Song"
+
+
+def test_list_playlists_accepts_admin_api_key(app_and_client, test_db):
+    _, client = app_and_client
+    test_db.upsert_playlist(
+        playlist_id=PL_ID,
+        name="Mix",
+        service="spotify",
+        tracks_json=json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]),
+        creator_id="user-alice",
+    )
+    api_key = test_db.get_api_key()
+
+    assert client.get("/api/playlists").status_code == 401
+    resp = client.get("/api/playlists", headers={"X-Api-Key": api_key})
+    assert resp.status_code == 200
+    assert any(p["id"] == PL_ID for p in resp.json())
+
+
+def test_playlist_tracks_accepts_admin_api_key(app_and_client, test_db):
+    _, client = app_and_client
+    test_db.upsert_playlist(
+        playlist_id=PL_ID,
+        name="Mix",
+        service="spotify",
+        tracks_json=json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]),
+        creator_id="user-alice",
+    )
+    api_key = test_db.get_api_key()
+
+    assert client.get(f"/api/playlists/{PL_ID}/tracks").status_code == 401
+    resp = client.get(f"/api/playlists/{PL_ID}/tracks", headers={"X-Api-Key": api_key})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert [t["title"] for t in body["tracks"]] == ["Song 1"]

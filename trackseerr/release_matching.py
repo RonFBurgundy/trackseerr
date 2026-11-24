@@ -543,11 +543,21 @@ def _repair_one_placeholder_album(db: Any, enricher: Any, album: dict[str, Any],
         db.set_album_mb_release_id(album_id, "")
         counts["unlinked"] += 1
 
+    artist = db.get_library_artist(str(album["artist_id"])) or {}
+    artist_name = str(artist.get("name") or "")
+    album_path = str(album.get("path") or "")
     tracks = db.list_library_tracks(album_id=album_id, limit=1000)
     for track in tracks:
         if not track.get("has_file"):
             db.delete_library_track(str(track["id"]))
             counts["wanted_removed"] += 1
+            logger.info(
+                "Unknown Album repair: removed wanted '%s – %s' from album %s (%s)",
+                artist_name,
+                str(track.get("title") or ""),
+                album_id,
+                album_path,
+            )
 
     album = _move_va_placeholder_to_folder_artist(db, album, album_id, counts)
 

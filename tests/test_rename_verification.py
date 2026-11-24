@@ -2,6 +2,7 @@
 
 import os
 import threading
+import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Iterator
@@ -381,3 +382,29 @@ def test_start_verification_refuses_second_run(lib: Database) -> None:
         for t in threading.enumerate():
             if t.name == "rename-verify":
                 t.join(5)
+
+
+def test_run_verification_parallel_counts_all_files(lib: Database, tmp_path: Path) -> None:
+    files = [_file(lib, tmp_path, f"fp{i}", f"tp{i}", R1) for i in range(10)]
+    ids = [f["id"] for f in files]
+
+    def slow_verify(_db: Any, file_row: dict[str, Any], _api_key: str) -> dict[str, Any]:
+        time.sleep(0.05)
+        return {
+            "file_path": file_row["file_path"],
+            "status": "ok",
+            "cached": False,
+            "matches": [{"recording_id": R1, "title": "Song", "artist": "Artist", "score": 0.95}],
+        }
+
+    with patch.object(rv, "verify_file", side_effect=slow_verify):
+        t0 = time.monotonic()
+        counts = rv.run_verification(lib, ids, "k")
+        elapsed = time.monotonic() - t0
+
+    assert counts["running"] is False
+    assert counts["total"] == 10
+    assert counts["done"] == 10
+    assert counts["verified"] == 10
+    assert counts["errors"] == 0
+    assert elapsed < 10 * 0.05

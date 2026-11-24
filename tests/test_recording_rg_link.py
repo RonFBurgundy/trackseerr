@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Optional
 from unittest.mock import MagicMock
@@ -203,7 +204,9 @@ def test_placeholder_album_never_linked(db: Database, tmp_path: Path) -> None:
     assert _rg_of(db, "a1") is None
 
 
-def test_repair_placeholder_album_unlinks_and_removes_wanted(db: Database, tmp_path: Path) -> None:
+def test_repair_placeholder_album_unlinks_and_removes_wanted(
+    db: Database, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     _album(db, tmp_path, "a-ph", "Unknown Album", "rec1", rg="rg-va")
     for n in range(2, 5):
         db.upsert_library_track(
@@ -219,11 +222,14 @@ def test_repair_placeholder_album_unlinks_and_removes_wanted(db: Database, tmp_p
         "artist_ids": [VARIOUS_ARTISTS_MBID],
     }
     enricher = FakeEnricher({"rec1": [va_group]})
-    counts = repair_placeholder_albums(db, enricher)
+    with caplog.at_level(logging.INFO, logger="trackseerr.release_matching"):
+        counts = repair_placeholder_albums(db, enricher)
 
     assert counts["albums"] == 1
     assert counts["unlinked"] == 1
     assert counts["wanted_removed"] == 3
+    for n in range(2, 5):
+        assert f"Unknown Album repair: removed wanted 'Eagles – Wanted {n}' from album a-ph ()" in caplog.text
     assert _rg_of(db, "a-ph") is None
     remaining_tracks = db.list_library_tracks(album_id="a-ph", limit=100)
     assert len(remaining_tracks) == 1
