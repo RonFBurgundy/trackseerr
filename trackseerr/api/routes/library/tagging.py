@@ -787,6 +787,21 @@ def _resolve_track_artist_and_mbid(
     return tag_artist_from_credits(credits, title, m_settings)
 
 
+def _resolve_retag_album_artist(
+    db: Database,
+    enricher: Any,
+    album: dict[str, Any],
+    artist: dict[str, Any],
+    media_settings: dict[str, Any] | None,
+    base_mbid: str | None,
+) -> tuple[str, str | None]:
+    """Return (album_artist, album_artist_mbid), clearing the MBID when series/label overrides."""
+    display_artist = compilation_display_artist(db, enricher, album, artist, media_settings or {})
+    if display_artist:
+        return display_artist, ""
+    return artist["name"], base_mbid
+
+
 def _evaluate_file_retag(
     db: Database,
     t: dict[str, Any],
@@ -832,13 +847,16 @@ def _evaluate_file_retag(
         if discs_cache is not None:
             discs_cache[alb_id] = total_discs
 
-    album_artist_mbid = _resolve_retag_album_artist_mbid(db, album, artist, artist_cache)
+    base_mbid = _resolve_retag_album_artist_mbid(db, album, artist, artist_cache)
+    album_artist_name, album_artist_mbid = _resolve_retag_album_artist(
+        db, enricher, album, artist, media_settings, base_mbid
+    )
 
     track_artist, track_mbid = _resolve_track_artist_and_mbid(db, t["id"], t["title"], media_settings)
 
     proposed_tags = build_tags_to_write(
         artist=track_artist or artist["name"],
-        album_artist=compilation_display_artist(db, enricher, album, artist, media_settings or {}) or artist["name"],
+        album_artist=album_artist_name,
         album=album["title"],
         title=t["title"],
         date=album.get("release_date") or album.get("year"),
@@ -1114,9 +1132,12 @@ def _retag_one_file(
             run.db, track["id"], track["title"], run.media_settings
         )
 
+        album_artist_name, album_artist_mbid = _resolve_retag_album_artist(
+            run.db, run.enricher, album, artist, run.media_settings, album_artist_mbid
+        )
         tags_to_write = build_tags_to_write(
             artist=track_artist or artist["name"],
-            album_artist=compilation_display_artist(run.db, run.enricher, album, artist, run.media_settings) or artist["name"],
+            album_artist=album_artist_name,
             album=album["title"],
             title=track["title"],
             date=album.get("release_date") or album.get("year"),

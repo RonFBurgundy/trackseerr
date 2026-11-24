@@ -1255,7 +1255,7 @@ def test_retag_without_credits_keeps_album_artist(
 def test_retag_preview_uses_compilation_album_artist_when_series_label_enabled(
     app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
 ):
-    """VA compilation preview proposes derived albumartist while keeping track artist and VA MBID."""
+    """VA compilation preview proposes derived albumartist while keeping track artist and removing VA MBID."""
     from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
 
     app, client = app_and_client
@@ -1270,6 +1270,7 @@ def test_retag_preview_uses_compilation_album_artist_when_series_label_enabled(
         "date": "2013-03-12",
         "tracknumber": 1,
         "totaltracks": 14,
+        "musicbrainz_albumartistid": VARIOUS_ARTISTS_MBID,
     }
     _catalog, file_path = _setup_library_track(
         test_db,
@@ -1303,9 +1304,9 @@ def test_retag_preview_uses_compilation_album_artist_when_series_label_enabled(
         diffs_various = {d["field"]: d for d in resp_various.json()[0]["diffs"]}
         assert diffs_various["albumartist"]["proposed"] == "Various Artists"
         assert diffs_various["artist"]["proposed"] == "Wilkinson"
-        assert diffs_various["musicbrainz_albumartistid"]["proposed"] == VARIOUS_ARTISTS_MBID
+        assert "musicbrainz_albumartistid" not in diffs_various
 
-        # Setting "series_label" -> proposes "UKF Drum & Bass" and keeps track artist + VA MBID
+        # Setting "series_label" -> proposes "UKF Drum & Bass", keeps track artist, removes VA MBID
         test_db.update_media_management_settings({"compilation_album_artist": "series_label"})
         resp_series = client.post(
             "/api/library/retag/preview",
@@ -1316,9 +1317,10 @@ def test_retag_preview_uses_compilation_album_artist_when_series_label_enabled(
         diffs_series = {d["field"]: d for d in resp_series.json()[0]["diffs"]}
         assert diffs_series["albumartist"]["proposed"] == "UKF Drum & Bass"
         assert diffs_series["artist"]["proposed"] == "Wilkinson"
-        assert diffs_series["musicbrainz_albumartistid"]["proposed"] == VARIOUS_ARTISTS_MBID
+        assert diffs_series["musicbrainz_albumartistid"]["current"] == VARIOUS_ARTISTS_MBID
+        assert not diffs_series["musicbrainz_albumartistid"]["proposed"]
 
-        # Apply writes derived albumartist to disk while keeping track artist and VA MBID
+        # Apply writes derived albumartist to disk while keeping track artist and removing VA MBID
         apply_resp = client.post(
             "/api/library/retag/apply",
             json={"file_ids": ["fl-1"]},
@@ -1329,7 +1331,97 @@ def test_retag_preview_uses_compilation_album_artist_when_series_label_enabled(
         meta = inspect_audio_file(file_path)
         assert meta["album_artist"] == "UKF Drum & Bass"
         assert meta["artist"] == "Wilkinson"
-        assert meta["musicbrainz_albumartistid"] == VARIOUS_ARTISTS_MBID
+        assert not meta["musicbrainz_albumartistid"]
+
+
+def test_retag_series_label_second_preview_is_empty(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    """After applying series_label retag, a second preview has no musicbrainz_albumartistid diff."""
+    from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    music_dir = tmp_path / "music"
+
+    initial_tags = {
+        "artist": "Old Artist",
+        "albumartist": "Old Album Artist",
+        "album": "UKF Drum & Bass 2013",
+        "title": "Take You Higher",
+        "date": "2013-03-12",
+        "tracknumber": 1,
+        "totaltracks": 14,
+        "musicbrainz_albumartistid": VARIOUS_ARTISTS_MBID,
+    }
+    _setup_library_track(
+        test_db,
+        music_dir,
+        artist_name="Various Artists",
+        artist_mbid=VARIOUS_ARTISTS_MBID,
+        album_title="UKF Drum & Bass 2013",
+        track_title="Take You Higher",
+        year=2013,
+        initial_tags=initial_tags,
+    )
+    test_db.replace_track_artists(
+        "trk-1",
+        [{"artist_name": "Wilkinson", "artist_mbid": "mbid-wilkinson", "join_phrase": ""}],
+    )
+    test_db.update_media_management_settings({"compilation_album_artist": "series_label"})
+
+    mock_enricher = MagicMock()
+    mock_enricher.get_release_group_identity.return_value = {"series": [], "labels": []}
+
+    with patch(
+        "trackseerr.api.routes.library.tagging.get_shared_enricher",
+        return_value=mock_enricher,
+    ):
+        apply_resp = client.post(
+            "/api/library/retag/apply",
+            json={"file_ids": ["fl-1"]},
+            headers=admin_headers,
+        )
+        assert apply_resp.status_code == 200
+
+        p2 = client.post(
+            "/api/library/retag/preview",
+            json={"album_id": "alb-1"},
+            headers=admin_headers,
+        )
+        assert p2.status_code == 200
+        assert p2.json() == []
+
+
+@pytest.mark.parametrize("fmt", ["flac", "mp3"])
+def test_write_audio_tags_empty_albumartist_id_removes_tag(tmp_path: Path, fmt: str):
+    """Writing musicbrainz_albumartistid='' removes the tag while None leaves it untouched."""
+    from trackseerr.library import write_audio_tags
+
+    if fmt == "flac":
+        path = tmp_path / "test.flac"
+        _create_minimal_flac(path)
+    else:
+        from tests.test_library_quality_fixes import make_mp3
+
+        path = make_mp3(tmp_path / "test.mp3")
+
+    write_audio_tags(
+        path,
+        {"artist": "Wilkinson", "album": "UKF", "musicbrainz_albumartistid": "x-mbid"},
+    )
+    assert inspect_audio_file(path)["musicbrainz_albumartistid"] == "x-mbid"
+
+    # None leaves existing ID untouched
+    write_audio_tags(path, {"artist": "Wilkinson", "musicbrainz_albumartistid": None})
+    assert inspect_audio_file(path)["musicbrainz_albumartistid"] == "x-mbid"
+
+    # Empty string removes the tag while preserving other tags
+    write_audio_tags(path, {"musicbrainz_albumartistid": ""})
+    meta = inspect_audio_file(path)
+    assert not meta["musicbrainz_albumartistid"]
+    assert meta["artist"] == "Wilkinson"
+    assert meta["album"] == "UKF"
 
 
 
