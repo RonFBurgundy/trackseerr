@@ -1412,14 +1412,36 @@ class LibraryCatalogStoreMixin:
 
     def delete_library_track(self, track_id: str) -> bool:
         """Deletes a library track and cascades to child files (history is kept)."""
+        tid = str(track_id)
         with self._lock:
-            self._emit_removed("track", str(track_id))
+            self._emit_removed("track", tid)
+            self.conn.execute(
+                "UPDATE active_downloads SET track_id = NULL WHERE track_id = ?",
+                (tid,),
+            )
+            self.conn.execute(
+                "UPDATE music_requests SET catalog_track_id = NULL, catalog_album_id = NULL, "
+                "catalog_seeded_at = NULL, catalog_seed_status = NULL WHERE catalog_track_id = ?",
+                (tid,),
+            )
             cur = self.conn.execute(
                 "DELETE FROM library_tracks WHERE id = ?",
-                (str(track_id),),
+                (tid,),
             )
             self.conn.commit()
             return cur.rowcount > 0
+
+    def reset_requests_with_missing_catalog_track(self) -> int:
+        """Clears stale catalog links on requests whose target track no longer exists."""
+        with self._lock:
+            cur = self.conn.execute(
+                "UPDATE music_requests SET catalog_track_id = NULL, catalog_album_id = NULL, "
+                "catalog_seeded_at = NULL, catalog_seed_status = NULL "
+                "WHERE catalog_track_id IS NOT NULL "
+                "AND catalog_track_id NOT IN (SELECT id FROM library_tracks)"
+            )
+            self.conn.commit()
+            return int(cur.rowcount)
 
     def set_track_monitored(self, track_id: str, monitored: bool) -> bool:
         """Sets monitoring status for a single library track."""

@@ -956,3 +956,20 @@ def test_unmatched_request_not_retried_within_a_day(test_db: Database) -> None:
 
     due = test_db.list_requests_needing_catalog()
     assert [r["id"] for r in due] == []
+
+
+def test_delete_track_requeues_request(test_db: Database) -> None:
+    test_db.upsert_library_artist(LibraryArtist(id="art-del", name="Artist", monitored=True))
+    test_db.upsert_library_album(LibraryAlbum(id="alb-del", artist_id="art-del", title="Unknown Album"))
+    test_db.upsert_library_track(
+        LibraryTrack(id="trk-del", album_id="alb-del", artist_id="art-del", title="Song", track_number=1)
+    )
+    _create_req(test_db, req_id="req-del", artist="Artist", title="Song")
+    test_db.set_request_catalog("req-del", status="seeded", track_id="trk-del", album_id="alb-del")
+    assert [r["id"] for r in test_db.list_requests_needing_catalog()] == []
+
+    assert test_db.delete_library_track("trk-del") is True
+
+    due = test_db.list_requests_needing_catalog()
+    assert [r["id"] for r in due] == ["req-del"]
+    assert due[0]["catalog_track_id"] is None
