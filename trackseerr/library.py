@@ -614,7 +614,10 @@ def _write_flac_tags(  # noqa: C901
         audio["totaldiscs"] = [str(vals.total_discs)]
     if vals.mb_artist is not None:
         audio["musicbrainz_artistid"] = [str(vals.mb_artist)]
-    if vals.mb_albumartist is not None:
+    if vals.mb_albumartist == "":
+        if "musicbrainz_albumartistid" in audio:
+            del audio["musicbrainz_albumartistid"]
+    elif vals.mb_albumartist is not None:
         audio["musicbrainz_albumartistid"] = [str(vals.mb_albumartist)]
     if vals.mb_album is not None:
         audio["musicbrainz_albumid"] = [str(vals.mb_album)]
@@ -669,7 +672,9 @@ def _write_mp3_tags(
         ("TXXX:MusicBrainz Release Group Id", "MusicBrainz Release Group Id", vals.mb_releasegroup),
     )
     for tag_id, desc, val in txxx_frames:
-        if val is not None:
+        if val == "":
+            audio.tags.delall(tag_id)
+        elif val is not None:
             audio.tags.setall(tag_id, [TXXX(encoding=3, desc=desc, text=[str(val)])])
     if vals.mb_track is not None:
         audio.tags.setall(
@@ -728,7 +733,10 @@ def _write_mp4_tags(  # noqa: C901
 
     if vals.mb_artist is not None:
         audio["----:com.apple.iTunes:MusicBrainz Artist Id"] = [str(vals.mb_artist).encode("utf-8")]
-    if vals.mb_albumartist is not None:
+    if vals.mb_albumartist == "":
+        if "----:com.apple.iTunes:MusicBrainz Album Artist Id" in audio:
+            del audio["----:com.apple.iTunes:MusicBrainz Album Artist Id"]
+    elif vals.mb_albumartist is not None:
         audio["----:com.apple.iTunes:MusicBrainz Album Artist Id"] = [str(vals.mb_albumartist).encode("utf-8")]
     if vals.mb_album is not None:
         audio["----:com.apple.iTunes:MusicBrainz Album Id"] = [str(vals.mb_album).encode("utf-8")]
@@ -785,7 +793,10 @@ def _write_ogg_tags(  # noqa: C901
         audio["totaldiscs"] = [str(vals.total_discs)]
     if vals.mb_artist is not None:
         audio["musicbrainz_artistid"] = [str(vals.mb_artist)]
-    if vals.mb_albumartist is not None:
+    if vals.mb_albumartist == "":
+        if "musicbrainz_albumartistid" in audio:
+            del audio["musicbrainz_albumartistid"]
+    elif vals.mb_albumartist is not None:
         audio["musicbrainz_albumartistid"] = [str(vals.mb_albumartist)]
     if vals.mb_album is not None:
         audio["musicbrainz_albumid"] = [str(vals.mb_album)]
