@@ -746,3 +746,154 @@ def test_out_of_various_search_no_candidate_stays(db: Database, tmp_path: Path):
     assert counts["errors"] == 0
     album = db.get_library_album("alb-va")
     assert album is not None and album["artist_id"] == va_id
+
+
+def test_out_of_various_counts_search_no_results(db: Database, tmp_path: Path, caplog):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    enricher = _enricher({"rec-va-only": [NOW_44]}, search_results={("Bob Marley", "Could I Be In Love"): []})
+
+    with caplog.at_level("INFO", logger="trackseerr.compilation_filing"):
+        counts = refile_out_of_various(db, enricher)
+
+    assert counts["left_search_no_results"] == 1
+    assert any(
+        "Could I Be In Love" in r.message and "release groups=1, own-artist groups=0" in r.message
+        for r in caplog.records
+    )
+
+
+def test_out_of_various_counts_search_artist_mismatch(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    other_home = _group("rg-other", "Other", artist_ids=[ALICE_MBID])
+    enricher = _enricher(
+        {"rec-va-only": [NOW_44], "rec-other": [other_home]},
+        search_results={
+            ("Bob Marley", "Could I Be In Love"): [
+                {
+                    "id": "rec-other",
+                    "title": "Could I Be In Love",
+                    "score": 100,
+                    "artist_ids": [ALICE_MBID],
+                    "artist_names": ["Bob Marley"],
+                    "artist_credit": "Bob Marley",
+                }
+            ]
+        },
+    )
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["left_search_artist_mismatch"] == 1
+
+
+def test_out_of_various_counts_no_credit(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    enricher = _enricher({"rec-va-only": [NOW_44]})
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["left_no_credit"] == 1
+
+
+def test_out_of_various_counts_no_recording(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Mystery Track", "rec_id": None}],
+        rg_id=None, artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    enricher = _enricher({})
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["left_no_recording"] == 1
+
+
+def test_out_of_various_counts_duplicate(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-home", "Exodus",
+        [{"num": 5, "title": "Could I Be In Love", "rec_id": "rec-bob"}],
+        rg_id="rg-home", artist_id="artist-bob", artist_name="Bob Marley", artist_mbid=BOB_MBID,
+    )
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Bob Marley", "artist_mbid": BOB_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    home_group = _group("rg-home", "Exodus", artist_ids=[BOB_MBID])
+    enricher = _enricher({"rec-bob": [NOW_44, home_group]})
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["left_duplicate"] == 1
+    assert counts["merge_conflict"] == 1
+
+
+def test_out_of_various_counts_wrong_link_mixed_performers(db: Database, tmp_path: Path):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-oblivion", "Oblivion",
+        [
+            {"num": 1, "title": "Oblivion", "rec_id": "rec-obl"},
+            {"num": 2, "title": "Other", "rec_id": "rec-other"},
+        ],
+        rg_id="rg-oblivion", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists("alb-oblivion-1", [
+        {"artist_name": "Andromedik", "artist_mbid": ANDROMEDIK_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    db.replace_track_artists("alb-oblivion-2", [
+        {"artist_name": "Alice", "artist_mbid": ALICE_MBID, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    oblivion = _group("rg-oblivion", "Oblivion", artist_ids=[ANDROMEDIK_MBID], various=False)
+    enricher = _enricher({"rec-obl": [oblivion], "rec-other": [oblivion]})
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["left_wrong_link_mixed_performers"] == 1
+    assert counts["skipped"] == 1
+    album = db.get_library_album("alb-oblivion")
+    assert album is not None and album["artist_id"] == va_id
+
+
+def test_file_tracks_under_home_without_flag_adds_no_left_counts(db: Database, tmp_path: Path):
+    from trackseerr.compilation_filing import file_tracks_under_home
+
+    _seed_album(
+        db, tmp_path, "alb-bob", "Unknown",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-va-only"}],
+        rg_id=None, artist_id="artist-bob", artist_name="Bob Marley", artist_mbid=BOB_MBID,
+    )
+    album = db.get_library_album("alb-bob")
+    assert album is not None
+    counts = {"filed_home": 0, "merge_conflict": 0}
+    enricher = _enricher({"rec-va-only": [NOW_44]})
+
+    file_tracks_under_home(db, enricher, album, {"rec-va-only": [NOW_44]}, counts, per_track_artist=False)
+
+    assert not any(k.startswith("left_") for k in counts)

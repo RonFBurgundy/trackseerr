@@ -194,6 +194,26 @@ def _primary_track_credit(db: Any, track_id: str) -> Optional[dict[str, Any]]:
     return min(credits, key=lambda c: (c.get("position") is None, int(c.get("position") or 0)))
 
 
+def _note_left(
+    counts: dict[str, int],
+    album: dict[str, Any],
+    track: dict[str, Any],
+    reason: str,
+    detail: str = "",
+) -> None:
+    key = f"left_{reason}"
+    counts[key] = counts.get(key, 0) + 1
+    suffix = f" ({detail})" if detail else ""
+    logger.info(
+        "Out of Various Artists: left %r (%s) on %r: %s%s",
+        track.get("title"),
+        track.get("id"),
+        album.get("title"),
+        reason,
+        suffix,
+    )
+
+
 def _artist_for_mbid(db: Any, mbid: str, name: str) -> Optional[dict[str, Any]]:
     """Library artist for an MBID, created unmonitored when missing and named; None without an MBID."""
     clean_mbid = str(mbid or "").strip()
@@ -227,43 +247,43 @@ def performer_artist(db: Any, track_id: str) -> Optional[dict[str, Any]]:
 
 def _search_home(
     db: Any, enricher: Any, track: dict[str, Any], credit: dict[str, Any]
-) -> Optional[tuple[dict[str, Any], dict[str, Any]]]:
+) -> tuple[Optional[tuple[dict[str, Any], dict[str, Any]]], str]:
     """Finds a track's performer artist and home release group via MusicBrainz recording search."""
     from trackseerr import recording_search
 
     name = str(credit.get("artist_name") or "").strip()
     title = str(track.get("title") or "")
     if not name or not title:
-        return None
+        return None, "search_no_name"
     candidates = enricher.search_recordings(name, title)
     if not candidates:
-        return None
+        return None, "search_no_results"
     cand = recording_search.pick_search_recording(candidates, title, name, track.get("duration_seconds"), set())
     if cand is None:
-        return None
+        return None, "search_no_pick"
     credit_mbid = str(credit.get("artist_mbid") or "").strip()
     cand_ids = [str(a).strip() for a in cand.get("artist_ids") or [] if str(a).strip()]
     if credit_mbid:
         if credit_mbid.lower() not in {a.lower() for a in cand_ids}:
-            return None
+            return None, "search_artist_mismatch"
         mbid = credit_mbid
     elif cand_ids:
         mbid = cand_ids[0]
     else:
-        return None
+        return None, "search_no_artist"
     cand_id = str(cand.get("id") or "").strip()
     if not cand_id:
-        return None
+        return None, "search_no_pick"
     groups = enricher.get_recording_release_groups(cand_id)
     home = home_release_group(groups or [], mbid, title)
     if home is None:
-        return None
+        return None, "search_no_home"
     cand_names = [str(n).strip() for n in cand.get("artist_names") or [] if str(n).strip()]
     artist_name = name if credit_mbid else (cand_names[0] if cand_names else name)
     artist = _artist_for_mbid(db, mbid, artist_name)
     if artist is None:
-        return None
-    return artist, home
+        return None, "no_performer_artist"
+    return (artist, home), ""
 
 
 def file_album_under_various(
@@ -292,8 +312,8 @@ def _resolve_per_track_target(
     track: dict[str, Any],
     per_rec_groups: dict[str, list[dict[str, Any]]],
     rec: str,
-) -> Optional[tuple[dict[str, Any], dict[str, Any], bool]]:
-    """Resolves (artist, home_group, from_search) for a track in per-track mode."""
+) -> tuple[Optional[tuple[dict[str, Any], dict[str, Any], bool]], str]:
+    """Resolves ((artist, home_group, from_search), reason) for a track in per-track mode."""
     title = str(track.get("title") or "")
     target_artist = performer_artist(db, str(track["id"]))
     home = (
@@ -302,14 +322,53 @@ def _resolve_per_track_target(
         else None
     )
     if target_artist is not None and home is not None:
-        return target_artist, home, False
+        return (target_artist, home, False), ""
     credit = _primary_track_credit(db, str(track["id"]))
     if credit is None:
-        return None
-    hit = _search_home(db, enricher, track, credit)
+        return None, "no_credit"
+    hit, reason = _search_home(db, enricher, track, credit)
     if hit is None:
-        return None
-    return hit[0], hit[1], True
+        return None, reason
+    return (hit[0], hit[1], True), ""
+
+
+def _file_one_track_home(
+    db: Any,
+    enricher: Any,
+    album: dict[str, Any],
+    track: dict[str, Any],
+    per_rec_groups: dict[str, list[dict[str, Any]]],
+    counts: dict[str, int],
+) -> bool:
+    """Files one track in per-track-artist mode; returns True when moved or conflict recorded."""
+    from trackseerr.artist_repair import move_track_into_album
+
+    if not track.get("has_file"):
+        return False
+    rec = str(track.get("mb_recording_id") or "").strip()
+    if not rec:
+        _note_left(counts, album, track, "no_recording")
+        return False
+    resolved, reason = _resolve_per_track_target(db, enricher, track, per_rec_groups, rec)
+    if resolved is None:
+        groups = per_rec_groups.get(rec, [])
+        own_count = sum(1 for g in groups if not g.get("is_various"))
+        _note_left(counts, album, track, reason, f"release groups={len(groups)}, own-artist groups={own_count}")
+        return False
+    target_artist, home, from_search = resolved
+    holder = ensure_release_group_album(db, enricher, str(target_artist["id"]), home)
+    if holder == str(album["id"]):
+        _note_left(counts, album, track, "already_home")
+        return False
+    if from_search:
+        counts["searched_home"] = counts.get("searched_home", 0) + 1
+    if move_track_into_album(db, str(track["id"]), holder) == "merged":
+        counts["filed_home"] = counts.get("filed_home", 0) + 1
+    else:
+        db.record_merge_conflict(str(album["id"]), holder, "duplicate_files")
+        counts["merge_conflict"] += 1
+        _note_left(counts, album, track, "duplicate", f"holder={holder}")
+    return True
 
 
 def file_tracks_under_home(
@@ -327,33 +386,30 @@ def file_tracks_under_home(
     """
     from trackseerr.artist_repair import move_track_into_album
 
+    tracks = db.list_library_tracks(album_id=album["id"], limit=1000)
+    if per_track_artist:
+        acted = False
+        for track in tracks:
+            if _file_one_track_home(db, enricher, album, track, per_rec_groups, counts):
+                acted = True
+        return acted
+
     album_artist_id = str(album["artist_id"])
-    album_artist = None if per_track_artist else (db.get_library_artist(album_artist_id) or {})
+    album_artist = db.get_library_artist(album_artist_id) or {}
     acted = False
-    for track in db.list_library_tracks(album_id=album["id"], limit=1000):
+    for track in tracks:
         rec = str(track.get("mb_recording_id") or "").strip()
         if not rec or not track.get("has_file"):
             continue
-        from_search = False
-        if per_track_artist:
-            resolved = _resolve_per_track_target(db, enricher, track, per_rec_groups, rec)
-            if resolved is None:
-                continue
-            target_artist, home, from_search = resolved
-            target_artist_id = str(target_artist["id"])
-        else:
-            target_artist_id = album_artist_id
-            home = home_release_group(
-                per_rec_groups.get(rec, []), (album_artist or {}).get("mbid"), str(track.get("title") or "")
-            )
-            if home is None:
-                continue
-        holder = ensure_release_group_album(db, enricher, target_artist_id, home)
+        home = home_release_group(
+            per_rec_groups.get(rec, []), album_artist.get("mbid"), str(track.get("title") or "")
+        )
+        if home is None:
+            continue
+        holder = ensure_release_group_album(db, enricher, album_artist_id, home)
         if holder == str(album["id"]):
             continue
         acted = True
-        if from_search:
-            counts["searched_home"] = counts.get("searched_home", 0) + 1
         if move_track_into_album(db, str(track["id"]), holder) == "merged":
             counts["filed_home"] = counts.get("filed_home", 0) + 1
         else:
@@ -458,12 +514,24 @@ def _move_wrongly_linked_album(
 ) -> None:
     sole_mbid = _sole_performer_mbid(db, owned_tracks)
     group_artists = {str(a).lower() for a in group.get("artist_ids") or []}
-    if sole_mbid is None or sole_mbid not in group_artists:
+    if sole_mbid is None:
+        reason = "wrong_link_mixed_performers"
         counts["skipped"] += 1
+        counts[f"left_{reason}"] = counts.get(f"left_{reason}", 0) + 1
+        logger.info("Out of Various Artists: left album %r: %s", album.get("title"), reason)
+        return
+    if sole_mbid not in group_artists:
+        reason = "wrong_link_performer_not_on_release"
+        counts["skipped"] += 1
+        counts[f"left_{reason}"] = counts.get(f"left_{reason}", 0) + 1
+        logger.info("Out of Various Artists: left album %r: %s", album.get("title"), reason)
         return
     artist = performer_artist(db, str(owned_tracks[0]["id"]))
     if artist is None:
+        reason = "wrong_link_no_artist"
         counts["skipped"] += 1
+        counts[f"left_{reason}"] = counts.get(f"left_{reason}", 0) + 1
+        logger.info("Out of Various Artists: left album %r: %s", album.get("title"), reason)
         return
     db.move_album_to_artist(str(album["id"]), str(artist["id"]))
     counts["moved_to_artist"] += 1
