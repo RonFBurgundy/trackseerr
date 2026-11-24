@@ -52,6 +52,20 @@ class FingerprintStoreMixin:
                 out[d["file_id"]] = d
         return out
 
+    def list_fingerprinted_files(self) -> list[dict[str, Any]]:
+        """All cached fingerprint rows joined with their library file and track."""
+        fp_cols = ", ".join(f"fp.{col.strip()}" for col in _COLUMNS.split(","))
+        with self._lock:
+            rows = self.conn.execute(
+                f"""
+                SELECT {fp_cols}, f.track_id, f.file_path AS current_path, f.relative_path
+                FROM file_fingerprints fp
+                JOIN library_files f ON f.id = fp.file_id
+                JOIN library_tracks t ON t.id = f.track_id
+                """
+            ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
     def upsert_file_fingerprint(self, row: dict[str, Any]) -> None:
         """Inserts or replaces the cached fingerprint for ``row["file_id"]``; ``matches`` (list) is stored as JSON."""
         with self._lock:

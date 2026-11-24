@@ -1824,6 +1824,14 @@ class LibraryCatalogStoreMixin:
             )
             return [self._map_library_file(row) for row in cur.fetchall()]
 
+    def list_library_file_ids(self) -> list[str]:
+        """Lists all library file ids ordered by date added."""
+        with self.reader() as conn:
+            rows = conn.execute(
+                "SELECT id FROM library_files ORDER BY date_added DESC"
+            ).fetchall()
+            return [str(r["id"]) for r in rows]
+
     def get_library_stats(self) -> dict[str, Any]:
         """Calculates aggregate statistics for the native library catalog."""
         with self.reader() as conn:
