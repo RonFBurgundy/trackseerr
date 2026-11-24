@@ -1252,4 +1252,85 @@ def test_retag_without_credits_keeps_album_artist(
     assert meta["album_artist"] == "Various Artists"
 
 
+def test_retag_preview_uses_compilation_album_artist_when_series_label_enabled(
+    app_and_client, test_db: Database, test_config: Config, seeded_users, tmp_path: Path
+):
+    """VA compilation preview proposes derived albumartist while keeping track artist and VA MBID."""
+    from trackseerr.clients.mbid_enricher import VARIOUS_ARTISTS_MBID
+
+    app, client = app_and_client
+    admin_headers = _auth_headers(seeded_users["admin"], test_db, test_config)
+    music_dir = tmp_path / "music"
+
+    initial_tags = {
+        "artist": "Old Artist",
+        "albumartist": "Old Album Artist",
+        "album": "UKF Drum & Bass 2013",
+        "title": "Take You Higher",
+        "date": "2013-03-12",
+        "tracknumber": 1,
+        "totaltracks": 14,
+    }
+    _catalog, file_path = _setup_library_track(
+        test_db,
+        music_dir,
+        artist_name="Various Artists",
+        artist_mbid=VARIOUS_ARTISTS_MBID,
+        album_title="UKF Drum & Bass 2013",
+        track_title="Take You Higher",
+        year=2013,
+        initial_tags=initial_tags,
+    )
+    test_db.replace_track_artists(
+        "trk-1",
+        [{"artist_name": "Wilkinson", "artist_mbid": "mbid-wilkinson", "join_phrase": ""}],
+    )
+
+    mock_enricher = MagicMock()
+    mock_enricher.get_release_group_identity.return_value = {"series": [], "labels": []}
+
+    with patch(
+        "trackseerr.api.routes.library.tagging.get_shared_enricher",
+        return_value=mock_enricher,
+    ):
+        # Default "various" -> proposes "Various Artists"
+        resp_various = client.post(
+            "/api/library/retag/preview",
+            json={"album_id": "alb-1"},
+            headers=admin_headers,
+        )
+        assert resp_various.status_code == 200
+        diffs_various = {d["field"]: d for d in resp_various.json()[0]["diffs"]}
+        assert diffs_various["albumartist"]["proposed"] == "Various Artists"
+        assert diffs_various["artist"]["proposed"] == "Wilkinson"
+        assert diffs_various["musicbrainz_albumartistid"]["proposed"] == VARIOUS_ARTISTS_MBID
+
+        # Setting "series_label" -> proposes "UKF Drum & Bass" and keeps track artist + VA MBID
+        test_db.update_media_management_settings({"compilation_album_artist": "series_label"})
+        resp_series = client.post(
+            "/api/library/retag/preview",
+            json={"album_id": "alb-1"},
+            headers=admin_headers,
+        )
+        assert resp_series.status_code == 200
+        diffs_series = {d["field"]: d for d in resp_series.json()[0]["diffs"]}
+        assert diffs_series["albumartist"]["proposed"] == "UKF Drum & Bass"
+        assert diffs_series["artist"]["proposed"] == "Wilkinson"
+        assert diffs_series["musicbrainz_albumartistid"]["proposed"] == VARIOUS_ARTISTS_MBID
+
+        # Apply writes derived albumartist to disk while keeping track artist and VA MBID
+        apply_resp = client.post(
+            "/api/library/retag/apply",
+            json={"file_ids": ["fl-1"]},
+            headers=admin_headers,
+        )
+        assert apply_resp.status_code == 200
+        assert apply_resp.json()["retagged_count"] == 1
+        meta = inspect_audio_file(file_path)
+        assert meta["album_artist"] == "UKF Drum & Bass"
+        assert meta["artist"] == "Wilkinson"
+        assert meta["musicbrainz_albumartistid"] == VARIOUS_ARTISTS_MBID
+
+
+
 
