@@ -113,6 +113,8 @@ def core_like_reasons(conn: sqlite3.Connection) -> list[str]:
         ("media_server_settings", "password", "a media server password"),
         ("media_server_settings", "api_key", "a media server API key"),
         ("media_server_settings", "plex_account_token", "a Plex account token"),
+        ("media_servers", "password", "a media server password"),
+        ("media_servers", "api_key", "a media server API key"),
         ("user_scrobble_configs", "lastfm_session_key", "per-user Last.fm credentials"),
         ("user_scrobble_configs", "listenbrainz_token", "per-user ListenBrainz credentials"),
         ("users", "password_hash", "local accounts with passwords"),

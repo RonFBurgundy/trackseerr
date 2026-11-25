@@ -94,6 +94,7 @@ class MigrationsMixin:
                 (104, self._migration_v104),
                 (105, self._migration_v105),
                 (106, self._migration_v106),
+                (107, self._migration_v107),
             ]
 
             applied = 0
@@ -381,6 +382,48 @@ class MigrationsMixin:
     def _migration_v106(self, cur: sqlite3.Cursor) -> None:
         """v106: Clear cached compilation album artists so they are worked out again without ranked-list series."""
         cur.execute("UPDATE library_albums SET compilation_artist = NULL")
+
+    def _migration_v107(self, cur: sqlite3.Cursor) -> None:
+        """v107: media_servers holds any number of media servers; the one saved server is copied into it."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS media_servers (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL CHECK (kind IN ('plex', 'subsonic', 'jellyfin')),
+                source TEXT NOT NULL DEFAULT 'settings' CHECK (source IN ('settings', 'env')),
+                name TEXT NOT NULL,
+                url TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                password TEXT NOT NULL DEFAULT '',
+                api_key TEXT NOT NULL DEFAULT '',
+                credentials_type TEXT NOT NULL DEFAULT '',
+                music_section TEXT NOT NULL DEFAULT '',
+                verify_ssl INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                use_refresh INTEGER NOT NULL DEFAULT 1,
+                use_playlists INTEGER NOT NULL DEFAULT 1,
+                use_users INTEGER NOT NULL DEFAULT 1,
+                use_scrobbles INTEGER NOT NULL DEFAULT 1,
+                is_login INTEGER NOT NULL DEFAULT 0,
+                path_mapping_json TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_media_servers_login ON media_servers(is_login) WHERE is_login = 1"
+        )
+        cur.execute(
+            """
+            INSERT INTO media_servers (id, kind, name, url, username, password, api_key, credentials_type, path_mapping_json)
+            SELECT lower(hex(randomblob(16))), type, CASE type WHEN 'subsonic' THEN 'Subsonic' ELSE 'Jellyfin' END, url,
+                   username, password, api_key, credentials_type, path_mapping_json
+            FROM media_server_settings
+            WHERE id = 1 AND type IN ('subsonic', 'jellyfin') AND url != '' AND NOT EXISTS (SELECT 1 FROM media_servers)
+            """
+        )
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:
         """v100: library_match_suggestions keeps the best unsure MusicBrainz match per unlinked album."""

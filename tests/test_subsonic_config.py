@@ -87,6 +87,13 @@ def test_gateway_db_with_saved_media_server_secret_is_core_like():
     assert "a media server password" in core_like_reasons(db.conn)
 
 
+def test_gateway_db_with_media_servers_secret_is_core_like():
+    db = Database(":memory:")
+    assert not any("media server" in r for r in core_like_reasons(db.conn))
+    db.insert_media_server_row({"kind": "subsonic", "name": "Subsonic", "url": URL, "username": "u", "password": "p"})
+    assert "a media server password" in core_like_reasons(db.conn)
+
+
 # ----------------------------------------------------------------------------- Settings overlay
 
 

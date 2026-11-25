@@ -224,6 +224,29 @@ CREATE TABLE media_server_settings (
                 api_key TEXT NOT NULL DEFAULT '',
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             , credentials_type TEXT NOT NULL DEFAULT '', path_mapping_json TEXT NOT NULL DEFAULT '', plex_account_token TEXT NOT NULL DEFAULT '', plex_account_username TEXT NOT NULL DEFAULT '');
+CREATE TABLE media_servers (
+                id TEXT PRIMARY KEY,
+                kind TEXT NOT NULL CHECK (kind IN ('plex', 'subsonic', 'jellyfin')),
+                source TEXT NOT NULL DEFAULT 'settings' CHECK (source IN ('settings', 'env')),
+                name TEXT NOT NULL,
+                url TEXT NOT NULL DEFAULT '',
+                username TEXT NOT NULL DEFAULT '',
+                password TEXT NOT NULL DEFAULT '',
+                api_key TEXT NOT NULL DEFAULT '',
+                credentials_type TEXT NOT NULL DEFAULT '',
+                music_section TEXT NOT NULL DEFAULT '',
+                verify_ssl INTEGER NOT NULL DEFAULT 1,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                use_refresh INTEGER NOT NULL DEFAULT 1,
+                use_playlists INTEGER NOT NULL DEFAULT 1,
+                use_users INTEGER NOT NULL DEFAULT 1,
+                use_scrobbles INTEGER NOT NULL DEFAULT 1,
+                is_login INTEGER NOT NULL DEFAULT 0,
+                path_mapping_json TEXT NOT NULL DEFAULT '',
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+            );
 CREATE TABLE "native_metadata_profiles" (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL UNIQUE,
@@ -866,6 +889,7 @@ CREATE INDEX idx_lib_artists_popularity ON library_artists(popularity);
 CREATE INDEX idx_system_events_created_at ON system_events (created_at DESC);
 CREATE INDEX idx_system_events_type ON system_events (event_type);
 CREATE INDEX idx_lib_artists_monitored ON library_artists(monitored);
+CREATE UNIQUE INDEX idx_media_servers_login ON media_servers(is_login) WHERE is_login = 1;
 CREATE INDEX idx_plex_registry_adopted ON plex_playlist_registry(trackseerr_playlist_id);
 CREATE INDEX idx_user_listens_lookup ON user_listens(user_id, played_at DESC);
 CREATE INDEX idx_user_listens_artist ON user_listens(user_id, artist);
