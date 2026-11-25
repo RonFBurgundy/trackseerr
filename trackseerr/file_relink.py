@@ -106,6 +106,17 @@ def _record_relink(db: Any, file_row: dict[str, Any], old: dict[str, Any], targe
     )
 
 
+def _cleanup_orphan_old_track(db: Any, old: dict[str, Any], target: dict[str, Any]) -> None:
+    """Deletes an unlinked twin track row on the same album once its last file has been moved or disposed."""
+    if str(old.get("album_id") or "") != str(target.get("album_id") or ""):
+        return
+    if str(old.get("mb_recording_id") or "").strip():
+        return
+    if db.list_library_files_for_track(str(old["id"])):
+        return
+    db.delete_library_track(str(old["id"]))
+
+
 def relink_file(
     db: Any,
     file_id: str,
@@ -142,6 +153,7 @@ def relink_file(
 
     if choice == "keep_existing":
         _dispose(db, file_row, existing[0], title, settings)
+        _cleanup_orphan_old_track(db, old, target)
         return {**result, "action": "kept_existing", "kept_file_id": str(existing[0]["id"]), "recycled_file_id": file_id}
     for row in existing:
         _dispose(db, row, file_row, title, settings)
@@ -149,6 +161,7 @@ def relink_file(
         result["recycled_file_id"] = str(existing[0]["id"])
     if not db.relink_library_file(file_id, target_track_id):
         raise LookupError("File not found")
+    _cleanup_orphan_old_track(db, old, target)
     logger.info("Relinked file %s from track %s to %s", file_id, old["id"], target["id"])
     _record_relink(db, file_row, old, target)
     return result

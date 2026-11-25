@@ -87,6 +87,36 @@ def _same_recording_other_album(hit: dict[str, Any], track: dict[str, Any]) -> b
     return titles_match(str(hit.get("title") or ""), str(track.get("title") or ""))
 
 
+def _verdict_for_confirmed_song(
+    db: Any,
+    matches: list[dict[str, Any]],
+    scores: dict[str, float],
+    track: dict[str, Any],
+    target: Optional[str],
+    track_title: str,
+) -> dict[str, Any]:
+    """Resolves verdict when the top AcoustID match already names the same song as the linked track."""
+    top = matches[0]
+    same_ids = [m["recording_id"] for m in matches if _same_song(str(m.get("title") or ""), track_title)]
+    found = _find_library_hit(db, same_ids, track.get("album_id"))
+    if found is not None:
+        hit, rid = found
+        if hit["id"] == track["id"]:
+            return _verdict(VERIFIED, scores[rid])
+        if not target and _same_recording_other_album(hit, track):
+            return _verdict(UNKNOWN, None)
+        return _verdict(
+            SAME_SONG,
+            scores[rid],
+            actual_track_id=hit["id"],
+            actual_album_id=hit.get("album_id"),
+            actual_title=hit.get("title"),
+        )
+    if target:
+        return _verdict(SAME_SONG, top["score"], actual_title=top.get("title"), actual_artist=top.get("artist"))
+    return _verdict(UNKNOWN, None)
+
+
 def verdict_for(db: Any, fp_row: Optional[dict[str, Any]], track: dict[str, Any], current_path: str) -> Optional[dict[str, Any]]:
     """Compares a cached fingerprint row with the linked track. None when there is no usable (current) row."""
     if fp_row is None or fp_row.get("file_path") != current_path:
@@ -98,15 +128,24 @@ def verdict_for(db: Any, fp_row: Optional[dict[str, Any]], track: dict[str, Any]
     target = track.get("mb_recording_id")
     if target and target in scores:
         return _verdict(VERIFIED, scores[target])
-    found = _find_library_hit(db, list(scores), track.get("album_id"))
     top = matches[0]
+    track_title = str(track.get("title") or "")
+    top_title = str(top.get("title") or "")
+    if _same_song(top_title, track_title):
+        return _verdict_for_confirmed_song(db, matches, scores, track, target, track_title)
+    consensus_ids = [
+        m["recording_id"]
+        for m in matches
+        if m["recording_id"] == top["recording_id"] or (top_title and _same_song(str(m.get("title") or ""), top_title))
+    ]
+    found = _find_library_hit(db, consensus_ids, track.get("album_id"))
     if found:
         hit, rid = found
         if hit["id"] == track["id"]:
             return _verdict(VERIFIED, scores[rid])
         if not target and _same_recording_other_album(hit, track):
             return _verdict(UNKNOWN, None)  # a single and its album release share a recording: not a mismatch
-        status = SAME_SONG if _same_song(str(hit.get("title") or ""), str(track.get("title") or "")) else MISMATCH
+        status = SAME_SONG if _same_song(str(hit.get("title") or ""), track_title) else MISMATCH
         return _verdict(
             status,
             scores[rid],
@@ -115,7 +154,7 @@ def verdict_for(db: Any, fp_row: Optional[dict[str, Any]], track: dict[str, Any]
             actual_title=hit.get("title"),
         )
     if target:
-        status = SAME_SONG if _same_song(str(top.get("title") or ""), str(track.get("title") or "")) else MISMATCH
+        status = SAME_SONG if _same_song(top_title, track_title) else MISMATCH
         return _verdict(status, top["score"], actual_title=top.get("title"), actual_artist=top.get("artist"))
     return _verdict(UNKNOWN, None)
 

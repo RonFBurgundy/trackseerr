@@ -362,3 +362,24 @@ def test_batch_relink_unknown_file_does_not_block_valid_one(test_db, env):
     assert [r["status"] for r in res["results"]] == ["relinked", "error"]
     assert _recycled(bin_dir) == []
     assert [r["id"] for r in test_db.list_library_files_for_track("trk-2")] == ["fl-1"]
+
+
+def test_relink_same_album_deletes_emptied_unlinked_old_track(test_db, env):
+    _, root, _ = env
+    _seed(test_db, root, 1, None, number=1)
+    _seed(test_db, root, 2, R2, number=2)
+    test_db.delete_library_file("fl-2")
+
+    relink_file(test_db, "fl-1", "trk-2", None)
+    assert test_db.get_library_track("trk-1") is None
+    assert test_db.get_library_file("fl-1")["track_id"] == "trk-2"
+
+    # keep_existing path also deletes an emptied unlinked twin on the same album
+    _seed(test_db, root, 3, None, number=3)
+    relink_file(test_db, "fl-3", "trk-2", "keep_existing")
+    assert test_db.get_library_track("trk-3") is None
+
+    # A track that has an mb_recording_id is kept when relinked
+    _seed(test_db, root, 4, R1, number=4)
+    relink_file(test_db, "fl-4", "trk-2", "keep_incoming")
+    assert test_db.get_library_track("trk-4") is not None
