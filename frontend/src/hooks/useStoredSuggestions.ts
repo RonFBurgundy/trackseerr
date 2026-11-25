@@ -4,7 +4,7 @@ import { applyStoredSuggestions, getStoredSuggestions } from '@/services/library
 import { errorMessage } from '@/services/apiClient';
 
 /** Matches at or above this confidence start out ticked. */
-export const SURE_CONFIDENCE = 80;
+export const SURE_CONFIDENCE = 70;
 const APPLY_CHUNK = 500;
 const FETCH_PAGE_SIZE = 200;
 

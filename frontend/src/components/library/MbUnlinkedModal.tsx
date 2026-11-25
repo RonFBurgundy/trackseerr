@@ -454,7 +454,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
         <div className="flex flex-col min-h-0 flex-1 h-full gap-3 sm:block sm:h-auto sm:flex-none sm:space-y-3">
           <p className="text-xs font-mono text-neutral-400 shrink-0">
             {suggestedTab
-              ? 'Matches Library Self-Heal found. Sure matches (80% or more) start ticked.'
+              ? 'Matches Library Self-Heal found. Sure matches (70% or more) start ticked.'
               : "Opens MusicBrainz with this album prefilled. Log in there, check it, and submit; you'll come back here and the album gets linked."}
           </p>
 
@@ -536,7 +536,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
                   <button
                     type="button"
                     onClick={() => void suggestions.selectSure()}
-                    title="Select only sure matches (80% or more)"
+                    title="Select only sure matches (70% or more)"
                     className="text-neutral-400 hover:text-white transition-colors"
                   >
                     Select sure only

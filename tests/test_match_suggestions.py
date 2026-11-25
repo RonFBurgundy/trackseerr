@@ -510,3 +510,91 @@ def test_auto_match_skips_placeholder_album(db: Database, tmp_path: Path) -> Non
     enricher.get_recording_release_groups.assert_not_called()
     enricher.search_release_groups.assert_not_called()
     enricher.search_recordings.assert_not_called()
+
+
+def test_auto_match_skips_various_compilation_without_title_match(db: Database, tmp_path: Path) -> None:
+    _seed_album(db, tmp_path, "alb-one", "Could I Be In Love", [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    enricher = _enricher({"rec-bob": [NOW_44]}, {"rg-now44": NOW_TRACKS})
+
+    counts = auto_match_unlinked(db, enricher)
+
+    assert counts["no_candidates"] == 1
+    assert db.get_match_suggestion("alb-one") is None
+    assert not any(c.args[0] == "rg-now44" for c in enricher.get_release_group_tracks.call_args_list)
+
+
+def test_auto_match_prefers_own_release_over_compilation(db: Database, tmp_path: Path) -> None:
+    _seed_album(db, tmp_path, "alb-one", "Could I Be In Love", [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    own_single = _group("rg-own", "Could I Be In Love", primary="Single", various=False)
+    enricher = _enricher(
+        {"rec-bob": [NOW_44, own_single]},
+        {"rg-now44": NOW_TRACKS, "rg-own": [_rt("Could I Be In Love", 1, "rec-bob")]},
+    )
+
+    auto_match_unlinked(db, enricher)
+
+    sugg = db.get_match_suggestion("alb-one")
+    album = db.get_library_album("alb-one")
+    assert (sugg is not None and sugg["candidate"]["id"] == "rg-own") or (album is not None and album["mb_release_group_id"] == "rg-own")
+    assert not any(c.args[0] == "rg-now44" for c in enricher.get_release_group_tracks.call_args_list)
+
+
+def test_auto_match_keeps_compilation_when_title_matches(db: Database, tmp_path: Path) -> None:
+    _seed_album(
+        db, tmp_path, "alb-now", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}],
+    )
+    enricher = _enricher({"rec-bob": [NOW_44]}, {"rg-now44": NOW_TRACKS})
+
+    counts = auto_match_unlinked(db, enricher)
+
+    sugg = db.get_match_suggestion("alb-now")
+    assert (sugg is not None and sugg["candidate"]["id"] == "rg-now44") or counts["applied"] == 1
+
+
+def test_auto_match_drops_dj_mix_without_title_match(db: Database, tmp_path: Path) -> None:
+    _seed_album(db, tmp_path, "alb-dj", "Could I Be In Love", [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    dj_mix = _group("rg-dj", "Ibiza Sunset Mix", secondary=["Compilation", "DJ-mix"], various=False)
+    enricher = _enricher({"rec-bob": [dj_mix]}, {"rg-dj": NOW_TRACKS})
+
+    counts = auto_match_unlinked(db, enricher)
+
+    assert counts["no_candidates"] == 1
+    assert db.get_match_suggestion("alb-dj") is None
+    enricher.get_release_group_tracks.assert_not_called()
+
+
+def test_auto_match_respects_suggest_floor(db: Database, tmp_path: Path) -> None:
+    _seed_album(db, tmp_path, "alb-low", "Completely Different Album", [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    other_album = _group("rg-other", "Unrelated Release", various=False)
+    enricher = _enricher({"rec-bob": [other_album]}, {"rg-other": [_rt("Could I Be In Love", 1, "rec-bob")]})
+
+    counts = auto_match_unlinked(db, enricher)
+
+    assert counts["no_candidates"] == 1
+    assert counts["suggested"] == 0
+    assert db.get_match_suggestion("alb-low") is None
+
+
+def test_list_match_suggestions_min_confidence(db: Database, tmp_path: Path) -> None:
+    _seed_album(db, tmp_path, "alb-50", "Low Match", [{"num": 1, "title": "A", "rec_id": None}])
+    _seed_album(db, tmp_path, "alb-75", "Good Match", [{"num": 1, "title": "B", "rec_id": None}])
+    db.save_match_suggestion("alb-50", {"id": "rg-50", "confidence": 50}, 1, 1)
+    db.save_match_suggestion("alb-75", {"id": "rg-75", "confidence": 75}, 1, 1)
+
+    rows, total = db.list_match_suggestions(min_confidence=60)
+    assert total == 1
+    assert [r["album_id"] for r in rows] == ["alb-75"]
+
+    all_rows, all_total = db.list_match_suggestions()
+    assert all_total == 2
+    assert {r["album_id"] for r in all_rows} == {"alb-50", "alb-75"}
+
+
+def test_suggest_matches_still_lists_compilations_for_find_match(db: Database, tmp_path: Path) -> None:
+    _seed_album(db, tmp_path, "alb-one", "Could I Be In Love", [{"num": 1, "title": "Could I Be In Love", "rec_id": "rec-bob"}])
+    enricher = _enricher({"rec-bob": [NOW_44]}, {"rg-now44": NOW_TRACKS})
+
+    res = suggest_matches(db, enricher, "alb-one")
+
+    assert [c["id"] for c in res["candidates"]] == ["rg-now44"]

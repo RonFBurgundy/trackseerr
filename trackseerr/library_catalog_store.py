@@ -1255,14 +1255,23 @@ class LibraryCatalogStoreMixin:
             "computed_at": str(row["computed_at"] or ""),
         }
 
-    def list_match_suggestions(self, page: int = 1, page_size: int = 50) -> tuple[list[dict[str, Any]], int]:
+    def list_match_suggestions(
+        self, page: int = 1, page_size: int = 50, min_confidence: int = 0
+    ) -> tuple[list[dict[str, Any]], int]:
         """Stored suggestions, highest confidence first, with album title, artist and track count."""
         offset = (max(1, int(page)) - 1) * int(page_size)
+        threshold = int(min_confidence)
         with self.reader() as conn:
-            total = int(conn.execute("SELECT COUNT(*) FROM library_match_suggestions").fetchone()[0])
+            total = int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM library_match_suggestions s WHERE s.confidence >= ?",
+                    (threshold,),
+                ).fetchone()[0]
+            )
             rows = conn.execute(
-                self._MATCH_SUGGESTION_SELECT + "ORDER BY s.confidence DESC, a.title ASC, s.album_id ASC LIMIT ? OFFSET ?",
-                (int(page_size), offset),
+                self._MATCH_SUGGESTION_SELECT
+                + "WHERE s.confidence >= ? ORDER BY s.confidence DESC, a.title ASC, s.album_id ASC LIMIT ? OFFSET ?",
+                (threshold, int(page_size), offset),
             ).fetchall()
         return [self._map_match_suggestion(r) for r in rows], total
 
