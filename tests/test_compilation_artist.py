@@ -562,16 +562,98 @@ def test_reset_compilation_artist_cache_once(tmp_path: Path) -> None:
             )
         )
         db.set_album_compilation_artist("alb-1", "Island")
+        enricher = MagicMock()
+        enricher.get_release_group_identity.return_value = {"complete": False}
 
-        assert reset_compilation_artist_cache_once(db) is True
+        assert reset_compilation_artist_cache_once(db, enricher) is True
         alb = db.get_library_album("alb-1")
         assert alb is not None
         assert alb["compilation_artist"] is None
 
         db.set_album_compilation_artist("alb-1", "The Harder They Come")
-        assert reset_compilation_artist_cache_once(db) is False
+        assert reset_compilation_artist_cache_once(db, enricher) is False
         alb_after = db.get_library_album("alb-1")
         assert alb_after is not None
         assert alb_after["compilation_artist"] == "The Harder They Come"
+    finally:
+        db.close()
+
+
+def test_local_soundtrack_skips_enricher_and_is_complete() -> None:
+    enricher = MagicMock()
+    enricher.get_release_group_identity.return_value = {"complete": False}
+
+    result = work_out_compilation_artist(
+        enricher,
+        {
+            "title": "Saturday Night Fever: The Original Movie Sound Track",
+            "secondary_types": ["soundtrack"],
+            "mb_release_group_id": "rg-snf",
+        },
+    )
+
+    assert result == ("Saturday Night Fever", True)
+    enricher.get_release_group_identity.assert_not_called()
+
+
+def test_populate_various_compilation_artists_fills_null_va_albums(tmp_path: Path) -> None:
+    from trackseerr.compilation_artist import reset_compilation_artist_cache_once
+
+    db = Database(str(tmp_path / "populate_va.db"))
+    try:
+        db.upsert_library_artist(
+            LibraryArtist(id="va-1", name="Various Artists", mbid=VARIOUS_ARTISTS_MBID, monitored=True)
+        )
+        db.upsert_library_album(
+            LibraryAlbum(
+                id="alb-now",
+                artist_id="va-1",
+                title="Now That's What I Call Music! 44",
+                mb_release_group_id="rg-now",
+            )
+        )
+        db.upsert_library_album(
+            LibraryAlbum(
+                id="alb-snf",
+                artist_id="va-1",
+                title="Saturday Night Fever: The Original Movie Sound Track",
+                secondary_types=["soundtrack"],
+                mb_release_group_id="rg-snf",
+            )
+        )
+        db.upsert_library_album(
+            LibraryAlbum(
+                id="alb-preset",
+                artist_id="va-1",
+                title="Some Preset Album",
+                mb_release_group_id="rg-preset",
+            )
+        )
+        db.set_album_compilation_artist("alb-preset", "Preset")
+
+        enricher = MagicMock()
+        enricher.get_release_group_identity.return_value = {"complete": True, "series": [], "labels": []}
+
+        # First call resets cache (clearing alb-preset too) and populates all VA albums
+        assert reset_compilation_artist_cache_once(db, enricher) is True
+        assert db.get_library_album("alb-now")["compilation_artist"] == "Now That's What I Call Music!"
+        assert db.get_library_album("alb-snf")["compilation_artist"] == "Saturday Night Fever"
+        assert db.get_library_album("alb-preset")["compilation_artist"] == ""
+
+        # Re-set alb-preset and add a new VA album with compilation_artist=None
+        db.set_album_compilation_artist("alb-preset", "Preset")
+        db.upsert_library_album(
+            LibraryAlbum(
+                id="alb-ukf",
+                artist_id="va-1",
+                title="UKF Drum & Bass 2013",
+                mb_release_group_id="rg-ukf",
+            )
+        )
+
+        # Second call does not reset, but still populates the new NULL VA album
+        assert reset_compilation_artist_cache_once(db, enricher) is False
+        assert db.get_library_album("alb-preset")["compilation_artist"] == "Preset"
+        assert db.get_library_album("alb-ukf")["compilation_artist"] == "UKF Drum & Bass"
     finally:
         db.close()

@@ -90,14 +90,20 @@ def _has_secondary_type(album: dict[str, Any], target: str) -> bool:
 
 def work_out_compilation_artist(enricher: Any, album: dict[str, Any]) -> tuple[str, bool]:
     """Resolves a display album artist for a compilation via soundtrack -> MB series -> title series -> label."""
+    title = str(album.get("title") or "")
+    local_soundtrack = _has_secondary_type(album, "soundtrack")
+    if local_soundtrack:
+        st = soundtrack_name(title)
+        if st:
+            return st, True
+
     rg_id = str(album.get("mb_release_group_id") or "").strip()
     identity: dict[str, Any] = (
         enricher.get_release_group_identity(rg_id) if (rg_id and enricher is not None) else {}
     ) or {}
     complete = not rg_id or bool(identity.get("complete", True))
 
-    title = str(album.get("title") or "")
-    is_soundtrack = _has_secondary_type(album, "soundtrack") or any(
+    is_soundtrack = local_soundtrack or any(
         str(t).strip().casefold() == "soundtrack" for t in identity.get("secondary_types") or []
     )
     if is_soundtrack:
@@ -147,10 +153,36 @@ def compilation_display_artist(
     return str(cached) if cached else None
 
 
-def reset_compilation_artist_cache_once(db: Any) -> bool:
-    """Clears cached compilation_artist values once so soundtrack-typed albums are re-evaluated."""
+def populate_various_compilation_artists(db: Any, enricher: Any) -> int:
+    """Populates compilation_artist for Various Artists albums where it is currently NULL."""
+    va = db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID)
+    if va is None:
+        return 0
+    albums = db.list_library_albums(artist_id=str(va["id"]), limit=5000)
+    updated = 0
+    for album in albums:
+        if album.get("compilation_artist") is not None:
+            continue
+        worked, complete = work_out_compilation_artist(enricher, album)
+        if complete or worked:
+            db.set_album_compilation_artist(str(album["id"]), worked)
+            album["compilation_artist"] = worked
+            updated += 1
+    return updated
+
+
+def reset_compilation_artist_cache_once(db: Any, enricher: Any = None) -> bool:
+    """Clears cached compilation_artist values once and populates NULL Various Artists albums."""
+    was_reset = False
     if db.get_kv("compilation_artist_v2") is None:
         db.clear_album_compilation_artists()
         db.set_kv("compilation_artist_v2", "1")
-        return True
-    return False
+        was_reset = True
+
+    active_enricher = enricher
+    if active_enricher is None:
+        from trackseerr.mb_metadata_store import get_shared_enricher
+
+        active_enricher = get_shared_enricher(db)
+    populate_various_compilation_artists(db, active_enricher)
+    return was_reset
