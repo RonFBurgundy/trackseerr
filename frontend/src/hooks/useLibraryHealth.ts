@@ -32,8 +32,8 @@ export interface UseLibraryHealthReturn {
   checkNow: () => Promise<void>;
   dismiss: (path: string, scope: LibraryHealthDismissScope) => Promise<void>;
   shorten: (findingId: string) => Promise<void>;
-  saveMapping: (serverPrefix: string, localPrefix: string) => Promise<void>;
-  removeMapping: () => Promise<void>;
+  saveMapping: (serverPrefix: string, localPrefix: string, serverId?: string) => Promise<void>;
+  removeMapping: (serverId?: string) => Promise<void>;
   setWeekly: (enabled: boolean) => Promise<void>;
   removeOrphan: (findingId: string, deleteFiles: boolean) => Promise<void>;
   retryFailed: (findingId: string) => Promise<void>;
@@ -123,9 +123,9 @@ export function useLibraryHealth({ onChanged, onToast }: UseLibraryHealthOptions
   );
 
   const saveMapping = useCallback(
-    (serverPrefix: string, localPrefix: string) =>
+    (serverPrefix: string, localPrefix: string, serverId?: string) =>
       mutate(
-        () => setLibraryHealthMapping({ server_prefix: serverPrefix.trim(), local_prefix: localPrefix.trim() }),
+        () => setLibraryHealthMapping({ server_prefix: serverPrefix.trim(), local_prefix: localPrefix.trim() }, serverId),
         'Path mapping saved',
         'Failed to save the path mapping'
       ),
@@ -133,7 +133,8 @@ export function useLibraryHealth({ onChanged, onToast }: UseLibraryHealthOptions
   );
 
   const removeMapping = useCallback(
-    () => mutate(() => deleteLibraryHealthMapping(), 'Path mapping removed', 'Failed to remove the path mapping'),
+    (serverId?: string) =>
+      mutate(() => deleteLibraryHealthMapping(serverId), 'Path mapping removed', 'Failed to remove the path mapping'),
     [mutate]
   );
 

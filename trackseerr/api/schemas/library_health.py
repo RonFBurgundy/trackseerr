@@ -44,6 +44,14 @@ class LibraryHealthMapping(ApiModel):
     auto: bool
 
 
+class LibraryHealthServerMapping(ApiModel):
+    server_id: str
+    name: str
+    server_prefix: str
+    local_prefix: str
+    auto: bool
+
+
 class LibraryHealthServer(ApiModel):
     kind: str
     file_paths: bool
@@ -55,6 +63,7 @@ class LibraryHealthResponse(ApiModel):
     last_run: Optional[LibraryHealthRun] = None
     running: bool
     mapping: Optional[LibraryHealthMapping] = None
+    mappings: list[LibraryHealthServerMapping] = []
     server: Optional[LibraryHealthServer] = None
     count: int
     weekly: bool
@@ -75,6 +84,7 @@ class LibraryHealthDismissed(ApiModel):
 
 class LibraryHealthMappingResponse(ApiModel):
     mapping: Optional[LibraryHealthMapping] = None
+    mappings: Optional[list[LibraryHealthServerMapping]] = None
 
 
 class LibraryHealthWeekly(ApiModel):

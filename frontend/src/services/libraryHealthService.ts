@@ -32,12 +32,16 @@ export function shortenLibraryHealthFinding(findingId: string): Promise<LibraryH
   return apiRequest<LibraryHealthShortened>(`${BASE}/findings/${encodeURIComponent(findingId)}/shorten`, { method: 'POST' });
 }
 
-export function setLibraryHealthMapping(body: LibraryHealthMappingRequest): Promise<unknown> {
-  return apiRequest<unknown>(`${BASE}/mapping`, { method: 'PUT', body });
+export function setLibraryHealthMapping(body: LibraryHealthMappingRequest, serverId?: string): Promise<unknown> {
+  return apiRequest<unknown>(`${BASE}/mapping`, {
+    method: 'PUT',
+    body: serverId ? { ...body, server_id: serverId } : body,
+  });
 }
 
-export function deleteLibraryHealthMapping(): Promise<unknown> {
-  return apiRequest<unknown>(`${BASE}/mapping`, { method: 'DELETE' });
+export function deleteLibraryHealthMapping(serverId?: string): Promise<unknown> {
+  const query = serverId ? `?server_id=${encodeURIComponent(serverId)}` : '';
+  return apiRequest<unknown>(`${BASE}/mapping${query}`, { method: 'DELETE' });
 }
 
 export function setLibraryHealthWeekly(enabled: boolean): Promise<LibraryHealthWeeklyResponse> {

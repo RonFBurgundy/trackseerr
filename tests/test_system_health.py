@@ -365,6 +365,52 @@ def test_media_server_none_skipped(test_db, test_config):
         assert len(ms_checks) == 0
 
 
+def test_media_server_checked_per_server(test_db, test_config):
+    from types import SimpleNamespace
+    from trackseerr.media_servers import registry
+    from trackseerr.system_health import _check_media_server, observe
+
+    now = datetime.now(timezone.utc)
+    settings = test_db.get_health_settings()
+    observe(
+        test_db,
+        key="media_server:stale",
+        kind="media_server",
+        label="Stale",
+        ok=True,
+        message="Connected",
+        threshold_minutes=10,
+        now=now,
+        settings=settings,
+    )
+
+    rec1 = registry.ServerRecord(id="s1", kind="plex", name="Plex 1", source="settings", url="http://plex1")
+    rec2 = registry.ServerRecord(id="s2", kind="jellyfin", name="Jellyfin 2", source="settings", url="http://jf2")
+    ok_adapter = MagicMock()
+    ok_adapter.test_connection.return_value = SimpleNamespace(ok=True, message="Connected")
+
+    registry.install([rec1, rec2])
+    try:
+        with patch.object(
+            registry,
+            "build_adapter",
+            side_effect=lambda r: ok_adapter if r.id == "s1" else None,
+        ):
+            checked, errors, warnings = _check_media_server(test_db, test_config, now, settings)
+    finally:
+        registry._reset_for_tests()
+
+    assert checked == 2
+    assert errors == 0
+    assert warnings == 1
+    ms_checks = {c["check_key"]: c for c in test_db.list_health_checks() if c["kind"] == "media_server"}
+    assert set(ms_checks) == {"media_server:s1", "media_server:s2"}
+    assert ms_checks["media_server:s1"]["label"] == "Plex 1"
+    assert ms_checks["media_server:s1"]["state"] == "ok"
+    assert ms_checks["media_server:s2"]["label"] == "Jellyfin 2"
+    assert ms_checks["media_server:s2"]["message"] == "cannot be reached"
+
+
 def test_stalled_download_alerts_once(test_db, test_config):
     now = datetime.now(timezone.utc)
     old_time = (now - timedelta(minutes=75)).strftime("%Y-%m-%d %H:%M:%S")

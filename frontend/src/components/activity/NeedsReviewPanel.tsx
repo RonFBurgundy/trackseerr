@@ -145,8 +145,33 @@ export const NeedsReviewPanel: React.FC<NeedsReviewPanelProps> = ({ onToast, onC
             ? 'No media server is connected, so there is nothing to compare your library against.'
             : `${serverName} does not expose file paths, so library checks are not available.`}
         </p>
+      ) : (data.mappings?.length ?? 0) > 1 ? (
+        <div className="space-y-2">
+          {data.mappings?.map((m) => (
+            <ReviewMappingCard
+              key={m.server_id}
+              mapping={m.server_prefix || m.local_prefix ? m : null}
+              serverId={m.server_id}
+              serverName={m.name}
+              busy={busy}
+              onSave={hl.saveMapping}
+              onRemove={hl.removeMapping}
+            />
+          ))}
+        </div>
       ) : (
-        <ReviewMappingCard mapping={mapping ?? null} busy={busy} onSave={hl.saveMapping} onRemove={hl.removeMapping} />
+        <ReviewMappingCard
+          mapping={
+            mapping ??
+            (data.mappings?.length === 1 && (data.mappings[0].server_prefix || data.mappings[0].local_prefix)
+              ? data.mappings[0]
+              : null)
+          }
+          serverId={data.mappings?.length === 1 ? data.mappings[0].server_id : undefined}
+          busy={busy}
+          onSave={hl.saveMapping}
+          onRemove={hl.removeMapping}
+        />
       )}
 
       <div className="min-h-0">

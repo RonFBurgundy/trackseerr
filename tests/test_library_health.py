@@ -522,7 +522,7 @@ def test_get_shape_and_count(client, db, config, music, server_box):
     h = _headers(db, config, admin=True)
     empty = client.get("/api/library-health", headers=h).json()
     assert empty == {"findings": [], "groups": [], "last_run": None, "running": False, "mapping": None,
-                     "server": None, "count": 0, "weekly": True}
+                     "mappings": [], "server": None, "count": 0, "weekly": True}
     _, refs = base_library(db, music)
     touch(music / "Art/Alb1/3.flac")
     touch(music / "Art/Alb1/4.flac")

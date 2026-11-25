@@ -39,6 +39,7 @@ class DismissRequest(BaseModel):
 class MappingRequest(BaseModel):
     server_prefix: str = Field(max_length=4096)
     local_prefix: str = Field(min_length=1, max_length=4096)
+    server_id: Optional[str] = None
 
 
 def _music_root(db: Database) -> Path:
@@ -57,6 +58,7 @@ def get_library_health(
         "last_run": library_health.run_view(db.get_last_library_health_run()),
         "running": library_health.is_running(),
         "mapping": library_health.mapping_view(db),
+        "mappings": library_health.mappings_view(db),
         "server": {"kind": server.kind, "file_paths": bool(server.capabilities.file_paths)} if server else None,
         "count": len(findings),
         "weekly": db.get_library_health_weekly(),
@@ -123,6 +125,18 @@ def shorten_finding(
 
 @router.put("/mapping", response_model=LibraryHealthMappingResponse, response_model_exclude_unset=True, summary="Save the media-server path mapping")
 def put_library_health_mapping(body: MappingRequest, db: Database = Depends(get_db)) -> dict[str, Any]:
+    if body.server_id:
+        row = db.get_media_server_row(body.server_id)
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media server not found")
+        db.set_media_server_row_path_mapping(
+            body.server_id,
+            {"server_prefix": body.server_prefix, "local_prefix": body.local_prefix, "auto": False, "server_kind": row["kind"]},
+        )
+        return {
+            "mapping": {"server_prefix": body.server_prefix, "local_prefix": body.local_prefix, "auto": False},
+            "mappings": library_health.mappings_view(db),
+        }
     kind = ""
     existing = db.get_media_server_path_mapping()
     if existing:
@@ -134,7 +148,13 @@ def put_library_health_mapping(body: MappingRequest, db: Database = Depends(get_
 
 
 @router.delete("/mapping", response_model=LibraryHealthMappingResponse, response_model_exclude_unset=True, summary="Clear the media-server path mapping")
-def delete_library_health_mapping(db: Database = Depends(get_db)) -> dict[str, Any]:
+def delete_library_health_mapping(server_id: Optional[str] = None, db: Database = Depends(get_db)) -> dict[str, Any]:
+    if server_id:
+        row = db.get_media_server_row(server_id)
+        if row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media server not found")
+        db.set_media_server_row_path_mapping(server_id, None)
+        return {"mapping": None, "mappings": library_health.mappings_view(db)}
     db.set_media_server_path_mapping(None)
     return {"mapping": None}
 
