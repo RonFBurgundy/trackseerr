@@ -16,7 +16,7 @@ It works with Plex, Jellyfin, and Subsonic servers such as Navidrome. It can dow
 
 ## Status
 
-TrackSeerr is in active development. Features, settings, and the API still change between builds. Wait for a tagged release before you rely on it.
+TrackSeerr is in active development. Features, settings, and the API still change between builds. Version 1.0.0 will be tagged once TrackSeerr has official access to the BrainzMash MusicBrainz mirror. Until then, wait for a tagged release before you rely on it.
 
 ## What it does
 
