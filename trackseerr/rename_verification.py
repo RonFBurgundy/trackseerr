@@ -299,10 +299,10 @@ def _summary(counts: dict[str, Any]) -> str:
     return f"verified={counts['verified']} mismatched={counts['mismatched']} unknown={counts['unknown']}"
 
 
-def _thread_main(db: Any, file_ids: list[str], api_key: str) -> None:
+def _thread_main(db: Any, file_ids: list[str], api_key: str, task_id: str, task_name: str) -> None:
     try:
-        with track_job("rename_verify", "AcoustID verify") as job, record_task_run(
-            db, "rename_verify", TRIGGER_MANUAL
+        with track_job(task_id, task_name) as job, record_task_run(
+            db, task_id, TRIGGER_MANUAL
         ) as run:
             counts = run_verification(db, file_ids, api_key) or get_verification_status()
             summary = _summary(counts)
@@ -316,12 +316,25 @@ def _thread_main(db: Any, file_ids: list[str], api_key: str) -> None:
             _state["message"] = "Verification failed"
 
 
-def start_verification(db: Any, file_ids: list[str], api_key: str) -> bool:
+def start_verification(
+    db: Any,
+    file_ids: list[str],
+    api_key: str,
+    *,
+    task_id: str = "rename_verify",
+    task_name: str = "Rename Files Audio Check",
+    thread_name: str = "rename-verify",
+) -> bool:
     """Starts a background verification run; False when one is already running."""
     with _state_lock:
         if _state.get("running"):
             return False
         _state.clear()
         _state.update(_fresh_state(total=len(file_ids), running=True))
-    threading.Thread(target=_thread_main, args=(db, file_ids, api_key), name="rename-verify", daemon=True).start()
+    threading.Thread(
+        target=_thread_main,
+        args=(db, file_ids, api_key, task_id, task_name),
+        name=thread_name,
+        daemon=True,
+    ).start()
     return True

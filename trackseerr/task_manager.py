@@ -328,6 +328,20 @@ TASKS: dict[str, TaskSpec] = {
             KIND_MANUAL,
             group=GROUP_LIBRARY,
         ),
+        TaskSpec(
+            "rename_verify",
+            "Rename Files Audio Check",
+            "Listens to the files you picked in Rename Files with AcoustID and flags any that hold a different song.",
+            KIND_MANUAL,
+            group=GROUP_LIBRARY,
+        ),
+        TaskSpec(
+            "wrong_files_check",
+            "Wrong Files Check",
+            "Listens to every library file with AcoustID and lists files that hold a different song from the one they're filed as. Started from Library tools → Wrong files.",
+            KIND_MANUAL,
+            group=GROUP_LIBRARY,
+        ),
     )
 }
 
@@ -431,6 +445,8 @@ WORKER_THREAD_TASKS: dict[str, str] = {
     "ManualLibrarySelfHealTask": "library_self_heal",
     "ManualLibraryRetagTask": "library_retag",
     "LidarrMigrationThread": "lidarr_migration",
+    "rename-verify": "rename_verify",
+    "wrong-files-check": "wrong_files_check",
 }
 
 NON_TASK_THREADS: dict[str, str] = {
@@ -438,7 +454,6 @@ NON_TASK_THREADS: dict[str, str] = {
     "and keeps no run history; the core reports gateway health separately",
     "media-server-probe": "one-shot connectivity probe with a timeout, started per status request",
     "lidarr-list-refresh": "request-driven cache refresh of the Lidarr list snapshot, not a scheduled job",
-    "rename-verify": "request-driven AcoustID check of selected rename-preview rows, started from the rename modal; not a scheduled job",
     "BootInit": "one-shot post-bind startup sequence (starts the real workers), not a recurring job",
     "BootListenLog": "one-shot boot log line once the server socket is bound",
     "media-server-user-discovery": "one-shot user import when a media server connects, not a recurring job",

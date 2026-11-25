@@ -162,14 +162,17 @@ def test_check_starts_verification_over_all_files(app_and_client, test_db, admin
     f1, _ = _seed(test_db, root, 1, R1, number=1)
     f2, _ = _seed(test_db, root, 2, R2, number=2)
 
-    calls: list[tuple[list[str], str]] = []
-    monkeypatch.setattr(wf, "start_verification", lambda db, ids, key: calls.append((ids, key)) or True)
+    calls: list[tuple[list[str], str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        wf, "start_verification", lambda db, ids, key, **kwargs: calls.append((ids, key, kwargs)) or True
+    )
 
     resp = client.post("/api/library/wrong-files/check", headers=headers)
     assert resp.status_code == 200
     assert len(calls) == 1
     assert set(calls[0][0]) == {f1, f2}
     assert calls[0][1] == "k"
+    assert calls[0][2]["task_id"] == "wrong_files_check"
     assert resp.json()["api_key_set"] is True
 
     status_resp = client.get("/api/library/wrong-files/check", headers=headers)
@@ -181,7 +184,7 @@ def test_check_conflict_when_running(app_and_client, test_db, admin, monkeypatch
     _, client = app_and_client
     headers, root = admin
     _settings(test_db, root, key="k")
-    monkeypatch.setattr(wf, "start_verification", lambda db, ids, key: False)
+    monkeypatch.setattr(wf, "start_verification", lambda db, ids, key, **kwargs: False)
 
     resp = client.post("/api/library/wrong-files/check", headers=headers)
     assert resp.status_code == 409

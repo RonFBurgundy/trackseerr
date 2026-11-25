@@ -62,7 +62,14 @@ def start_wrong_file_check(db: Any) -> bool:
     key = str(db.get_media_management_settings().get("acoustid_api_key") or "").strip()
     if not key:
         raise ValueError(_NO_KEY_MESSAGE)
-    return start_verification(db, db.list_library_file_ids(), key)
+    return start_verification(
+        db,
+        db.list_library_file_ids(),
+        key,
+        task_id="wrong_files_check",
+        task_name="Wrong Files Check",
+        thread_name="wrong-files-check",
+    )
 
 
 def _cached_lookup(
