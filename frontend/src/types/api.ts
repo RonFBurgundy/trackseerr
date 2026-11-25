@@ -10259,6 +10259,8 @@ export interface components {
         /** LibraryHealthMappingResponse */
         LibraryHealthMappingResponse: {
             mapping?: components["schemas"]["LibraryHealthMapping"] | null;
+            /** Mappings */
+            mappings?: components["schemas"]["LibraryHealthServerMapping"][] | null;
         };
         /** LibraryHealthResponse */
         LibraryHealthResponse: {
@@ -10270,6 +10272,11 @@ export interface components {
             groups: components["schemas"]["LibraryHealthGroup"][];
             last_run?: components["schemas"]["LibraryHealthRun"] | null;
             mapping?: components["schemas"]["LibraryHealthMapping"] | null;
+            /**
+             * Mappings
+             * @default []
+             */
+            mappings: components["schemas"]["LibraryHealthServerMapping"][];
             /** Running */
             running: boolean;
             server?: components["schemas"]["LibraryHealthServer"] | null;
@@ -10315,6 +10322,19 @@ export interface components {
             file_paths: boolean;
             /** Kind */
             kind: string;
+        };
+        /** LibraryHealthServerMapping */
+        LibraryHealthServerMapping: {
+            /** Auto */
+            auto: boolean;
+            /** Local Prefix */
+            local_prefix: string;
+            /** Name */
+            name: string;
+            /** Server Id */
+            server_id: string;
+            /** Server Prefix */
+            server_prefix: string;
         };
         /** LibraryHealthShortened */
         LibraryHealthShortened: {
@@ -11136,6 +11156,8 @@ export interface components {
         MappingRequest: {
             /** Local Prefix */
             local_prefix: string;
+            /** Server Id */
+            server_id?: string | null;
             /** Server Prefix */
             server_prefix: string;
         };
@@ -19558,7 +19580,9 @@ export interface operations {
     };
     delete_library_health_mapping_api_library_health_mapping_delete: {
         parameters: {
-            query?: never;
+            query?: {
+                server_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19572,6 +19596,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryHealthMappingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

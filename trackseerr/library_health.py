@@ -549,59 +549,91 @@ def _finish(db: Any, run: dict[str, Any], error: Optional[str] = None) -> dict[s
     return db.record_library_health_run(run)
 
 
-def _resolve_mapping(
-    db: Any, server: Any, server_kind: str, disk_paths: list[str], first_refs: list[Any]
-) -> tuple[Optional[tuple[str, str]], bool]:
-    """(mapping or None, auto). Uses the saved mapping; otherwise suggests one from a sample and persists it."""
+class _ScanError(Exception):
+    """Per-server scan failure carrying a user-facing message."""
+
+
+def _saved_row_mapping(db: Any, rec: Any) -> Optional[dict[str, Any]]:
+    row = db.get_media_server_row(rec.id)
+    if row is not None:
+        return row.get("path_mapping")
+    return getattr(rec, "path_mapping", None)
+
+
+def _mapping_pair(saved: Optional[dict[str, Any]]) -> Optional[tuple[tuple[str, str], bool]]:
+    if saved and (saved.get("server_prefix") or saved.get("local_prefix")):
+        return (saved["server_prefix"], saved["local_prefix"]), bool(saved.get("auto"))
+    return None
+
+
+def _legacy_mapping(db: Any, server_kind: str) -> Optional[dict[str, Any]]:
     saved = db.get_media_server_path_mapping()
     if saved and saved.get("server_kind") in ("", server_kind) and (saved["server_prefix"] or saved["local_prefix"]):
-        return (saved["server_prefix"], saved["local_prefix"]), bool(saved.get("auto"))
+        return saved
+    return None
+
+
+def _resolve_mapping(
+    db: Any,
+    rec: Optional[Any],
+    server: Any,
+    server_kind: str,
+    disk_paths: list[str],
+    first_refs: list[Any],
+    *,
+    allow_legacy: bool = True,
+) -> tuple[Optional[tuple[str, str]], bool]:
+    """(mapping or None, auto). Uses the saved mapping; otherwise suggests one from a sample and persists it."""
+    if rec is not None:
+        row_pair = _mapping_pair(_saved_row_mapping(db, rec))
+        if row_pair is not None:
+            return row_pair
+        if allow_legacy:
+            legacy_pair = _mapping_pair(_legacy_mapping(db, server_kind))
+            if legacy_pair is not None:
+                return legacy_pair
+    else:
+        legacy_pair = _mapping_pair(_legacy_mapping(db, server_kind))
+        if legacy_pair is not None:
+            return legacy_pair
+
     if server.paths_relative or not first_refs:
         return None, False
     suggestion = path_mapping.suggest_mapping([r.path for r in first_refs[:SUGGEST_SAMPLE]], disk_paths)
     if suggestion is None:
         return None, False
-    db.set_media_server_path_mapping(
-        {"server_prefix": suggestion[0], "local_prefix": suggestion[1], "auto": True, "server_kind": server_kind}
-    )
+    payload = {"server_prefix": suggestion[0], "local_prefix": suggestion[1], "auto": True, "server_kind": server_kind}
+    if rec is not None:
+        db.set_media_server_row_path_mapping(rec.id, payload)
+    else:
+        db.set_media_server_path_mapping(payload)
     return (suggestion[0], suggestion[1]), True
 
 
-def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) -> dict[str, Any]:  # noqa: C901
-    started = now.isoformat()
-    run: dict[str, Any] = {
-        "started_at": started,
-        "server_kind": getattr(server, "kind", None),
-        "disk_files": 0,
-        "server_files": 0,
-        "unindexed": 0,
-        "stale": 0,
-    }
-    if not music_root.is_dir():
-        return _finish(db, run, f"The music folder {music_root} does not exist.")
-
-    try:
-        count = _record_long_names(db, music_root, started)
-        logger.info("library health: recorded %d long_name findings", count)
-    except OSError as exc:
-        logger.warning("library health: failed checking long names: %s", type(exc).__name__)
-
-    if server is None:
-        return _finish(db, run, "No media server is configured.")
+def _scan_server(
+    db: Any,
+    rec: Optional[Any],
+    server: Any,
+    music_root: Path,
+    started: str,
+    *,
+    allow_legacy: bool = True,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     server_kind = str(getattr(server, "kind", "") or "")
     if not server.capabilities.file_paths:
-        return _finish(db, run, f"{server_kind or 'This media server'} does not expose library file paths.")
+        raise _ScanError(f"{server_kind or 'This media server'} does not expose library file paths.")
 
     try:
         disk = disk_inventory(music_root, server_kind)
-        run["disk_files"] = len(disk)
         refs = iter(server.iter_library_files())
         head: list[Any] = []
         for ref in refs:  # buffer a sample to suggest a mapping from
             head.append(ref)
             if len(head) >= SUGGEST_SAMPLE:
                 break
-        mapping, auto = _resolve_mapping(db, server, server_kind, list(disk.values()), head)
+        mapping, auto = _resolve_mapping(
+            db, rec, server, server_kind, list(disk.values()), head, allow_legacy=allow_legacy
+        )
         relative = bool(server.paths_relative)
 
         def local_path(server_path: str) -> str:
@@ -613,16 +645,15 @@ def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) ->
         last_scan = server.last_scan_at()
         roots = [local_path(r) for r in server.library_roots()] if not relative else []
     except MediaServerUnsupported as exc:
-        return _finish(db, run, f"Library file paths are not available: {safe_exc(exc)}")
+        raise _ScanError(f"Library file paths are not available: {safe_exc(exc)}") from exc
     except MediaServerError as exc:
         logger.warning("library health: media server error: %s", safe_exc(exc))
-        return _finish(db, run, f"Could not read the media server library: {safe_exc(exc)}")
+        raise _ScanError(f"Could not read the media server library: {safe_exc(exc)}") from exc
     except (OSError, ValueError, KeyError) as exc:
         logger.error("library health: check failed: %s", safe_exc(exc))
         logger.debug("library health traceback", exc_info=True)
-        return _finish(db, run, f"Check failed: {safe_exc(exc)}")
+        raise _ScanError(f"Check failed: {safe_exc(exc)}") from exc
 
-    run["server_files"] = len(server_map)
     indexed_keys = set(disk) & set(server_map)
     unindexed = [disk[k] for k in sorted(set(disk) - indexed_keys)]
     zero_overlap = not indexed_keys
@@ -663,13 +694,101 @@ def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) ->
             }
         )
 
+    counts = {
+        "disk_files": len(disk),
+        "server_files": len(server_map),
+        "mapping_auto": auto,
+        "started": started,
+    }
+    return rows, counts
+
+
+def _merge_server_rows(results: list[tuple[str, list[dict[str, Any]], dict[str, Any]]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for label, srv_rows, _ in results:
+        for r in srv_rows:
+            key = (r["kind"], r["path"])
+            existing = merged.get(key)
+            if existing is None:
+                detail = dict(r.get("detail") or {})
+                detail["servers"] = [label]
+                merged[key] = {**r, "detail": detail}
+            else:
+                servers_list = existing["detail"]["servers"]
+                if label not in servers_list:
+                    servers_list.append(label)
+    return list(merged.values())
+
+
+def _resolve_targets(server: Optional[Any]) -> tuple[list[tuple[Optional[Any], Any]], Optional[str]]:
+    from trackseerr.media_servers import registry
+
+    if registry.is_installed():
+        refresh_pairs = registry.media_servers(registry.ROLE_REFRESH)
+        targets: list[tuple[Optional[Any], Any]] = [(rec, srv) for rec, srv in refresh_pairs if srv.capabilities.file_paths]
+        if targets:
+            return targets, None
+        if refresh_pairs:
+            kind = str(getattr(refresh_pairs[0][1], "kind", "") or "")
+            return [], f"{kind or 'This media server'} does not expose library file paths."
+        return [], "No media server is configured."
+    if server is None:
+        return [], "No media server is configured."
+    return [(None, server)], None
+
+
+def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) -> dict[str, Any]:
+    started = now.isoformat()
+    run: dict[str, Any] = {
+        "started_at": started,
+        "server_kind": getattr(server, "kind", None),
+        "disk_files": 0,
+        "server_files": 0,
+        "unindexed": 0,
+        "stale": 0,
+    }
+    if not music_root.is_dir():
+        return _finish(db, run, f"The music folder {music_root} does not exist.")
+
+    try:
+        count = _record_long_names(db, music_root, started)
+        logger.info("library health: recorded %d long_name findings", count)
+    except OSError as exc:
+        logger.warning("library health: failed checking long names: %s", type(exc).__name__)
+
+    targets, target_err = _resolve_targets(server)
+    if target_err is not None:
+        return _finish(db, run, target_err)
+
+    results: list[tuple[str, list[dict[str, Any]], dict[str, Any]]] = []
+    errors: list[str] = []
+    raw_errors: list[str] = []
+    for idx, (rec, srv) in enumerate(targets):
+        label = rec.name if rec is not None else (str(getattr(srv, "kind", "") or "") or "server")
+        try:
+            srv_rows, counts = _scan_server(db, rec, srv, music_root, started, allow_legacy=(idx == 0))
+            results.append((label, srv_rows, counts))
+        except _ScanError as exc:
+            errors.append(f"{label}: {exc}")
+            raw_errors.append(str(exc))
+
+    if errors:
+        run["errors"] = errors
+    if not results:
+        err_msg = raw_errors[0] if len(targets) == 1 and targets[0][0] is None else "; ".join(errors)
+        return _finish(db, run, err_msg)
+
+    rows = _merge_server_rows(results)
     seen_at = started
     for i in range(0, len(rows), _SCAN_BATCH):
         db.upsert_library_health_findings(rows[i : i + _SCAN_BATCH], seen_at)
     db.delete_library_health_findings_not_seen([KIND_UNINDEXED, KIND_STALE], seen_at)
+    run["server_kind"] = ", ".join(label for label, _, _ in results)
+    run["disk_files"] = max((c["disk_files"] for _, _, c in results), default=0)
+    run["server_files"] = sum(c["server_files"] for _, _, c in results)
     run["unindexed"] = sum(1 for r in rows if r["kind"] == KIND_UNINDEXED)
     run["stale"] = sum(1 for r in rows if r["kind"] == KIND_STALE)
-    run["mapping_auto"] = auto
+    run["mapping_auto"] = any(c["mapping_auto"] for _, _, c in results)
     return _finish(db, run)
 
 
@@ -799,6 +918,36 @@ def mapping_view(db: Any) -> Optional[dict[str, Any]]:
     if not m:
         return None
     return {"server_prefix": m["server_prefix"], "local_prefix": m["local_prefix"], "auto": m["auto"]}
+
+
+def mappings_view(db: Any) -> list[dict[str, Any]]:
+    """Return one path-mapping entry per installed enabled server with ``file_paths`` capability."""
+    from trackseerr.media_servers import registry
+
+    if not registry.is_installed():
+        return []
+    out: list[dict[str, Any]] = []
+    idx = 0
+    for rec in registry.records():
+        if not rec.enabled:
+            continue
+        adapter = registry.build_adapter(rec)
+        if adapter is None or not adapter.capabilities.file_paths:
+            continue
+        saved = _saved_row_mapping(db, rec)
+        if not (saved and (saved.get("server_prefix") or saved.get("local_prefix"))) and idx == 0:
+            saved = _legacy_mapping(db, rec.kind)
+        out.append(
+            {
+                "server_id": rec.id,
+                "name": rec.name,
+                "server_prefix": (saved or {}).get("server_prefix", ""),
+                "local_prefix": (saved or {}).get("local_prefix", ""),
+                "auto": bool((saved or {}).get("auto", False)),
+            }
+        )
+        idx += 1
+    return out
 
 
 def run_view(row: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:

@@ -9,6 +9,8 @@ export type LibraryHealthRun = Schema<'LibraryHealthRun'>;
 
 export type LibraryHealthMapping = Schema<'LibraryHealthMapping'>;
 
+export type LibraryHealthServerMapping = Schema<'LibraryHealthServerMapping'>;
+
 export type LibraryHealthServer = Schema<'LibraryHealthServer'>;
 
 export type LibraryHealthResponse = Narrow<Schema<'LibraryHealthResponse'>, { findings: LibraryHealthFinding[]; groups: LibraryHealthGroup[] }>;
@@ -27,6 +29,7 @@ export interface LibraryHealthDismissRequest {
 export interface LibraryHealthMappingRequest {
   server_prefix: string;
   local_prefix: string;
+  server_id?: string | null;
 }
 
 /** The parts of a weak_match finding's `detail` the panel renders. */
