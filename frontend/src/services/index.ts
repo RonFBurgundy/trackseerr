@@ -7,6 +7,7 @@ export * from './playlistService';
 export * from './settingsService';
 export * from './systemService';
 export * from './plexPlaylistService';
+export * from './serverPlaylistService';
 export * from './scrobbleService';
 export * from './mixService';
 export * from './issueService';

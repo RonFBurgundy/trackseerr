@@ -3628,6 +3628,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media-servers/{server_id}/playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Server Playlists
+         * @description List playlists available on a Subsonic or Jellyfin server alongside any adopted Trackseerr id.
+         */
+        get: operations["list_server_playlists_api_media_servers__server_id__playlists_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media-servers/{server_id}/playlists/{pid}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adopt Server Playlist
+         * @description Adopt a Subsonic or Jellyfin playlist into Trackseerr as a read-only mirrored snapshot.
+         */
+        post: operations["adopt_server_playlist_api_media_servers__server_id__playlists__pid__adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media-servers/{server_id}/playlists/{pid}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Server Playlist Items
+         * @description Return read-only tracks of a playlist on a Subsonic or Jellyfin server.
+         */
+        get: operations["get_server_playlist_items_api_media_servers__server_id__playlists__pid__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/missing": {
         parameters: {
             query?: never;
@@ -14687,6 +14747,40 @@ export interface components {
             /** Plex History Poll Minutes */
             plex_history_poll_minutes?: number | null;
         };
+        /** ServerPlaylistSummary */
+        ServerPlaylistSummary: {
+            /** Adopted Playlist Id */
+            adopted_playlist_id?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Owner
+             * @default
+             */
+            owner: string;
+            /** Title */
+            title: string;
+            /**
+             * Track Count
+             * @default 0
+             */
+            track_count: number;
+        };
+        /** ServerPlaylistTrack */
+        ServerPlaylistTrack: {
+            /**
+             * Album
+             * @default
+             */
+            album: string;
+            /**
+             * Artist
+             * @default
+             */
+            artist: string;
+            /** Title */
+            title: string;
+        };
         /** ServicePingResult */
         ServicePingResult: {
             /** Enabled */
@@ -22309,6 +22403,107 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RejectCurrentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_server_playlists_api_media_servers__server_id__playlists_get: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerPlaylistSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_server_playlist_api_media_servers__server_id__playlists__pid__adopt_post: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                server_id: string;
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_server_playlist_items_api_media_servers__server_id__playlists__pid__items_get: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                server_id: string;
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerPlaylistTrack"][];
                 };
             };
             /** @description Validation Error */

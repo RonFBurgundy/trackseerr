@@ -72,12 +72,13 @@ const PLAYLIST_SERVICE_LABELS: Readonly<Record<string, string>> = {
 
 const SMART_LIDARR_HINT = 'Smart collections need TrackSeerr as the library manager (Settings \u2192 Library)';
 import { TailoredMixesSection } from '@/components/mixes';
-import { NoMediaServerNote } from '@/components/mediaServer';
+import { NoMediaServerNote, ServerPlaylistsSection } from '@/components/mediaServer';
 
 export interface PlaylistsViewProps {
   playlists: Playlist[];
   users: User[];
   playlistServers?: MediaServerItem[];
+  enabledServers?: MediaServerItem[];
   currentUserId?: string;
   onSync: () => Promise<void>;
   onToggleTarget: (playlistId: number | string, userIds: string[]) => Promise<void>;
@@ -1110,16 +1111,27 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   );
 };
 
-type PlaylistsSection = 'sync' | 'plex' | 'mixes';
+type PlaylistsSection = 'sync' | 'plex' | 'mixes' | `server:${string}`;
 
 export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
   const [requestedSection, setSection] = useState<PlaylistsSection>('sync');
   const hasMediaServer = props.hasMediaServer ?? true;
+  const isAdmin = props.isAdmin ?? false;
+  const enabledServers = props.enabledServers ?? [];
   // Plex playlists and mixes only exist with a media server; never leave a hidden section selected.
   const serverType = props.serverType ?? 'plex';
-  const showPlexSection = serverType === 'plex';
+  const showPlexSection =
+    enabledServers.length > 0 ? enabledServers.some((s) => s.kind === 'plex') : serverType === 'plex';
   const showMixes = props.mixesEnabled ?? true;
-  const visible = (s: PlaylistsSection): boolean => s === 'sync' || (s === 'plex' ? showPlexSection : showMixes);
+  const adoptableServers = isAdmin
+    ? enabledServers.filter(
+        (s): s is MediaServerItem & { kind: 'subsonic' | 'jellyfin' } =>
+          s.kind === 'subsonic' || s.kind === 'jellyfin'
+      )
+    : [];
+  const activeServer = adoptableServers.find((s) => `server:${s.id}` === requestedSection);
+  const visible = (s: PlaylistsSection): boolean =>
+    s === 'sync' || (s === 'plex' ? showPlexSection : s === 'mixes' ? showMixes : activeServer !== undefined);
   const section: PlaylistsSection = hasMediaServer && visible(requestedSection) ? requestedSection : 'sync';
 
   return (
@@ -1137,6 +1149,14 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
               Plex
             </TapeDeckButton>
           )}
+          {adoptableServers.map((srv) => {
+            const key: PlaylistsSection = `server:${srv.id}`;
+            return (
+              <TapeDeckButton key={srv.id} size="sm" active={section === key} onClick={() => setSection(key)}>
+                {srv.name}
+              </TapeDeckButton>
+            );
+          })}
           {showMixes && (
             <TapeDeckButton size="sm" active={section === 'mixes'} onClick={() => setSection('mixes')}>
               Mixes
@@ -1149,8 +1169,17 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
       }
     >
       {section === 'sync' && <SyncPlaylistsPanel {...props} hasMediaServer={hasMediaServer} />}
-      {section === 'plex' && <PlexPlaylistsSection isAdmin={props.isAdmin ?? false} />}
-      {section === 'mixes' && <TailoredMixesSection isAdmin={props.isAdmin ?? false} />}
+      {section === 'plex' && <PlexPlaylistsSection isAdmin={isAdmin} />}
+      {activeServer && section === `server:${activeServer.id}` && (
+        <ServerPlaylistsSection
+          key={activeServer.id}
+          serverId={activeServer.id}
+          serverName={activeServer.name}
+          kind={activeServer.kind}
+          users={props.users}
+        />
+      )}
+      {section === 'mixes' && <TailoredMixesSection isAdmin={isAdmin} />}
     </PageFrame>
   );
 };

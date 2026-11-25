@@ -163,7 +163,7 @@ const MainApp: React.FC = () => {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isPlaylistsLoading, setIsPlaylistsLoading] = useState<boolean>(false);
-  const { playlistServers } = usePlaylistServers(auth.canUseAdminUi);
+  const { playlistServers, enabledServers } = usePlaylistServers(auth.canUseAdminUi);
 
   // Set of requested IDs to update UI state
   const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
@@ -563,6 +563,7 @@ const MainApp: React.FC = () => {
                   playlists={playlists}
                   users={users}
                   playlistServers={playlistServers}
+                  enabledServers={enabledServers}
                   currentUserId={auth.user?.id}
                   onSync={handleSyncPlaylists}
                   onToggleTarget={handleToggleTarget}
