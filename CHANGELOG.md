@@ -105,6 +105,7 @@ heading becomes the version and date.
 ### Changed
 
 - **Duplicates** and **Not on MusicBrainz** in Library tools now look and work like Rename Files: filter chips, Select all / Select safe only (sure matches for MusicBrainz), a selected count, and the action buttons at the bottom. Duplicates can now keep the better quality copy, or both copies, for many albums at once.
+- On phones, the lists in Library tools (Rename Files, Retag, Wrong files, Duplicates, Not on MusicBrainz) now fill the screen instead of stopping halfway. **Find match** shows each possible match on one short line with how sure it is, how many of your songs it found, and how many tracks the release has; the reasons and track list are under **Show details**.
 - Songs from compilations are now filed under their own artist's single or album, so Plexamp shows far fewer "Various Artists" albums. This covers compilations from your Lidarr import, song requests, playlists and new downloads. A compilation stays together only when you monitor that album yourself, or when you switch on **Keep compilations together** in Settings → Media Management (off by default). Library Self-Heal does the moving; run Rename Files and Retag afterwards. Songs MusicBrainz only knows from compilations stay where they are.
 - Library Self-Heal shows which step it is on ("Step 4 of 11 · Linking albums") instead of a counter that keeps restarting, and scheduled runs now show progress too.
 - Switching on one song in an album now also monitors its album and artist, so the song is really searched for. The album's other songs stay as they were.
@@ -159,6 +160,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Find match showed confidence a hundred times too high ("5000% sure").
 - Wrong files and Rename Files' audio check no longer flag a song as wrong when AcoustID's main match agrees with the song title (even if a lower AcoustID result matches another song in your library), and treat spellings like "Thirty Days" vs "30 Days", "B4" vs "Before", censored words and spacing differences as the same song. Relinking a duplicate unlinked track row on an album now removes the emptied row instead of leaving a missing track behind.
 - Library Self-Heal no longer creates empty artist entries for compilation songs that stay under Various Artists, merges duplicate artists with the same name (including names written with `&` like "Blatta&Inesha"), moves single-artist albums stuck under Various Artists to their artist, and fills in compilation series and soundtrack names on Various Artists albums automatically.
 - Wrong files: Select safe only now leaves out songs that two files both claim (at least one of them is wrong) and tracks on DJ mixes, where AcoustID is unreliable. Those rows are marked Shared song or DJ mix. Relinking several files that point at the same song is refused, so neither is sent to the recycle bin.
