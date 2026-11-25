@@ -144,8 +144,14 @@ class ScrobbleWorker:
         now = _as_utc(now or datetime.now(timezone.utc))
         result = {"ingested": 0, "retried": 0}
 
+        from trackseerr.media_servers import registry
+
+        rec = registry.login_plex_record(config) if config is not None else None
+        poll_allowed = not registry.is_installed() or (
+            rec is not None and registry.ROLE_SCROBBLES in rec.roles
+        )
         minutes = db.get_plex_history_poll_minutes()
-        if minutes > 0 and plex_client is not None:
+        if poll_allowed and minutes > 0 and plex_client is not None:
             cursor_raw = db.get_scrobble_state(HISTORY_CURSOR_KEY)
             due = force or not cursor_raw or (
                 now - _as_utc(datetime.fromisoformat(cursor_raw)) >= timedelta(minutes=minutes)

@@ -306,6 +306,40 @@ def _discover_media_server_users(db: Database, server: MediaServer) -> None:
     logger.info("Discovered %d %s users (%d imported, %d skipped)", len(users), server.kind, imported, skipped)
 
 
+def _discover_all_server_users(db: Database, config: Config, plex_client: Any = None) -> None:
+    """Discover users from all enabled servers with ``ROLE_USERS`` (or fall back to ``plex_client``)."""
+    if not registry.is_installed():
+        if isinstance(plex_client, MediaServer) and plex_client.capabilities.users:
+            try:
+                _discover_media_server_users(db, plex_client)
+            except Exception as e:
+                logger.error("%s user discovery failed; continuing degraded: %s", plex_client.kind, safe_exc(e))
+                logger.debug("User discovery traceback", exc_info=True)
+        elif plex_client is not None and not isinstance(plex_client, MediaServer):
+            try:
+                _discover_plex_users(db, plex_client)
+            except Exception as e:
+                logger.error("Plex user discovery failed; continuing degraded: %s", safe_exc(e))
+                logger.debug("Plex discovery traceback", exc_info=True)
+        return
+
+    from .media_servers.plex import PlexMediaServer
+
+    for _rec, adapter in registry.media_servers(registry.ROLE_USERS):
+        if isinstance(adapter, PlexMediaServer):
+            try:
+                _discover_plex_users(db, adapter.plex_extras())
+            except Exception as e:
+                logger.error("Plex user discovery failed; continuing degraded: %s", safe_exc(e))
+                logger.debug("Plex discovery traceback", exc_info=True)
+        elif adapter.capabilities.users:
+            try:
+                _discover_media_server_users(db, adapter)
+            except Exception as e:
+                logger.error("%s user discovery failed; continuing degraded: %s", adapter.kind, safe_exc(e))
+                logger.debug("User discovery traceback", exc_info=True)
+
+
 def _start_sync_scheduler(
     db: Database,
     config: Config,
@@ -623,20 +657,8 @@ def _background_init(
         logger.debug("Client connect traceback", exc_info=True)
     finally:
         clients_ready.set()  # success or failure: the scheduler must not wait forever
-    if isinstance(clients.plex, MediaServer) and clients.plex.capabilities.users:
-        try:
-            with boot_state.step_timer(f"discovering {clients.plex.kind} users", publish=False):
-                _discover_media_server_users(db, clients.plex)
-        except Exception as e:  # mirrors the Plex path: user discovery degrades, it never blocks the workers below
-            logger.error("%s user discovery failed; continuing degraded: %s", clients.plex.kind, safe_exc(e))
-            logger.debug("User discovery traceback", exc_info=True)
-    if clients.plex is not None and not isinstance(clients.plex, MediaServer):  # a raw Plex client, not a MediaServer adapter
-        try:
-            with boot_state.step_timer("discovering Plex Home users", publish=False):
-                _discover_plex_users(db, clients.plex)
-        except Exception as e:
-            logger.error("Plex user discovery failed; continuing degraded: %s", safe_exc(e))
-            logger.debug("Plex discovery traceback", exc_info=True)
+    with boot_state.step_timer("discovering media server users", publish=False):
+        _discover_all_server_users(db, config, clients.plex)
     try:
         from .acquisition_worker import acquisition_worker
 
@@ -787,13 +809,12 @@ def _prepare_core(db: Database, config: Config, clients: _Clients, role: str) ->
                 pair = registry.primary_server(config)
                 adapter = registry.client_for(pair)
                 clients.plex = adapter  # a sync in flight keeps the adapter it already holds
-            if isinstance(adapter, MediaServer) and adapter.capabilities.users:
-                threading.Thread(  # off the request thread: the server may be slow or down
-                    target=_discover_media_server_users,
-                    args=(db, adapter),
-                    name="media-server-user-discovery",
-                    daemon=True,
-                ).start()
+            threading.Thread(  # off the request thread: the server may be slow or down
+                target=_discover_all_server_users,
+                args=(db, config),
+                name="media-server-user-discovery",
+                daemon=True,
+            ).start()
             name = pair[0].name if pair is not None else "no media server"
             logger.info("Media server settings changed: now using %s", name)
 
