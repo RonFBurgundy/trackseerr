@@ -158,6 +158,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Wrong files and Rename Files' audio check no longer flag a song as wrong when AcoustID's main match agrees with the song title (even if a lower AcoustID result matches another song in your library), and treat spellings like "Thirty Days" vs "30 Days", "B4" vs "Before", censored words and spacing differences as the same song. Relinking a duplicate unlinked track row on an album now removes the emptied row instead of leaving a missing track behind.
+- Library Self-Heal no longer creates empty artist entries for compilation songs that stay under Various Artists, merges duplicate artists with the same name (including names written with `&` like "Blatta&Inesha"), moves single-artist albums stuck under Various Artists to their artist, and fills in compilation series and soundtrack names on Various Artists albums automatically.
 - Wrong files: Select safe only now leaves out songs that two files both claim (at least one of them is wrong) and tracks on DJ mixes, where AcoustID is unreliable. Those rows are marked Shared song or DJ mix. Relinking several files that point at the same song is refused, so neither is sent to the recycle bin.
 - The Wrong files check and Rename Files' audio check show by name in Activity and the task list, instead of "rename_verify".
 - Relinking many files at once (Wrong files, or Relink suggested in Rename Files) now handles albums where every song is shifted by one. Files swapping places in the same batch no longer count as a clash, so neither copy is sent to the recycle bin.
