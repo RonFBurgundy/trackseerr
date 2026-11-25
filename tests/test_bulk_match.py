@@ -64,11 +64,15 @@ class _Stub:
     def __init__(self, monkeypatch: pytest.MonkeyPatch, results: dict[str, Any], conflict: bool = False):
         self.results = results
         self.applied: list[tuple[str, str, dict[str, str]]] = []
+        self.exclude_flags: list[bool] = []
         self.conflict = conflict
         monkeypatch.setattr(match_suggestions, "suggest_matches", self.suggest)
         monkeypatch.setattr(match_suggestions, "apply_match", self.apply)
 
-    def suggest(self, db: Any, enricher: Any, album_id: str, limit: int = 5) -> dict[str, Any]:
+    def suggest(
+        self, db: Any, enricher: Any, album_id: str, limit: int = 5, exclude_compilations: bool = False
+    ) -> dict[str, Any]:
+        self.exclude_flags.append(exclude_compilations)
         value = self.results[album_id]
         if isinstance(value, Exception):
             raise value
@@ -90,6 +94,7 @@ def test_auto_applies_sure_match(db: Database, tmp_path: Path, monkeypatch: pyte
 
     assert counts["applied"] == 1 and counts["albums"] == 1
     assert stub.applied == [("alb-1", "rg-a", {"alb-1-1": "rec-rg-a-1", "alb-1-2": "rec-rg-a-2"})]
+    assert stub.exclude_flags == [True]
     assert db.get_match_suggestion("alb-1") is None
 
 
@@ -169,7 +174,7 @@ def test_auto_conflict_counted(db: Database, tmp_path: Path, monkeypatch: pytest
 def test_auto_counts_errors_and_continues(db: Database, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     _seed(db, tmp_path, "alb-1")
     _seed(db, tmp_path, "alb-2")
-    _Stub(monkeypatch, {"alb-1": sqlite3.OperationalError("locked"), "alb-2": [_cand("rg-a", 50, 1, "alb-2")]})
+    _Stub(monkeypatch, {"alb-1": sqlite3.OperationalError("locked"), "alb-2": [_cand("rg-a", 70, 1, "alb-2")]})
 
     counts = auto_match_unlinked(db, object())
 
