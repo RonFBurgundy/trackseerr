@@ -98,6 +98,7 @@ class MigrationsMixin:
                 (108, self._migration_v108),
                 (109, self._migration_v109),
                 (110, self._migration_v110),
+                (111, self._migration_v111),
             ]
 
             applied = 0
@@ -473,6 +474,19 @@ class MigrationsMixin:
                 secret_sealed TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 PRIMARY KEY (user_id, server_id)
+            )
+            """
+        )
+
+    def _migration_v111(self, cur: sqlite3.Cursor) -> None:
+        """v111: server_playlist_sources for adopted Subsonic/Jellyfin playlists."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS server_playlist_sources (
+                playlist_id TEXT PRIMARY KEY REFERENCES playlists(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                server_playlist_id TEXT NOT NULL,
+                server_user TEXT NOT NULL DEFAULT ''
             )
             """
         )

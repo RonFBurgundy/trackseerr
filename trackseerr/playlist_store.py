@@ -274,6 +274,60 @@ class PlaylistStoreMixin:
             return [dict(row) for row in cur.fetchall()]
 
     # -------------------------------------------------------------------------
+    # Subsonic / Jellyfin Playlist Adoption: server_playlist_sources
+    # -------------------------------------------------------------------------
+
+    def set_server_playlist_source(
+        self,
+        playlist_id: str,
+        server_id: str,
+        server_playlist_id: str,
+        server_user: str = "",
+    ) -> None:
+        """Record or update the originating media-server playlist for an adopted Trackseerr playlist."""
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO server_playlist_sources (playlist_id, server_id, server_playlist_id, server_user)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(playlist_id) DO UPDATE SET
+                    server_id = excluded.server_id,
+                    server_playlist_id = excluded.server_playlist_id,
+                    server_user = excluded.server_user
+                """,
+                (str(playlist_id), str(server_id), str(server_playlist_id), str(server_user or "")),
+            )
+            self.conn.commit()
+
+    def get_server_playlist_source(self, playlist_id: str) -> Optional[dict[str, Any]]:
+        """Return the ``server_playlist_sources`` row for ``playlist_id``, or None."""
+        with self.reader() as conn:
+            cur = conn.execute(
+                """
+                SELECT playlist_id, server_id, server_playlist_id, server_user
+                FROM server_playlist_sources
+                WHERE playlist_id = ?
+                """,
+                (str(playlist_id),),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def list_server_playlist_sources(self, server_id: str) -> list[dict[str, Any]]:
+        """Return all ``server_playlist_sources`` rows belonging to ``server_id``."""
+        with self.reader() as conn:
+            cur = conn.execute(
+                """
+                SELECT playlist_id, server_id, server_playlist_id, server_user
+                FROM server_playlist_sources
+                WHERE server_id = ?
+                ORDER BY playlist_id ASC
+                """,
+                (str(server_id),),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    # -------------------------------------------------------------------------
     # Plex Playlist Control: registry + mix snapshots
     # -------------------------------------------------------------------------
 

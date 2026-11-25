@@ -647,6 +647,12 @@ CREATE TABLE user_server_accounts (
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 PRIMARY KEY (user_id, server_id)
             );
+CREATE TABLE server_playlist_sources (
+                playlist_id TEXT PRIMARY KEY REFERENCES playlists(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                server_playlist_id TEXT NOT NULL,
+                server_user TEXT NOT NULL DEFAULT ''
+            );
 CREATE TABLE plex_playlist_registry (
                 plex_user TEXT NOT NULL,
                 rating_key TEXT NOT NULL,

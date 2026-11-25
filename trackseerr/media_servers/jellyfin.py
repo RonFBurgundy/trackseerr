@@ -531,6 +531,53 @@ class JellyfinMediaServer(MediaServer):
             logger.warning("Jellyfin has %d playlists named '%s' for this user; updating the first", len(owned), name)
         return owned[0] if owned else None
 
+    def _resolve_source_user(self, user: Optional[str]) -> ServerUser:
+        """Resolve a Jellyfin user name/id, or fall back to the adapter's default account."""
+        resolved = self._resolve_user(user or "", self.list_users())
+        if resolved is None:
+            who = f"'{user}'" if user else "the default account"
+            raise MediaServerNotFound(f"Jellyfin user {who} not found", safe_detail=f"Jellyfin user {who} not found")
+        return resolved
+
+    def list_source_playlists(self, user: Optional[str] = None) -> list[dict[str, Any]]:
+        """Return audio playlists visible to ``user`` (or the default Jellyfin account)."""
+        resolved = self._resolve_source_user(user)
+        out: list[dict[str, Any]] = []
+        for p in self._paged(
+            "/Items",
+            [("IncludeItemTypes", "Playlist"), ("Recursive", "true"), ("MediaTypes", "Audio"), ("UserId", resolved.id)],
+        ):
+            pid = str(p.get("Id") or "")
+            if not pid:
+                continue
+            raw_count = p.get("ChildCount") if p.get("ChildCount") is not None else p.get("RecursiveItemCount")
+            track_count = int(raw_count) if isinstance(raw_count, (int, float)) and not isinstance(raw_count, bool) else 0
+            out.append(
+                {
+                    "id": pid,
+                    "title": str(p.get("Name") or ""),
+                    "owner": str(p.get("Owner") or ""),
+                    "track_count": track_count,
+                }
+            )
+        return out
+
+    def source_playlist_tracks(self, playlist_id: str, user: Optional[str] = None) -> list[dict[str, str]]:
+        """Return ``{title, artist, album}`` dicts for every track in Jellyfin playlist ``playlist_id``."""
+        resolved = self._resolve_source_user(user)
+        tracks: list[dict[str, str]] = []
+        for item in self._paged(f"/Playlists/{playlist_id}/Items", [("UserId", resolved.id)]):
+            artists = [str(a) for a in item.get("Artists") or [] if a]
+            artist = artists[0] if artists else str(item.get("AlbumArtist") or "")
+            tracks.append(
+                {
+                    "title": str(item.get("Name") or ""),
+                    "artist": artist,
+                    "album": str(item.get("Album") or ""),
+                }
+            )
+        return tracks
+
     def _entries(self, playlist_id: str, user_id: str) -> list[tuple[str, str]]:
         return [
             (str(e["PlaylistItemId"]), str(e["Id"]))

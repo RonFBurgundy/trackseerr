@@ -218,6 +218,14 @@ class MediaServer(ABC):
         """Human-readable warnings about media-server settings that could lose data on rename."""
         return []
 
+    def list_source_playlists(self, user: Optional[str] = None) -> list[dict[str, Any]]:
+        """Read-only listing of playlists on this server: dicts with ``{id, title, owner, track_count}``."""
+        raise MediaServerUnsupported(f"{self.kind or 'This media server'} does not support listing source playlists")
+
+    def source_playlist_tracks(self, playlist_id: str, user: Optional[str] = None) -> list[dict[str, str]]:
+        """Read-only track listing for a server playlist: dicts with ``{title, artist, album}``."""
+        raise MediaServerUnsupported(f"{self.kind or 'This media server'} does not support reading source playlists")
+
 
 def as_media_server(server_or_client: Any, music_section: Optional[str] = None) -> Optional[MediaServer]:
     """Normalise whatever a flow was handed into a :class:`MediaServer`.
