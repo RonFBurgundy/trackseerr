@@ -311,7 +311,20 @@ def _sort_key(candidate: dict[str, Any]) -> tuple[int, int, int, str, str]:
     )
 
 
-def suggest_matches(db: Any, enricher: Any, album_id: str, limit: int = 5) -> dict[str, Any]:
+def _is_compilation_only(group: dict[str, Any], clean_title: str) -> bool:
+    """True when a group is a VA compilation or DJ-mix whose title does not match the album."""
+    if album_titles_match(str(group.get("title") or ""), clean_title):
+        return False
+    return bool(group.get("is_various")) or "DJ-mix" in (group.get("secondary_types") or [])
+
+
+def suggest_matches(
+    db: Any,
+    enricher: Any,
+    album_id: str,
+    limit: int = 5,
+    exclude_compilations: bool = False,
+) -> dict[str, Any]:
     """Ranked MusicBrainz release groups an unlinked album could be, with how each file would map. Never writes."""
     album = db.get_library_album(album_id)
     if album is None:
@@ -333,6 +346,8 @@ def suggest_matches(db: Any, enricher: Any, album_id: str, limit: int = 5) -> di
     except _MusicBrainzUnavailable:
         logger.info("MusicBrainz unavailable while suggesting matches for album %s", album_id)
         return {"album": summary, "candidates": [], "unavailable": True}
+    if exclude_compilations and artist.strip().casefold() != VARIOUS_NAME.casefold():
+        groups = {gid: g for gid, g in groups.items() if not _is_compilation_only(g, clean_title)}
     candidates = [
         _build_candidate(enricher, group, tracks, len(files), artist, clean_title, gid in known)
         for gid, group in groups.items()
@@ -398,7 +413,7 @@ def apply_match(
 
 SURE_CONFIDENCE = 90
 SURE_MARGIN = 10
-MIN_SUGGEST_CONFIDENCE = 30
+MIN_SUGGEST_CONFIDENCE = 60  # below 60 the song is found but neither the title nor the length agrees
 MAX_CONSECUTIVE_UNAVAILABLE = 3
 _AUTO_KEYS = ("albums", "applied", "suggested", "no_candidates", "unavailable", "conflicts", "errors")
 
@@ -432,7 +447,7 @@ def _auto_one(db: Any, enricher: Any, album_id: str, counts: dict[str, int]) -> 
         db.delete_match_suggestion(album_id)
         counts["no_candidates"] += 1
         return False
-    result = suggest_matches(db, enricher, album_id, limit=3)
+    result = suggest_matches(db, enricher, album_id, limit=3, exclude_compilations=True)
     if result.get("unavailable"):
         counts["unavailable"] += 1
         return True

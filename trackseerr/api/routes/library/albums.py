@@ -10,6 +10,7 @@ from fastapi.responses import RedirectResponse
 
 from trackseerr import art_pipeline
 from trackseerr import lidarr_library
+from trackseerr.match_suggestions import MIN_SUGGEST_CONFIDENCE
 from trackseerr.api.dependencies import (
     get_db,
     get_discovery_client,
@@ -385,7 +386,9 @@ def list_stored_match_suggestions(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Lists the unsure matches Self-Heal stored for bulk review, most confident first."""
-    items, total = db.list_match_suggestions(page=page, page_size=page_size)
+    items, total = db.list_match_suggestions(
+        page=page, page_size=page_size, min_confidence=MIN_SUGGEST_CONFIDENCE
+    )
     return {"items": items, "total": total, "page": page, "page_size": page_size}
 
 
