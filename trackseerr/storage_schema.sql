@@ -624,6 +624,21 @@ CREATE TABLE playlist_targets (
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 PRIMARY KEY (playlist_id, user_id)
             );
+CREATE TABLE playlist_server_excludes (
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                PRIMARY KEY (playlist_id, server_id)
+            );
+CREATE TABLE playlist_server_state (
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                matched INTEGER NOT NULL DEFAULT 0,
+                missing INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                synced_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                PRIMARY KEY (playlist_id, server_id)
+            );
 CREATE TABLE plex_playlist_registry (
                 plex_user TEXT NOT NULL,
                 rating_key TEXT NOT NULL,

@@ -96,6 +96,7 @@ class MigrationsMixin:
                 (106, self._migration_v106),
                 (107, self._migration_v107),
                 (108, self._migration_v108),
+                (109, self._migration_v109),
             ]
 
             applied = 0
@@ -432,6 +433,32 @@ class MigrationsMixin:
             "UPDATE media_server_settings "
             "SET type = '', url = '', username = '', password = '', api_key = '', credentials_type = '' "
             "WHERE id = 1"
+        )
+
+    def _migration_v109(self, cur: sqlite3.Cursor) -> None:
+        """v109: playlist_server_excludes and playlist_server_state for multi-server playlist fanout."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS playlist_server_excludes (
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                PRIMARY KEY (playlist_id, server_id)
+            )
+            """
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS playlist_server_state (
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                status TEXT NOT NULL,
+                matched INTEGER NOT NULL DEFAULT 0,
+                missing INTEGER NOT NULL DEFAULT 0,
+                error TEXT NOT NULL DEFAULT '',
+                synced_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                PRIMARY KEY (playlist_id, server_id)
+            )
+            """
         )
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:

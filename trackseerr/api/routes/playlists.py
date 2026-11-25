@@ -24,6 +24,7 @@ from trackseerr.api.dependencies import (
     require_permission,
 )
 from trackseerr.api.routes.issues import _Stripped, _is_admin, _reject_control_chars, file_issue
+from trackseerr.api.routes.sync import _playlist_servers, _push_to_extra_server
 from trackseerr.api.schemas.playlists import (
     FeaturedChart,
     ListeningSourcesResponse,
@@ -42,6 +43,7 @@ from trackseerr.clients.deezer import DeezerClient
 from trackseerr.clients.import_lists import listenbrainz as lb_provider
 from trackseerr.clients.import_lists.base import ImportListError
 from trackseerr.media_servers import PlaylistSyncOptions, as_media_server, describe_error
+from trackseerr.media_servers.registry import ServerRecord
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.spotify_scraper import SpotifyWebScraper
 from trackseerr.clients.youtube_music import get_shared_youtube_music_client
@@ -981,6 +983,56 @@ def delete_playlist(
     return {"status": "deleted", "id": playlist_id}
 
 
+def _push_stored_to_first_server(
+    db: Database,
+    config: Config,
+    first_rec: Optional[ServerRecord],
+    first_server: Any,
+    model_playlist: Playlist,
+    target_usernames: list[str],
+) -> tuple[int, int]:
+    """Push a just-stored playlist to its primary/first server and record overall playlist state."""
+    playlist_id = model_playlist.id
+    server_name = first_rec.name if first_rec is not None else "Plex"
+    try:
+        results = first_server.sync_playlist(
+            model_playlist, target_usernames, PlaylistSyncOptions.from_config(config, db=db)
+        )
+        matched, missing = first_server.match_playlist_tracks(
+            model_playlist.tracks, threshold=config.search_similarity_threshold
+        )
+        matched_count = len(matched)
+        missing_count = len(missing)
+        success = any(r.success for r in results) if results else False
+        db.record_sync_result(
+            playlist_id,
+            status="success" if (success and not missing) else ("partial" if success else "error"),
+            missing_tracks=missing,
+        )
+        if first_rec is not None:
+            db.record_playlist_server_state(
+                playlist_id,
+                first_rec.id,
+                "success" if success else "failed",
+                matched=matched_count,
+                missing=missing_count,
+            )
+    except Exception as e:
+        logger.error("Error during direct import sync to %s: %s", server_name, describe_error(e))
+        logger.debug("Direct import sync traceback", exc_info=True)
+        db.record_sync_result(playlist_id, status="error")
+        if first_rec is not None:
+            db.record_playlist_server_state(
+                playlist_id,
+                first_rec.id,
+                "failed",
+                error=describe_error(e),
+            )
+        return 0, 0
+    _apply_missing_in_background(db, config, playlist_id)
+    return matched_count, missing_count
+
+
 def _sync_stored_playlist(
     db: Database,
     config: Config,
@@ -992,14 +1044,15 @@ def _sync_stored_playlist(
     model_tracks: list[Track],
     targets: list[str],
 ) -> tuple[int, int]:
-    """Pushes a just-stored playlist to the media server (or matches it natively) and records its missing tracks.
+    """Pushes a just-stored playlist to the media servers (or matches it natively) and records its missing tracks.
 
-    Returns ``(matched, missing)``. Failures are logged and recorded on the playlist, never raised.
+    Returns ``(matched, missing)`` from the primary server. Failures are logged and recorded on the playlist, never raised.
     """
     matched_count = 0
     missing_count = 0
-    server = as_media_server(plex_client)
-    if server and model_tracks:
+    fallback_server = as_media_server(plex_client)
+    servers = _playlist_servers(db, {"id": playlist_id, "name": name}, fallback_server)
+    if servers and model_tracks:
         target_usernames = []
         for uid in targets:
             user_row = db.get_user(uid)
@@ -1014,28 +1067,14 @@ def _sync_stored_playlist(
                 description=description,
                 poster=poster_url,
             )
-            try:
-                results = server.sync_playlist(
-                    model_playlist, target_usernames, PlaylistSyncOptions.from_config(config, db=db)
-                )
-                matched, missing = server.match_playlist_tracks(
-                    model_tracks, threshold=config.search_similarity_threshold
-                )
-                matched_count = len(matched)
-                missing_count = len(missing)
-                success = any(r.success for r in results) if results else False
-                db.record_sync_result(
-                    playlist_id,
-                    status="success" if (success and not missing) else ("partial" if success else "error"),
-                    missing_tracks=missing,
-                )
-            except Exception as e:
-                logger.error("Error during direct import sync to Plex: %s", describe_error(e))
-                logger.debug("Direct import sync traceback", exc_info=True)
-                db.record_sync_result(playlist_id, status="error")
-            else:
-                _apply_missing_in_background(db, config, playlist_id)
-    elif model_tracks and not __import__("trackseerr.media_servers", fromlist=["registry"]).registry.has_servers(config):
+            first_rec, first_server = servers[0]
+            matched_count, missing_count = _push_stored_to_first_server(
+                db, config, first_rec, first_server, model_playlist, target_usernames
+            )
+            for rec, adapter in servers[1:]:
+                if rec is not None:
+                    _push_to_extra_server(db, config, rec, adapter, model_playlist, target_usernames)
+    elif model_tracks and not servers:
         # No media server: nothing to push, but the playlist is still matched against the native library so its
         # missing tracks feed monitoring / wanted.
         try:
