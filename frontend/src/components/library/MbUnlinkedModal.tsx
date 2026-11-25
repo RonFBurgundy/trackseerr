@@ -451,8 +451,8 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
           onToast={onToast}
         />
       ) : (
-        <div className="space-y-3">
-          <p className="text-xs font-mono text-neutral-400">
+        <div className="flex flex-col min-h-0 flex-1 h-full gap-3 sm:block sm:h-auto sm:flex-none sm:space-y-3">
+          <p className="text-xs font-mono text-neutral-400 shrink-0">
             {suggestedTab
               ? 'Matches Library Self-Heal found. Sure matches (80% or more) start ticked.'
               : "Opens MusicBrainz with this album prefilled. Log in there, check it, and submit; you'll come back here and the album gets linked."}
@@ -462,7 +462,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
           <div
             role="group"
             aria-label="MusicBrainz unlinked categories"
-            className="tab-strip overflow-x-auto pb-0.5"
+            className="tab-strip overflow-x-auto pb-0.5 shrink-0"
           >
             <button
               type="button"
@@ -517,7 +517,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
           </div>
 
           {/* Header Toolbar */}
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono shrink-0">
             {suggestedTab ? (
               <>
                 <div className="flex items-center gap-2">
@@ -595,7 +595,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
           </div>
 
           {suggestedTab && suggestions.error && (
-            <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+            <p role="alert" className="text-xs font-mono text-[var(--status-error)] shrink-0">
               {suggestions.error}
             </p>
           )}
@@ -603,7 +603,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
           {activeList.error && (
             <div
               role="alert"
-              className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-[var(--status-error)]"
+              className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-[var(--status-error)] shrink-0"
             >
               <span>{activeList.error}</span>
               <TapeDeckButton size="sm" onClick={activeList.retry}>
@@ -639,8 +639,7 @@ export const MbUnlinkedModal: React.FC<MbUnlinkedModalProps> = ({
               tabIndex={0}
               role="region"
               aria-label={suggestedTab ? 'Suggested MusicBrainz matches (scrollable)' : 'MusicBrainz unlinked albums (scrollable)'}
-              className="virtual-scroll overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
-              style={{ maxHeight: 'min(450px, 55vh)' }}
+              className="virtual-scroll overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c] flex-1 min-h-[16rem] sm:flex-none sm:max-h-[min(450px,55vh)]"
             >
               <div
                 style={{
