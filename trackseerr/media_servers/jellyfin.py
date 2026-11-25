@@ -34,7 +34,7 @@ never sent twice.
 import logging
 import time
 import weakref
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Iterator, Optional, Sequence
 
 import httpx
@@ -490,6 +490,53 @@ class JellyfinMediaServer(MediaServer):
             and u.get("Name")
             and not (u.get("Policy") or {}).get("IsDisabled", False)
         ]
+
+    def recent_plays(self, user_id: str, since: datetime, limit: int = 200) -> list[dict[str, Any]]:
+        """Audio items played by ``user_id`` strictly after ``since``, newest first.
+
+        Note: Jellyfin only keeps each song's LAST play (``UserData.LastPlayedDate``), so a song replayed
+        between two polls counts once.
+        """
+        since_utc = since.replace(tzinfo=timezone.utc) if since.tzinfo is None else since.astimezone(timezone.utc)
+        params = (
+            ("IncludeItemTypes", "Audio"),
+            ("Recursive", "true"),
+            ("Filters", "IsPlayed"),
+            ("SortBy", "DatePlayed"),
+            ("SortOrder", "Descending"),
+            ("Fields", "UserData"),
+        )
+        plays: list[dict[str, Any]] = []
+        page_size = max(1, min(limit, _PAGE))
+        for item in self._paged(f"/Users/{user_id}/Items", params, page=page_size):
+            user_data = item.get("UserData")
+            raw_date = str(user_data.get("LastPlayedDate") or "") if isinstance(user_data, dict) else ""
+            played_at = _parse_iso_utc(raw_date) if raw_date else None
+            if played_at is None:
+                continue
+            if played_at <= since_utc:
+                break
+            item_id = str(item.get("Id") or "").strip()
+            artists = item.get("Artists") or []
+            artist = str(artists[0] if artists else item.get("AlbumArtist") or "").strip()
+            title = str(item.get("Name") or "").strip()
+            if not item_id or not artist or not title:
+                continue
+            ticks = item.get("RunTimeTicks")
+            duration_ms = int(ticks // 10_000) if isinstance(ticks, (int, float)) and ticks > 0 else None
+            plays.append(
+                {
+                    "item_id": item_id,
+                    "artist": artist,
+                    "title": title,
+                    "album": str(item.get("Album") or "").strip() or None,
+                    "duration_ms": duration_ms,
+                    "played_at": played_at,
+                }
+            )
+            if len(plays) >= limit:
+                break
+        return plays
 
     # ------------------------------------------------------------------ playlists
 

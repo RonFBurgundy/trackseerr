@@ -57,10 +57,19 @@ class FakeUser:
 
 
 @dataclass
+class FakePlay:
+    user_id: str
+    item_id: str
+    played_at: str
+    play_count: int = 1
+
+
+@dataclass
 class JellyfinState:
     songs: list[FakeAudio] = field(default_factory=list)
     playlists: dict[str, FakePlaylist] = field(default_factory=dict)
     users: list[FakeUser] = field(default_factory=list)
+    plays: list[FakePlay] = field(default_factory=list)
     api_keys: set[str] = field(default_factory=lambda: {API_KEY})
     scans: int = 0
     next_playlist: int = 1
@@ -143,6 +152,7 @@ class FakeJellyfin:
         return [
             route("GET", r"/System/Info", self._system_info),
             route("GET", r"/Users", self._users),
+            route("GET", r"/Users/([^/]+)/Items", self._user_items),
             route("GET", r"/Items", self._items),
             route("GET", r"/Library/VirtualFolders", self._virtual_folders),
             route("POST", r"/Library/Media/Updated", self._media_updated),
@@ -211,6 +221,42 @@ class FakeJellyfin:
             term = _clean(query["SearchTerm"]).strip()
             songs = [s for s in songs if term in _clean(s.title)]  # name only, like Jellyfin
         return self._json(self._page([self._audio_json(s) for s in songs], query, st.max_page))
+
+    def _user_items(self, request: httpx.Request, query: dict[str, str], user_id: str) -> httpx.Response:
+        st = self.state
+        if st.user(user_id) is None:
+            return httpx.Response(404)
+        if query.get("IncludeItemTypes", "") != "Audio":
+            return httpx.Response(400)
+        plays_by_item = {p.item_id: p for p in st.plays if p.user_id == user_id}
+        rows: list[dict[str, Any]] = []
+        if query.get("Filters") == "IsPlayed":
+            for play in plays_by_item.values():
+                song = st.song(play.item_id)
+                if song is None:
+                    continue
+                row = self._audio_json(song)
+                row["UserData"] = {
+                    "LastPlayedDate": play.played_at,
+                    "PlayCount": play.play_count,
+                    "Played": True,
+                }
+                rows.append(row)
+        else:
+            for song in st.songs:
+                row = self._audio_json(song)
+                play = plays_by_item.get(song.id)
+                if play is not None:
+                    row["UserData"] = {
+                        "LastPlayedDate": play.played_at,
+                        "PlayCount": play.play_count,
+                        "Played": True,
+                    }
+                rows.append(row)
+        if query.get("SortBy") == "DatePlayed":
+            reverse = query.get("SortOrder", "").lower() == "descending"
+            rows.sort(key=lambda r: (r.get("UserData") or {}).get("LastPlayedDate", ""), reverse=reverse)
+        return self._json(self._page(rows, query, st.max_page))
 
     def _virtual_folders(self, request: httpx.Request, query: dict[str, str]) -> httpx.Response:
         return self._json(self.state.virtual_folders)
