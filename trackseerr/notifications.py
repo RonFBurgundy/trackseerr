@@ -194,8 +194,8 @@ def format_notification(event: str, data: dict[str, Any]) -> tuple[str, str]:
         else:
             body += "."
     elif event == NotificationEvent.ITEM_AVAILABLE.value:
-        subj = f"Music Available: {artist} - {title} is ready in Plex!"
-        body = f"'{artist} - {title}' has been imported and is now ready in your Plex library."
+        subj = f"Music Available: {artist} - {title} is ready in your library!"
+        body = f"'{artist} - {title}' has been imported and is now ready in your library."
     elif event == NotificationEvent.DOWNLOAD_FAILED.value:
         err = data.get("error_message") or data.get("error") or "Unknown error"
         subj = f"Download Failed: {artist} - {title}"

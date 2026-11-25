@@ -335,7 +335,7 @@ class TestGenerate:
         plex = MagicMock()
         plex.sync_playlist_to_users.side_effect = requests.ConnectionError("plex down")
         res, _ = run_generate(gen_env, mix, plex)
-        assert res.synced is False and res.sync_error == "Plex sync failed (ConnectionError)"
+        assert res.synced is False and res.sync_error == "Media server sync failed (ConnectionError)"
 
     def test_insufficient_history_propagates(self, db, users, config):
         mix = make_mix(db, users["bob"]["id"])
@@ -728,7 +728,7 @@ class TestNoTokenLeaks:
         plex.sync_playlist_to_users.side_effect = requests.ReadTimeout(SECRET_URL)
         with caplog.at_level("DEBUG"):
             res, _ = run_generate(gen_env, mix, plex)
-        assert res.sync_error == "Plex sync failed (ReadTimeout)"
+        assert res.sync_error == "Media server sync failed (ReadTimeout)"
         assert "SECRET" not in caplog.text
         assert "SECRET" not in gen_env.db.get_mix_config(mix["id"])["last_result_json"]
 
