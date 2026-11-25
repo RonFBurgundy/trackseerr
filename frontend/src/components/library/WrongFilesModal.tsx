@@ -141,6 +141,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
   const [batchRelinkSummary, setBatchRelinkSummary] = useState<{
     relinked: number;
     conflictsSkipped: number;
+    ambiguous: number;
     errors: number;
     errorMessages: string[];
   } | null>(null);
@@ -153,6 +154,11 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
     estimateSize: () => 92,
     overscan: 8,
   });
+
+  const safeCount = useMemo(
+    () => items.filter((item) => item.safe).length,
+    [items]
+  );
 
   const selectedItems = useMemo(
     () => items.filter((item) => selectedIds.has(item.file_id)),
@@ -235,8 +241,10 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
 
     let relinked = 0;
     let conflictsSkipped = 0;
+    let ambiguous = 0;
     let errors = 0;
     const errorMessages: string[] = [];
+    const seenMessages = new Set<string>();
     const removedIds = new Set<string>();
 
     try {
@@ -247,6 +255,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
         });
         relinked += res.relinked;
         conflictsSkipped += res.conflicts_skipped;
+        ambiguous += res.ambiguous;
         errors += res.errors;
 
         for (const r of res.results) {
@@ -259,6 +268,10 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
           if (r.status === 'error' && r.message) {
             errorMessages.push(r.message);
           }
+          if (r.status === 'ambiguous_target' && r.message && !seenMessages.has(r.message)) {
+            seenMessages.add(r.message);
+            errorMessages.push(r.message);
+          }
         }
       }
 
@@ -269,6 +282,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
       setBatchRelinkSummary({
         relinked,
         conflictsSkipped,
+        ambiguous,
         errors,
         errorMessages,
       });
@@ -376,7 +390,10 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
         <div className="space-y-1 text-xs font-mono text-neutral-300">
           <p>
             Relinked {batchRelinkSummary.relinked} · skipped {batchRelinkSummary.conflictsSkipped}{' '}
-            (right track already has a file) · {batchRelinkSummary.errors} errors
+            (right track already has a file)
+            {batchRelinkSummary.ambiguous > 0 &&
+              ` · ${batchRelinkSummary.ambiguous} left alone (two files point at the same song)`}{' '}
+            · {batchRelinkSummary.errors} errors
           </p>
           {batchRelinkSummary.errorMessages.length > 0 && (
             <ul className="text-[var(--status-error)] space-y-0.5 max-h-32 overflow-y-auto pl-4 list-disc">
@@ -557,10 +574,10 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                       <button
                         type="button"
                         onClick={selectSafe}
-                        title="Select only different-song files with a known library track"
+                        title="Select only safe files"
                         className="text-neutral-400 hover:text-white transition-colors"
                       >
-                        Select safe only
+                        Select safe only ({safeCount})
                       </button>
                       <span className="text-neutral-500">•</span>
                       <button
@@ -762,8 +779,24 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                                 </TapeDeckButton>
                               </div>
 
-                              <div className="tab-strip mt-1 h-4 overflow-x-auto">
+                              <div className="tab-strip mt-1 h-4 overflow-x-auto flex items-center gap-1">
                                 <KindChip kind={item.kind} />
+                                {item.claimed_by_others > 0 && (
+                                  <span
+                                    title="Another file also points at this song — at least one of them is wrong. Check by ear and relink one at a time"
+                                    className={`${CHIP_BASE} ${CHIP_RISKY}`}
+                                  >
+                                    Shared song
+                                  </span>
+                                )}
+                                {item.album_is_mix && (
+                                  <span
+                                    title="Continuous mixes fingerprint unreliably — check by ear"
+                                    className={`${CHIP_BASE} ${CHIP_RISKY}`}
+                                  >
+                                    DJ mix
+                                  </span>
+                                )}
                               </div>
                             </div>
                           </div>
