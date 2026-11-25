@@ -5470,27 +5470,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/settings/media-server": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get the saved media-server settings (secrets masked) */
-        get: operations["get_media_server_settings_api_settings_media_server_get"];
-        /**
-         * Save the media-server settings (Admin Only)
-         * @description Saves the choice. The environment takes precedence: while it configures a media server this is refused (409).
-         */
-        put: operations["update_media_server_settings_api_settings_media_server_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/settings/media-server/plex-account": {
         parameters: {
             query?: never;
@@ -5498,7 +5477,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get the stored Plex owner account status (Admin Only) */
+        get: operations["get_plex_account_status_api_settings_media_server_plex_account_get"];
         put?: never;
         post?: never;
         /** Disconnect the stored Plex owner account token (Admin Only) */
@@ -5536,26 +5516,6 @@ export interface paths {
         put?: never;
         /** Create a Plex OAuth PIN for linking the server owner's Plex account (Admin Only) */
         post: operations["create_plex_account_pin_api_settings_media_server_plex_account_pin_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/settings/media-server/test": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Test a media-server connection without saving it (Admin Only)
-         * @description Builds the adapter from the submitted values (masked secrets resolved from the saved ones) and pings it.
-         */
-        post: operations["test_media_server_settings_api_settings_media_server_test_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11908,58 +11868,6 @@ export interface components {
              */
             verify_ssl: boolean;
         };
-        /**
-         * MediaServerSettingsPayload
-         * @description What the Settings page submits. A secret sent back as ``********`` keeps the stored value.
-         */
-        MediaServerSettingsPayload: {
-            /**
-             * Api Key
-             * @default
-             */
-            api_key: string;
-            /**
-             * Password
-             * @default
-             */
-            password: string;
-            /**
-             * Type
-             * @enum {string}
-             */
-            type: "subsonic" | "jellyfin" | "none";
-            /**
-             * Url
-             * @default
-             */
-            url: string;
-            /**
-             * Username
-             * @default
-             */
-            username: string;
-        };
-        /** MediaServerSettingsResponse */
-        MediaServerSettingsResponse: {
-            /** Api Key */
-            api_key: string;
-            /** Effective Type */
-            effective_type: string;
-            /** Locked By Env */
-            locked_by_env: boolean;
-            /** Password */
-            password: string;
-            /** Plex Account Connected */
-            plex_account_connected: boolean;
-            /** Plex Account Username */
-            plex_account_username: string;
-            /** Type */
-            type: string;
-            /** Url */
-            url: string;
-            /** Username */
-            username: string;
-        };
         /** MediaServerStatus */
         MediaServerStatus: {
             capabilities: components["schemas"]["MediaServerCapabilities"];
@@ -11967,13 +11875,6 @@ export interface components {
             connected: boolean;
             /** Type */
             type: string;
-        };
-        /** MediaServerTestResponse */
-        MediaServerTestResponse: {
-            /** Message */
-            message: string;
-            /** Ok */
-            ok: boolean;
         };
         /** MediaServerTestResult */
         MediaServerTestResult: {
@@ -12881,6 +12782,13 @@ export interface components {
         PlexAccountDisconnectResponse: {
             /** Connected */
             connected: boolean;
+        };
+        /** PlexAccountStatusResponse */
+        PlexAccountStatusResponse: {
+            /** Connected */
+            connected: boolean;
+            /** Username */
+            username: string;
         };
         /** PlexIdentityResponse */
         PlexIdentityResponse: {
@@ -25738,7 +25646,7 @@ export interface operations {
             };
         };
     };
-    get_media_server_settings_api_settings_media_server_get: {
+    get_plex_account_status_api_settings_media_server_plex_account_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -25753,40 +25661,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MediaServerSettingsResponse"];
-                };
-            };
-        };
-    };
-    update_media_server_settings_api_settings_media_server_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MediaServerSettingsPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MediaServerSettingsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PlexAccountStatusResponse"];
                 };
             };
         };
@@ -25860,39 +25735,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlexPinResponse"];
-                };
-            };
-        };
-    };
-    test_media_server_settings_api_settings_media_server_test_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MediaServerSettingsPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MediaServerTestResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

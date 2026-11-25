@@ -9,6 +9,19 @@ def _tables(db: Database) -> set[str]:
     return {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
 
 
+def _insert_legacy_settings(db: Database, settings: dict[str, str]) -> None:
+    keys = ("type", "url", "username", "password", "api_key", "credentials_type")
+    values = [str(settings.get(k) or "") for k in keys]
+    db.conn.execute(
+        "INSERT INTO media_server_settings (id, type, url, username, password, api_key, credentials_type) "
+        "VALUES (1, ?, ?, ?, ?, ?, ?) "
+        "ON CONFLICT(id) DO UPDATE SET type = excluded.type, url = excluded.url, username = excluded.username, "
+        "password = excluded.password, api_key = excluded.api_key, credentials_type = excluded.credentials_type",
+        values,
+    )
+    db.conn.commit()
+
+
 def test_schema_version_is_at_least_107() -> None:
     assert SCHEMA_VERSION >= 107
 
@@ -54,13 +67,14 @@ def test_fresh_db_has_media_servers_table(tmp_path: Path) -> None:
 def test_v107_copies_saved_subsonic_server(tmp_path: Path) -> None:
     db = Database(str(tmp_path / "copy.db"))
     try:
-        db.save_media_server_settings(
+        _insert_legacy_settings(
+            db,
             {
                 "type": "subsonic",
                 "url": "http://navidrome:4533",
                 "username": "u",
                 "password": "p",
-            }
+            },
         )
         cur = db.conn.cursor()
         cur.execute("DELETE FROM media_servers")
@@ -87,7 +101,7 @@ def test_v107_skips_plex_or_empty_settings(tmp_path: Path) -> None:
             {"type": "", "url": ""},
             {"type": "plex", "url": "http://plex:32400", "api_key": "tok"},
         ):
-            db.save_media_server_settings(settings)
+            _insert_legacy_settings(db, settings)
             cur.execute("DELETE FROM media_servers")
             db._migration_v107(cur)
             db.conn.commit()
@@ -99,12 +113,13 @@ def test_v107_skips_plex_or_empty_settings(tmp_path: Path) -> None:
 def test_v107_is_idempotent(tmp_path: Path) -> None:
     db = Database(str(tmp_path / "idempotent.db"))
     try:
-        db.save_media_server_settings(
+        _insert_legacy_settings(
+            db,
             {
                 "type": "jellyfin",
                 "url": "http://jellyfin:8096",
                 "api_key": "jf-key",
-            }
+            },
         )
         cur = db.conn.cursor()
         cur.execute("DELETE FROM media_servers")

@@ -95,6 +95,7 @@ class MigrationsMixin:
                 (105, self._migration_v105),
                 (106, self._migration_v106),
                 (107, self._migration_v107),
+                (108, self._migration_v108),
             ]
 
             applied = 0
@@ -423,6 +424,14 @@ class MigrationsMixin:
             FROM media_server_settings
             WHERE id = 1 AND type IN ('subsonic', 'jellyfin') AND url != '' AND NOT EXISTS (SELECT 1 FROM media_servers)
             """
+        )
+
+    def _migration_v108(self, cur: sqlite3.Cursor) -> None:
+        """v108: the saved server moved to media_servers in v107; blank its copied credentials here."""
+        cur.execute(
+            "UPDATE media_server_settings "
+            "SET type = '', url = '', username = '', password = '', api_key = '', credentials_type = '' "
+            "WHERE id = 1"
         )
 
     def _migration_v100(self, cur: sqlite3.Cursor) -> None:

@@ -4,13 +4,12 @@ import type {
   MediaServerItem,
   MediaServerLoginResponse,
   MediaServerPayload,
-  MediaServerSettings,
-  MediaServerSettingsInput,
   MediaServerStatus,
   MediaServerTestResult,
   MediaServerType,
   PlexAccountCheckResponse,
   PlexAccountDisconnectResponse,
+  PlexAccountStatusResponse,
   PlexPinResponse,
 } from '@/types/mediaServer';
 
@@ -43,16 +42,8 @@ export async function getMediaServerStatus(): Promise<MediaServerStatus | null> 
   }
 }
 
-export async function getMediaServerSettings(): Promise<MediaServerSettings> {
-  return apiRequest<MediaServerSettings>('/api/settings/media-server');
-}
-
-export async function saveMediaServerSettings(input: MediaServerSettingsInput): Promise<MediaServerSettings> {
-  return apiRequest<MediaServerSettings>('/api/settings/media-server', { method: 'PUT', body: input });
-}
-
-export async function testMediaServerSettings(input: MediaServerSettingsInput): Promise<MediaServerTestResult> {
-  return apiRequest<MediaServerTestResult>('/api/settings/media-server/test', { method: 'POST', body: input });
+export async function getPlexAccountStatus(): Promise<PlexAccountStatusResponse> {
+  return apiRequest<PlexAccountStatusResponse>('/api/settings/media-server/plex-account');
 }
 
 export async function startPlexAccountSignIn(): Promise<PlexPinResponse> {

@@ -3,7 +3,7 @@ import { ExternalLink, Loader2, LogIn, LogOut, X } from 'lucide-react';
 import { MachinedCard, PageLoader, TapeDeckButton } from '@/components/ui';
 import { errorMessage } from '@/services/apiClient';
 import { disconnectPlexAccount } from '@/services/mediaServerService';
-import { useMediaServerSettings } from '@/hooks/useMediaServerSettings';
+import { usePlexAccountStatus } from '@/hooks/usePlexAccountStatus';
 import { usePlexAccountSignIn } from '@/hooks/usePlexAccountSignIn';
 import type { MediaServerItem } from '@/types/mediaServer';
 import { MediaServerList } from './MediaServerList';
@@ -14,8 +14,8 @@ export interface MediaServerPanelProps {
 
 /** Settings > Media Server: list and configure media servers plus the Plex account sign-in. */
 export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) => {
-  const hook = useMediaServerSettings(true);
-  const { settings, reload } = hook;
+  const hook = usePlexAccountStatus(true);
+  const { status, reload } = hook;
   const [servers, setServers] = useState<MediaServerItem[]>([]);
   const [isDisconnecting, setIsDisconnecting] = useState<boolean>(false);
 
@@ -74,9 +74,9 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
           <div className="rounded-[4px] border border-[#222222] bg-[#0f0f0f] p-3 sm:p-4 space-y-3">
             <div className="space-y-1">
               <h5 className="text-xs font-bold uppercase font-mono text-white">Plex account</h5>
-              {settings?.plex_account_connected ? (
+              {status?.connected ? (
                 <p className="text-xs font-mono text-neutral-300">
-                  Signed in as <span className="text-white font-semibold">{settings.plex_account_username}</span>.
+                  Signed in as <span className="text-white font-semibold">{status.username}</span>.
                   TrackSeerr uses this account for Plex Home users and other users&apos; playlists.
                 </p>
               ) : (
@@ -87,7 +87,7 @@ export const MediaServerPanel: React.FC<MediaServerPanelProps> = ({ onToast }) =
               )}
             </div>
 
-            {settings?.plex_account_connected ? (
+            {status?.connected ? (
               <div className="flex flex-wrap items-center gap-2">
                 <TapeDeckButton
                   type="button"

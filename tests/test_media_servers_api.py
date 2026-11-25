@@ -272,3 +272,61 @@ def test_test_endpoint_uses_saved_secret_and_never_caches(env, monkeypatch):
     assert resp.json() == {"ok": True, "message": "Navidrome ok"}
     assert seen == [(SUBSONIC_URL, "bob", "super-secret-password", "", True)]
     assert registry._adapters == {}
+
+
+def test_env_row_lists_env_url_and_masked_token(env):
+    plex_cfg = Config(plex_url=PLEX_URL, plex_token="env-plex-token-secret", data_dir=env.cfg.data_dir)
+    env.app.dependency_overrides[get_config] = lambda: plex_cfg
+    registry.reload(plex_cfg, env.db)
+
+    listed = env.tc.get("/api/settings/media-servers", headers=env.admin).json()
+    assert len(listed) == 1
+    row = listed[0]
+    assert row["id"] == "env-plex"
+    assert row["url"] == PLEX_URL
+    assert row["api_key"] == mask_secret("env-plex-token-secret")
+    assert "env-plex-token-secret" not in row["api_key"]
+
+
+def test_env_row_test_uses_env_credentials(env, monkeypatch):
+    seen: list[tuple[str, str, str, str, bool]] = []
+
+    class FakeSubsonicAdapter:
+        def __init__(self, url, username, password, api_key="", verify_ssl=True):
+            seen.append((url, username, password, api_key, verify_ssl))
+
+        def test_connection(self) -> ConnectionTest:
+            return ConnectionTest(ok=True, message="Env Subsonic ok")
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(registry, "SubsonicMediaServer", FakeSubsonicAdapter)
+
+    sub_cfg = Config(
+        plex_url="",
+        plex_token="",
+        media_server="subsonic",
+        subsonic_url=SUBSONIC_URL,
+        subsonic_user="env-user",
+        subsonic_password="env-password",
+        data_dir=env.cfg.data_dir,
+    )
+    env.app.dependency_overrides[get_config] = lambda: sub_cfg
+    registry.reload(sub_cfg, env.db)
+
+    resp = env.tc.post(
+        "/api/settings/media-servers/test",
+        json={
+            "id": "env-subsonic",
+            "kind": "subsonic",
+            "name": "Subsonic",
+            "url": "http://ignored-submitted:4533",
+            "username": "ignored",
+            "password": "ignored",
+        },
+        headers=env.admin,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "message": "Env Subsonic ok"}
+    assert seen == [(SUBSONIC_URL, "env-user", "env-password", "", True)]

@@ -6,20 +6,9 @@ export type MediaServerCapabilities = Schema<'MediaServerCapabilities'>;
 
 export type MediaServerStatus = Narrow<Schema<'MediaServerStatus'>, { type: MediaServerType }>;
 
-/** Servers that can be chosen on the Settings page (Plex is configured through environment variables only). */
-export type SettableMediaServerType = 'subsonic' | 'jellyfin' | 'none';
+export type MediaServerTestResult = Schema<'MediaServerTestResult'>;
 
-export type MediaServerSettings = Narrow<Schema<'MediaServerSettingsResponse'>, { type: MediaServerType | ''; effective_type: MediaServerType }>;
-
-export interface MediaServerSettingsInput {
-  type: SettableMediaServerType;
-  url: string;
-  username: string;
-  password: string;
-  api_key: string;
-}
-
-export type MediaServerTestResult = Schema<'MediaServerTestResponse'>;
+export type PlexAccountStatusResponse = Schema<'PlexAccountStatusResponse'>;
 
 export type PlexPinResponse = Schema<'PlexPinResponse'>;
 

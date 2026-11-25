@@ -261,7 +261,6 @@ def _apply_saved_media_server_settings(config: Config) -> None:
         return
     try:
         media_server_settings.load_into_process(db)
-        config.apply_media_server_overlay()
         registry.reload(config, db)
     finally:
         db.close()
@@ -778,14 +777,12 @@ def _prepare_core(db: Database, config: Config, clients: _Clients, role: str) ->
         logger.warning("Could not record the deployment role: %s", safe_exc(e))
 
     if role != "gateway":
-        # The Settings page may name the media server when the environment does not; follow later saves live.
+        # The Settings page may name media servers when the environment does not; follow later saves live.
         media_server_settings.load_into_process(db)
-        config.apply_media_server_overlay()
         registry.reload(config, db)
 
         def _reconnect_media_server() -> None:
-            with clients.lock:  # one reconnect at a time: the overlay, the reload and the assignment go together
-                config.apply_media_server_overlay()
+            with clients.lock:  # one reconnect at a time: the reload and the assignment go together
                 registry.reload(config, db)
                 pair = registry.primary_server(config)
                 adapter = registry.client_for(pair)

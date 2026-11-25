@@ -18,7 +18,7 @@ from trackseerr.api.schemas.media_servers import (
     MediaServerTestResult,
 )
 from trackseerr.config import Config
-from trackseerr.media_servers import server_settings
+from trackseerr.media_servers import registry, server_settings
 from trackseerr.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -38,9 +38,13 @@ def _raise_for_settings_error(exc: server_settings.ServerSettingsError) -> NoRet
 
 @router.get("", response_model=list[MediaServerItem], summary="List configured media servers")
 @router.get("/", response_model=list[MediaServerItem], include_in_schema=False)
-def list_media_servers(db: Database = Depends(get_db)) -> list[dict[str, Any]]:
+def list_media_servers(
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> list[dict[str, Any]]:
     """Return all configured media servers with secrets masked."""
-    return [server_settings.present(row) for row in db.list_media_server_rows()]
+    by_id = {r.id: r for r in registry.records(config)}
+    return [server_settings.present(row, record=by_id.get(row["id"])) for row in db.list_media_server_rows()]
 
 
 @router.post("", response_model=MediaServerItem, summary="Create or update a media server")
@@ -66,10 +70,11 @@ def save_media_server(
 def test_media_server(
     payload: MediaServerPayload,
     db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
 ) -> MediaServerTestResult:
     """Test connectivity against a media server without saving or caching the adapter."""
     try:
-        result = server_settings.test(db, payload.model_dump())
+        result = server_settings.test(db, payload.model_dump(), config=config)
     except server_settings.ServerSettingsError as exc:
         _raise_for_settings_error(exc)
     except sqlite3.Error as exc:

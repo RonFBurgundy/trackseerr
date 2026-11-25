@@ -50,18 +50,24 @@ def _norm_url(url: str) -> str:
     return (url or "").strip().rstrip("/").lower()
 
 
-def present(row: dict[str, Any]) -> dict[str, Any]:
+def present(row: dict[str, Any], record: Optional[registry.ServerRecord] = None) -> dict[str, Any]:
     """Return a media-server row safe for API responses with secrets masked and capabilities attached."""
+    use_record = row["source"] == MEDIA_SERVER_SOURCE_ENV and record is not None and record.id == row["id"]
+    url = record.url if use_record and record is not None else row["url"]
+    username = record.username if use_record and record is not None else row["username"]
+    raw_password = record.password if use_record and record is not None else row.get("password")
+    raw_api_key = record.api_key if use_record and record is not None else row.get("api_key")
+    music_section = record.music_section if use_record and record is not None else row["music_section"]
     return {
         "id": row["id"],
         "kind": row["kind"],
         "source": row["source"],
         "name": row["name"],
-        "url": row["url"],
-        "username": row["username"],
-        "password": mask_secret(row.get("password")) if row.get("password") else "",
-        "api_key": mask_secret(row.get("api_key")) if row.get("api_key") else "",
-        "music_section": row["music_section"],
+        "url": url,
+        "username": username,
+        "password": mask_secret(raw_password) if raw_password else "",
+        "api_key": mask_secret(raw_api_key) if raw_api_key else "",
+        "music_section": music_section,
         "verify_ssl": bool(row["verify_ssl"]),
         "enabled": bool(row["enabled"]),
         "use_refresh": bool(row["use_refresh"]),
@@ -159,20 +165,27 @@ def validate(values: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _save_locked(db: Any, server_id: str, values: dict[str, Any], stored: dict[str, Any]) -> dict[str, Any]:
+def _save_locked(
+    db: Any,
+    server_id: str,
+    values: dict[str, Any],
+    stored: dict[str, Any],
+    record: Optional[registry.ServerRecord] = None,
+) -> dict[str, Any]:
+    presented = present(stored, record=record)
     for key in _LOCKED_IMMUTABLE_KEYS:
         if key not in values or values[key] is None:
             continue
         incoming_val = values[key]
-        stored_val = stored[key]
+        expected_val = presented[key]
         if key == "verify_ssl":
-            changed = bool(incoming_val) != bool(stored_val)
+            changed = bool(incoming_val) != bool(expected_val)
         elif key == "kind":
-            changed = str(incoming_val).strip().lower() != str(stored_val).strip().lower()
+            changed = str(incoming_val).strip().lower() != str(expected_val).strip().lower()
         elif key == "url":
-            changed = _norm_url(str(incoming_val)) != _norm_url(str(stored_val))
+            changed = _norm_url(str(incoming_val)) != _norm_url(str(expected_val))
         else:
-            changed = str(incoming_val).strip() != str(stored_val).strip()
+            changed = str(incoming_val).strip() != str(expected_val).strip()
         if changed:
             raise ServerLockedError("This server is set by environment variables; change them there")
 
@@ -200,7 +213,8 @@ def save(db: Any, config: Config, values: dict[str, Any]) -> dict[str, Any]:
         if stored is None:
             raise ServerNotFoundError(f"Media server '{server_id}' not found")
         if stored["source"] == MEDIA_SERVER_SOURCE_ENV:
-            row = _save_locked(db, server_id, values, stored)
+            record = next((r for r in registry.records(config) if r.id == server_id), None)
+            row = _save_locked(db, server_id, values, stored, record=record)
         else:
             incoming_kind = str(values.get("kind") or "").strip().lower()
             if incoming_kind and incoming_kind != stored["kind"]:
@@ -218,7 +232,8 @@ def save(db: Any, config: Config, values: dict[str, Any]) -> dict[str, Any]:
 
     registry.reload(config, db)
     settings.notify_changed()
-    return present(row)
+    record = next((r for r in registry.records(config) if r.id == row["id"]), None)
+    return present(row, record=record)
 
 
 def delete(db: Any, config: Config, server_id: str) -> None:
@@ -243,29 +258,36 @@ def set_login(db: Any, config: Config, server_id: Optional[str]) -> None:
     settings.notify_changed()
 
 
-def test(db: Any, values: dict[str, Any]) -> ConnectionTest:
+def test(db: Any, values: dict[str, Any], config: Optional[Config] = None) -> ConnectionTest:
     """Test a media-server connection using a throwaway adapter that is never cached."""
     raw_id = values.get("id")
     server_id = str(raw_id).strip() if raw_id is not None else ""
     stored = db.get_media_server_row(server_id) if server_id else None
 
-    resolved = resolve_secrets(values, stored)
-    clean = validate(resolved)
-    record = registry.ServerRecord(
-        id=server_id or "test",
-        kind=clean["kind"],
-        name=clean["name"],
-        source=MEDIA_SERVER_SOURCE_SETTINGS,
-        url=clean["url"],
-        username=clean["username"],
-        password=clean["password"],
-        api_key=clean["api_key"],
-        music_section=clean["music_section"],
-        verify_ssl=clean["verify_ssl"],
-    )
+    if stored is not None and stored["source"] == MEDIA_SERVER_SOURCE_ENV:
+        record = next((r for r in registry.records(config) if r.id == server_id), None)
+        if record is None:
+            return ConnectionTest(ok=False, message=f"Media server '{server_id}' is not configured in the environment")
+        label = record.kind
+    else:
+        resolved = resolve_secrets(values, stored)
+        clean = validate(resolved)
+        label = clean["kind"]
+        record = registry.ServerRecord(
+            id=server_id or "test",
+            kind=clean["kind"],
+            name=clean["name"],
+            source=MEDIA_SERVER_SOURCE_SETTINGS,
+            url=clean["url"],
+            username=clean["username"],
+            password=clean["password"],
+            api_key=clean["api_key"],
+            music_section=clean["music_section"],
+            verify_ssl=clean["verify_ssl"],
+        )
     adapter = registry._instantiate_adapter(record)
     if adapter is None:
-        return ConnectionTest(ok=False, message=f"Failed to initialize {clean['kind']} client")
+        return ConnectionTest(ok=False, message=f"Failed to initialize {label} client")
     try:
         return adapter.test_connection()
     finally:
