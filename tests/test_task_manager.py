@@ -1430,3 +1430,10 @@ def test_library_self_heal_is_pausable_interval_task(db):
     assert task_manager.is_paused(db, "library_self_heal") is False
 
 
+def test_playlist_sync_task_name_is_server_neutral():
+    spec = task_manager.TASKS["playlist_sync"]
+    assert spec.name == "Playlist Sync"
+    assert "Plex" not in spec.name
+    assert "Plex" not in spec.description
+
+

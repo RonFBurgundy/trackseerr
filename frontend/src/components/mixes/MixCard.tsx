@@ -167,7 +167,7 @@ export const MixCard: React.FC<MixCardProps> = ({
           onClick={() => void onGenerate(mix.id)}
           icon={isGenerating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
         >
-          {isGenerating ? 'Generating...' : 'Generate & sync to Plexamp'}
+          {isGenerating ? 'Generating...' : 'Generate & sync'}
         </TapeDeckButton>
         {confirmDelete ? (
           <>
@@ -206,7 +206,7 @@ export const MixCard: React.FC<MixCardProps> = ({
             {result.acquisitions_queued} queued, quota left {result.quota_remaining}
           </div>
           <div className={result.synced ? 'text-[#22c55e]' : 'text-[#ef4444]'}>
-            {result.synced ? 'Synced to Plex' : `Not synced${result.sync_error ? `: ${result.sync_error}` : ''}`}
+            {result.synced ? 'Synced to your media server' : `Not synced${result.sync_error ? `: ${result.sync_error}` : ''}`}
           </div>
         </div>
       )}

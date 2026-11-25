@@ -103,11 +103,11 @@ TASKS: dict[str, TaskSpec] = {
             KIND_MANUAL,
             group=GROUP_LIBRARY,
         ),
-        # Calls Spotify/Deezer/Plex: not more often than every 15m to stay clear of rate limits. Config: WAIT_SECONDS.
+        # Calls Spotify/Deezer/the media server: not more often than every 15m to stay clear of rate limits. Config: WAIT_SECONDS.
         TaskSpec(
             "playlist_sync",
-            "Plex Playlist Sync",
-            "Synchronizes enabled Spotify and Deezer playlists with Plex media server users.",
+            "Playlist Sync",
+            "Syncs enabled playlists to your media server.",
             KIND_INTERVAL,
             _DAY,
             _presets(15 * _MIN),

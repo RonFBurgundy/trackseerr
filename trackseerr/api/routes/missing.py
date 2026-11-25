@@ -196,7 +196,7 @@ def feed_missing_rss(
         items_xml.append(item)
 
     items_block = "\n".join(items_xml)
-    channel_desc = "Missing tracks unmatched in Plex Media Server music library"
+    channel_desc = "Missing tracks not found in your media server library"
     if playlist_id and playlist_id in playlists_map:
         channel_desc += f" for playlist {playlists_map[playlist_id]}"
 

@@ -232,7 +232,7 @@ class TestNotificationDispatcherSenders:
         assert "slskd" in m4
 
         t5, m5 = format_notification("item_available", data)
-        assert "Music Available: Daft Punk - Discovery is ready in Plex!" in t5
+        assert "Music Available: Daft Punk - Discovery is ready in your library!" in t5
 
         t6, m6 = format_notification("download_failed", {"artist": "Daft Punk", "title": "Discovery", "error_message": "Timeout"})
         assert "Download Failed: Daft Punk - Discovery" in t6
@@ -352,7 +352,7 @@ class TestNotificationDispatcherSenders:
         webhook_url = "https://discord.com/api/webhooks/12345/token"
         dispatcher._send_discord(
             webhook_url=webhook_url,
-            title="Music Available: Artist - Title is ready in Plex!",
+            title="Music Available: Artist - Title is ready in your library!",
             message="Imported successfully.",
             data={"artist": "Artist", "title": "Title", "album": "Album", "cover_url": "https://i.scdn.co/art.jpg"},
             event="item_available",

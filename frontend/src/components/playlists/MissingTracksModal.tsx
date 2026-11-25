@@ -220,7 +220,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
             </form>
 
             {isSearching ? (
-              <PageLoader size="sm" message="Searching Plex library" />
+              <PageLoader size="sm" message="Searching your media server" />
             ) : results.length === 0 ? (
               <div className="py-8 text-center text-xs font-mono text-neutral-500">
                 No matching tracks found in library for "{query}".

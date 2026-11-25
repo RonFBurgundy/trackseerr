@@ -344,12 +344,12 @@ def generate_and_sync(  # noqa: C901
             if errors:
                 result.sync_error = redact_text(str(errors[0]))
             elif not result.synced:
-                result.sync_error = "Plex sync did not complete"
+                result.sync_error = "Media server sync did not complete"
         except MediaServerError as exc:
             # The adapter already redacted the cause (Plex/requests text can embed the X-Plex-Token URL).
             logger.warning("Tailored mix %s Plex sync failed (%s)", mix_id, exc.safe_detail)
             logger.debug("Tailored mix Plex sync traceback", exc_info=True)
-            result.sync_error = f"Plex sync failed ({exc.safe_detail})"
+            result.sync_error = f"Media server sync failed ({exc.safe_detail})"
 
     db.record_mix_result(mix_id, json.dumps(result.to_dict()))
     return result
