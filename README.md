@@ -144,6 +144,7 @@ A lot of what TrackSeerr does rests on libraries and services built by independe
 - [mrab-regex](https://github.com/mrabarnett/mrab-regex) by Matthew Barnett, for Unicode-aware matching.
 - [FastAPI](https://github.com/fastapi/fastapi) by Sebastián Ramírez, for the API layer.
 - [pywebpush](https://github.com/web-push-libs/pywebpush) by JR Conlin, for push notifications.
+- [cryptography](https://github.com/pyca/cryptography) by the Python Cryptographic Authority, for encrypting per-user media server credentials.
 - [TanStack Virtual](https://github.com/TanStack/virtual) by Tanner Linsley, for the long, fast-scrolling lists.
 - [Lucide](https://github.com/lucide-icons/lucide), the community icon set grown from Cole Bemis's Feather.
 

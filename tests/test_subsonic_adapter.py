@@ -110,6 +110,22 @@ class TestAuth:
         with pytest.raises(MediaServerAuthError):
             server.refresh_library()
 
+    def test_with_login_uses_password_auth_and_preserves_transport(self) -> None:
+        fake = FakeSubsonic(default_state(SONGS, password="pw"))
+        admin = SubsonicMediaServer("http://srv/rest", api_key="KEY123", transport=fake.transport())
+        try:
+            kid = admin.with_login("kid", "pw")
+            try:
+                assert kid.test_connection().ok
+                (res,) = kid.sync_playlist(pl("Song A"), [""], PlaylistSyncOptions())
+                assert res.success is True
+                assert [p.owner for p in fake.state.playlists.values()] == ["kid"]
+                assert all("apiKey" not in dict(params) for _, params in fake.state.calls)
+            finally:
+                kid.close()
+        finally:
+            admin.close()
+
 
 class TestSecretsNeverLeak:
     def test_logs_and_errors_hold_no_secret(self, caplog: pytest.LogCaptureFixture) -> None:

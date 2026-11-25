@@ -143,8 +143,8 @@ def test_pushes_to_every_playlist_server(monkeypatch: pytest.MonkeyPatch) -> Non
             cfg,
             [
                 ({"kind": "plex", "name": "Home Plex", "url": "http://plex:32400", "is_login": True}, plex_adapter),
-                ({"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533"}, sub_adapter),
-                ({"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf:8096", "use_playlists": False}, jf_adapter),
+                ({"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf1:8096"}, sub_adapter),
+                ({"kind": "jellyfin", "name": "Jellyfin Off", "url": "http://jf2:8096", "use_playlists": False}, jf_adapter),
             ],
         )
 
@@ -202,7 +202,7 @@ def test_extra_server_failure_does_not_change_playlist_status(monkeypatch: pytes
             cfg,
             [
                 ({"kind": "plex", "name": "Plex", "url": "http://plex:32400", "is_login": True}, plex_adapter),
-                ({"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533"}, sub_adapter),
+                ({"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf:8096"}, sub_adapter),
             ],
         )
 
@@ -216,8 +216,8 @@ def test_extra_server_failure_does_not_change_playlist_status(monkeypatch: pytes
 
         by_server = {s["server_id"]: s for s in db.list_playlist_server_state("imp_pl1")}
         assert by_server[ids["Plex"]]["status"] == "success"
-        assert by_server[ids["Navidrome"]]["status"] == "failed"
-        assert by_server[ids["Navidrome"]]["error"] == "connection refused"
+        assert by_server[ids["Jellyfin"]]["status"] == "failed"
+        assert by_server[ids["Jellyfin"]]["error"] == "connection refused"
     finally:
         db.close()
 
@@ -267,7 +267,7 @@ def test_server_state_recorded_per_server(monkeypatch: pytest.MonkeyPatch) -> No
             cfg,
             [
                 ({"kind": "plex", "name": "Plex", "url": "http://plex:32400", "is_login": True}, plex_adapter),
-                ({"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533"}, sub_adapter),
+                ({"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf:8096"}, sub_adapter),
             ],
         )
 
@@ -276,9 +276,9 @@ def test_server_state_recorded_per_server(monkeypatch: pytest.MonkeyPatch) -> No
         assert by_server[ids["Plex"]]["status"] == "success"
         assert by_server[ids["Plex"]]["matched"] == 1
         assert by_server[ids["Plex"]]["missing"] == 1
-        assert by_server[ids["Navidrome"]]["status"] == "failed"
-        assert by_server[ids["Navidrome"]]["matched"] == 0
-        assert by_server[ids["Navidrome"]]["missing"] == 2
+        assert by_server[ids["Jellyfin"]]["status"] == "failed"
+        assert by_server[ids["Jellyfin"]]["matched"] == 0
+        assert by_server[ids["Jellyfin"]]["missing"] == 2
 
         # Direct-import fanout records per-server state and returns primary counts.
         matched, missing = _sync_stored_playlist(
@@ -317,7 +317,7 @@ def test_adding_server_changes_fingerprint(monkeypatch: pytest.MonkeyPatch) -> N
 
         # Add a second playlist server: fingerprint changes, triggering a resync to both servers.
         sub_row = db.insert_media_server_row(
-            {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533"}
+            {"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf:8096"}
         )
         adapters[sub_row["id"]] = sub_adapter
         registry.reload(cfg, db)
@@ -391,6 +391,40 @@ def test_skip_rating_keys_only_for_login_plex(monkeypatch: pytest.MonkeyPatch) -
         assert len(other_plex.calls) == 1
         assert login_plex.calls[0][2].skip_item_ids == {"42"}
         assert other_plex.calls[0][2].skip_item_ids is None
+    finally:
+        db.close()
+
+
+def test_subsonic_push_uses_user_logins(monkeypatch: pytest.MonkeyPatch) -> None:
+    db, cfg = _seed_fanout_db()
+    try:
+        t1 = Track("Song 1", "Artist 1", "Album 1")
+        sub_primary = _FakePlaylistAdapter(matched=[t1], missing=[])
+        sub_extra = _FakePlaylistAdapter(matched=[t1], missing=[])
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "subsonic", "name": "Nav Primary", "url": "http://nav1:4533", "sort_order": 0}, sub_primary),
+                ({"kind": "subsonic", "name": "Nav Extra", "url": "http://nav2:4533", "sort_order": 1}, sub_extra),
+            ],
+        )
+
+        routed: list[tuple[str, list[str]]] = []
+
+        def fake_sync_subsonic(d, c, rec, adapter, playlist, target_usernames, options):
+            routed.append((rec.id, list(target_usernames)))
+            return [SyncResult(playlist.name, len(playlist.tracks), 1, 0, True)]
+
+        monkeypatch.setattr("trackseerr.api.routes.sync.sync_subsonic_for_users", fake_sync_subsonic)
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert routed == [(ids["Nav Primary"], ["alice"]), (ids["Nav Extra"], ["alice"])]
+        assert sub_primary.calls == []
+        assert sub_extra.calls == []
     finally:
         db.close()
 

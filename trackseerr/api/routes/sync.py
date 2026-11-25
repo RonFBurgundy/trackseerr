@@ -29,9 +29,10 @@ from trackseerr.clients.plex import PlexClient
 from trackseerr.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error, registry
 from trackseerr.media_servers.plex import read_playlist_items, refresh_mix_snapshots
 from trackseerr.media_servers.registry import ServerRecord
+from trackseerr.media_servers.user_logins import sync_subsonic_for_users
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.youtube_music import get_shared_youtube_music_client
-from trackseerr.config import Config
+from trackseerr.config import MEDIA_SERVER_SUBSONIC, Config
 from trackseerr.job_tracker import tracked
 from trackseerr.list_monitoring import apply_playlist_missing_safely
 from trackseerr.listening_playlists import fetch_listening_tracks
@@ -144,22 +145,30 @@ def _push_to_extra_server(
 ) -> None:
     """Push ``model_playlist`` to an additional playlist server and record only its per-server state."""
     try:
-        results = adapter.sync_playlist(
-            model_playlist,
-            target_usernames,
-            PlaylistSyncOptions.from_config(config, db=db),
-        )
+        options = PlaylistSyncOptions.from_config(config, db=db)
+        if rec.kind == MEDIA_SERVER_SUBSONIC:
+            results = sync_subsonic_for_users(
+                db, config, rec, adapter, model_playlist, target_usernames, options
+            )
+        else:
+            results = adapter.sync_playlist(
+                model_playlist,
+                target_usernames,
+                options,
+            )
         matched, missing = adapter.match_playlist_tracks(
             model_playlist.tracks,
             threshold=config.search_similarity_threshold,
         )
         success = any(r.success for r in results) if results else False
+        error_msg = "" if success else next((r.error for r in results if not r.success and r.error), "")
         db.record_playlist_server_state(
             model_playlist.id,
             rec.id,
             "success" if success else "failed",
             matched=len(matched),
             missing=len(missing),
+            error=error_msg,
         )
     except MediaServerError as e:
         logger.error("Error syncing playlist '%s' to %s: %s", model_playlist.name, rec.name, e.safe_detail)
@@ -357,15 +366,22 @@ class SyncState:
         stats: dict[str, int],
         fingerprint: str,
         server_name: str = "Plex",
+        rec: Optional[ServerRecord] = None,
     ) -> tuple[bool, int, int]:
         """Pushes a playlist to the primary media server for its target users and records the outcome."""
         pl_id = pl["id"]
         try:
-            results = server.sync_playlist(
-                model_playlist,
-                target_usernames,
-                PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys),
-            )
+            options = PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys)
+            if rec is not None and rec.kind == MEDIA_SERVER_SUBSONIC:
+                results = sync_subsonic_for_users(
+                    db, config, rec, server, model_playlist, target_usernames, options
+                )
+            else:
+                results = server.sync_playlist(
+                    model_playlist,
+                    target_usernames,
+                    options,
+                )
             matched, missing = server.match_playlist_tracks(
                 model_playlist.tracks, threshold=config.search_similarity_threshold
             )
@@ -420,6 +436,7 @@ class SyncState:
             stats,
             fingerprint,
             server_name=server_name,
+            rec=first_rec,
         )
         if first_rec is not None:
             db.record_playlist_server_state(

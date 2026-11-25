@@ -1,6 +1,7 @@
 """API routes package."""
 
 from trackseerr.api.routes import (
+    account_media_servers,
     acquisition,
     activity,
     admin_users,
@@ -33,6 +34,7 @@ from trackseerr.api.routes import (
 )
 
 __all__ = [
+    "account_media_servers",
     "acquisition",
     "activity",
     "admin_users",

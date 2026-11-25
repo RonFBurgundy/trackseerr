@@ -97,6 +97,7 @@ class MigrationsMixin:
                 (107, self._migration_v107),
                 (108, self._migration_v108),
                 (109, self._migration_v109),
+                (110, self._migration_v110),
             ]
 
             applied = 0
@@ -457,6 +458,21 @@ class MigrationsMixin:
                 error TEXT NOT NULL DEFAULT '',
                 synced_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 PRIMARY KEY (playlist_id, server_id)
+            )
+            """
+        )
+
+    def _migration_v110(self, cur: sqlite3.Cursor) -> None:
+        """v110: user_server_accounts for per-user encrypted media-server logins."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_server_accounts (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                username TEXT NOT NULL,
+                secret_sealed TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                PRIMARY KEY (user_id, server_id)
             )
             """
         )

@@ -639,6 +639,14 @@ CREATE TABLE playlist_server_state (
                 synced_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 PRIMARY KEY (playlist_id, server_id)
             );
+CREATE TABLE user_server_accounts (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                username TEXT NOT NULL,
+                secret_sealed TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                PRIMARY KEY (user_id, server_id)
+            );
 CREATE TABLE plex_playlist_registry (
                 plex_user TEXT NOT NULL,
                 rating_key TEXT NOT NULL,

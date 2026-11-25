@@ -20,6 +20,7 @@ from trackseerr.boot import boot_state
 from trackseerr.media_server import MediaServerUnavailable, media_server_unavailable_response
 from trackseerr.api.routes import (
     account,
+    account_media_servers,
     acquisition,
     activity,
     admin_users,
@@ -242,6 +243,11 @@ def _build_api_router(app: FastAPI) -> APIRouter:
     api_router = APIRouter(prefix="/api")
     api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
     api_router.include_router(account.router, prefix="/account", tags=["account"])
+    api_router.include_router(
+        account_media_servers.router,
+        prefix="/account/media-servers",
+        tags=["account-media-servers"],
+    )
     api_router.include_router(
         user_notifications.router, prefix="/account/notifications", tags=["account-notifications"]
     )

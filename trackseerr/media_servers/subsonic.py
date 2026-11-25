@@ -231,12 +231,28 @@ class SubsonicMediaServer(MediaServer):
         self._user = username
         self._password = password
         self._api_key = api_key
+        self._verify_ssl = verify_ssl
+        self._timeout = timeout
+        self._transport = transport
         self._http = httpx.Client(verify=verify_ssl, timeout=timeout, transport=transport, follow_redirects=False)
         # A replaced adapter is simply dropped by the builder: its pooled client is closed once the last in-flight
         # user lets go of it, never while a sync still holds it (the callback holds the client, not the adapter).
         self._finalizer = weakref.finalize(self, self._http.close)
         self._sleep = sleep
         self._api_key_checked = False
+
+    def with_login(self, username: str, password: str) -> "SubsonicMediaServer":
+        """Return a new adapter against the same server authenticated with ``username`` and ``password``."""
+        return SubsonicMediaServer(
+            self._base,
+            username,
+            password,
+            api_key="",
+            verify_ssl=self._verify_ssl,
+            timeout=self._timeout,
+            transport=self._transport,
+            sleep=self._sleep,
+        )
 
     # ------------------------------------------------------------------ transport
 
