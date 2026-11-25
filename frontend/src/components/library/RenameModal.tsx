@@ -297,7 +297,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
       maxWidth="sm:max-w-4xl"
       footer={footer}
     >
-      <div className="space-y-4">
+      <div className="h-full sm:h-auto flex flex-col min-h-0 flex-1 gap-4 sm:block sm:flex-none sm:space-y-4">
         {loading && (
           <div className="flex flex-col items-center justify-center gap-2 py-14 text-xs font-mono uppercase tracking-widest text-[var(--text-secondary)]">
             <Loader2 className="h-6 w-6 animate-spin text-[var(--accent-amber)]" />
@@ -366,11 +366,11 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                 </p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="flex flex-col min-h-0 flex-1 gap-3 sm:block sm:flex-none sm:space-y-3">
                 {safetyWarnings.length > 0 && (
                   <div
                     role="note"
-                    className="p-3 rounded-[3px] border border-[var(--accent-amber)]/50 bg-[var(--accent-amber)]/10 text-xs font-mono text-[var(--accent-amber)] space-y-1"
+                    className="shrink-0 p-3 rounded-[3px] border border-[var(--accent-amber)]/50 bg-[var(--accent-amber)]/10 text-xs font-mono text-[var(--accent-amber)] space-y-1"
                   >
                     <div className="flex items-start gap-2">
                       <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -385,7 +385,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                   </div>
                 )}
 
-                <p className="text-xs font-mono text-neutral-400">
+                <p className="shrink-0 text-xs font-mono text-neutral-400">
                   {truncated ? (
                     <>
                       Showing <strong className="text-white">{items.length}</strong> of{' '}
@@ -404,7 +404,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                 <div
                   role="group"
                   aria-label="Filter by reason"
-                  className="tab-strip overflow-x-auto pb-0.5"
+                  className="shrink-0 tab-strip overflow-x-auto pb-0.5"
                 >
                   {reasonCodes.map((code) => {
                     const info = reasonInfo(code);
@@ -440,7 +440,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                 </div>
 
                 {/* Header Toolbar */}
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono">
+                <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono">
                   <div className="flex items-center gap-2">
                     <SelectionCheckbox
                       name="rename-select-all"
@@ -535,7 +535,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                 </div>
 
                 {verifyRunning && verifyStatus && (
-                  <div className="space-y-1 text-xs font-mono text-neutral-300" aria-live="polite">
+                  <div className="shrink-0 space-y-1 text-xs font-mono text-neutral-300" aria-live="polite">
                     <p>
                       Verifying audio… {verifyStatus.done}/{verifyStatus.total}
                     </p>
@@ -555,7 +555,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                   </div>
                 )}
                 {!verifyRunning && verifyStatus && verifyStatus.finished_at != null && (
-                  <div className="space-y-0.5 text-xs font-mono text-neutral-400">
+                  <div className="shrink-0 space-y-0.5 text-xs font-mono text-neutral-400">
                     <p>
                       {verifyStatus.verified} verified · {verifyStatus.mismatched} mismatched ·{' '}
                       {verifyStatus.unknown} unknown · {verifyStatus.errors} errors
@@ -564,22 +564,22 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                   </div>
                 )}
                 {verifyError && (
-                  <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+                  <p role="alert" className="shrink-0 text-xs font-mono text-[var(--status-error)]">
                     {verifyError}
                   </p>
                 )}
                 {relinkError && (
-                  <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+                  <p role="alert" className="shrink-0 text-xs font-mono text-[var(--status-error)]">
                     {relinkError}
                   </p>
                 )}
                 {batchRelinkError && (
-                  <p role="alert" className="text-xs font-mono text-[var(--status-error)]">
+                  <p role="alert" className="shrink-0 text-xs font-mono text-[var(--status-error)]">
                     {batchRelinkError}
                   </p>
                 )}
                 {batchRelinkSummary && (
-                  <div className="space-y-1 text-xs font-mono text-neutral-300">
+                  <div className="shrink-0 space-y-1 text-xs font-mono text-neutral-300">
                     <p>
                       Relinked {batchRelinkSummary.relinked} · skipped {batchRelinkSummary.conflictsSkipped}{' '}
                       (right track already has a file) · {batchRelinkSummary.errors} errors
@@ -602,8 +602,7 @@ export const RenameModal: React.FC<RenameModalProps> = ({ scope, onClose, onRena
                   tabIndex={0}
                   role="region"
                   aria-label="Rename preview files (scrollable)"
-                  className="virtual-scroll overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
-                  style={{ maxHeight: 'min(450px, 55vh)' }}
+                  className="virtual-scroll flex-1 min-h-[16rem] sm:flex-none sm:max-h-[min(450px,55vh)] overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
                 >
                   <div
                     style={{
