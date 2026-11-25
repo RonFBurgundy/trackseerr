@@ -22,7 +22,7 @@ from trackseerr.media_servers.subsonic import (
     score_candidate,
 )
 from trackseerr.models import Playlist, Track
-from tests.subsonic_fake import FakeSubsonic, default_state, raw_json
+from tests.subsonic_fake import FakePlaylist, FakeSubsonic, default_state, raw_json
 
 SONGS = [
     ("Song A", "Artist 1", "Album X"),
@@ -461,3 +461,26 @@ def test_stale_override_lookup_failure_falls_back_to_search(caplog) -> None:
         ref = server.match_track(Track("Song A", "Artist 1", "Album X"), db=DB())
     assert ref is not None and ref.id == "s1"
     assert any("Pinned match" in r.getMessage() for r in caplog.records)
+
+
+def test_list_source_playlists_includes_public() -> None:
+    server, fake, _ = make()
+    fake.state.playlists["p1"] = FakePlaylist("p1", "Admin Mix", "admin", ["s1"])
+    fake.state.playlists["p2"] = FakePlaylist("p2", "Kid Public", "kid", ["s2", "s3"])
+
+    listed = server.list_source_playlists(user="ignored")
+    assert listed == [
+        {"id": "p1", "title": "Admin Mix", "owner": "admin", "track_count": 1},
+        {"id": "p2", "title": "Kid Public", "owner": "kid", "track_count": 2},
+    ]
+
+
+def test_source_playlist_tracks() -> None:
+    server, fake, _ = make()
+    fake.state.playlists["p2"] = FakePlaylist("p2", "Kid Public", "kid", ["s1", "s3"])
+
+    tracks = server.source_playlist_tracks("p2")
+    assert tracks == [
+        {"title": "Song A", "artist": "Artist 1", "album": "Album X"},
+        {"title": "Song C", "artist": "Artist 2", "album": "Album Y"},
+    ]

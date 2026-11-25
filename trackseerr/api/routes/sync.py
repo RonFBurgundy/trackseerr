@@ -246,6 +246,37 @@ class SyncState:
         return skip
 
     @staticmethod
+    def _refresh_server_adopted(db: Database, pl: dict[str, Any], source: dict[str, Any]) -> None:
+        """Refresh ``tracks_json`` of a Subsonic/Jellyfin adopted playlist from its originating server.
+
+        Falls back to the stored snapshot when the source server is missing, unreachable, or returns an error.
+        """
+        pair = registry.server_by_id(source["server_id"])
+        if pair is None:
+            logger.warning(
+                "Source server '%s' for adopted playlist '%s' is unavailable; using stored snapshot",
+                source["server_id"],
+                pl["name"],
+            )
+            return
+        _, adapter = pair
+        try:
+            tracks = adapter.source_playlist_tracks(
+                source["server_playlist_id"],
+                user=source.get("server_user") or None,
+            )
+        except MediaServerError as e:
+            logger.warning(
+                "Source playlist for adopted '%s' unavailable (%s); using stored snapshot",
+                pl["name"],
+                e.safe_detail,
+            )
+            return
+        payload = json.dumps(tracks)
+        db.set_playlist_tracks_json(pl["id"], payload)
+        pl["tracks_json"] = payload
+
+    @staticmethod
     def _tracks_to_json(tracks: list[Track]) -> str:
         return json.dumps([{"title": t.title, "artist": t.artist, "album": t.album, "url": t.url} for t in tracks])
 
@@ -503,6 +534,8 @@ class SyncState:
         skip_rating_keys: Optional[set[str]] = None
         if pl.get("service", "spotify") == "plex":
             skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
+        elif (source := db.get_server_playlist_source(pl_id)) is not None:
+            self._refresh_server_adopted(db, pl, source)
         try:
             tracks = self._load_source_tracks(db, config, pl, spotify_client, deezer_client)
         except SmartCollectionError as e:

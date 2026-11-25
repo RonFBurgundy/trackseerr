@@ -555,6 +555,44 @@ class SubsonicMediaServer(MediaServer):
             playlists = [p for p in playlists if not p.get("readonly")]
         return playlists
 
+    def list_source_playlists(self, user: Optional[str] = None) -> list[dict[str, Any]]:
+        """Return every playlist visible on the Subsonic server (own and public); ``user`` is ignored."""
+        del user
+        body = self._request("getPlaylists")
+        playlists = [p for p in (body.get("playlists") or {}).get("playlist") or [] if isinstance(p, dict)]
+        out: list[dict[str, Any]] = []
+        for p in playlists:
+            pid = str(p.get("id") or "")
+            if not pid:
+                continue
+            raw_count = p.get("songCount")
+            track_count = int(raw_count) if isinstance(raw_count, (int, float)) and not isinstance(raw_count, bool) else 0
+            out.append(
+                {
+                    "id": pid,
+                    "title": str(p.get("name") or ""),
+                    "owner": str(p.get("owner") or ""),
+                    "track_count": track_count,
+                }
+            )
+        return out
+
+    def source_playlist_tracks(self, playlist_id: str, user: Optional[str] = None) -> list[dict[str, str]]:
+        """Return ``{title, artist, album}`` dicts for every entry in ``playlist_id``; ``user`` is ignored."""
+        del user
+        body = self._request("getPlaylist", [("id", playlist_id)])
+        playlist = body.get("playlist") or {}
+        entries = playlist.get("entry") or []
+        return [
+            {
+                "title": str(e.get("title") or ""),
+                "artist": str(e.get("artist") or ""),
+                "album": str(e.get("album") or ""),
+            }
+            for e in entries
+            if isinstance(e, dict)
+        ]
+
     def _playlist_entry_ids(self, playlist_id: str) -> tuple[list[str], dict[str, Any]]:
         body = self._request("getPlaylist", [("id", playlist_id)])
         playlist = body.get("playlist") or {}

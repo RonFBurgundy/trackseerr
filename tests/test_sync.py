@@ -428,3 +428,97 @@ def test_subsonic_push_uses_user_logins(monkeypatch: pytest.MonkeyPatch) -> None
     finally:
         db.close()
 
+
+def test_server_adopted_playlist_refreshes_from_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSubsonic, default_state
+
+    db = Database(":memory:")
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "alice", "alice@example.com")
+        fake = FakeSubsonic(
+            default_state([("Song 1", "Artist 1", "Album 1"), ("Song 2", "Artist 2", "Album 2")], password="pw")
+        )
+        fake.state.playlists["sub-1"] = FakePlaylist("sub-1", "Adopted Nav", "admin", ["s1", "s2"])
+        sub_adapter = SubsonicMediaServer("http://nav1:4533", "admin", "pw", transport=fake.transport())
+
+        sub_row = db.insert_media_server_row(
+            {"kind": "subsonic", "name": "Nav Source", "url": "http://nav1:4533", "username": "admin", "password": "pw"}
+        )
+        dest_adapter = _FakePlaylistAdapter(
+            matched=[Track("Song 1", "Artist 1", "Album 1"), Track("Song 2", "Artist 2", "Album 2")],
+            missing=[],
+        )
+        dest_row = db.insert_media_server_row(
+            {"kind": "jellyfin", "name": "JF Dest", "url": "http://jf:8096", "api_key": "k"}
+        )
+        records = registry.load_records(cfg, db)
+        registry.install(records)
+        rec_by_id = {r.id: r for r in records}
+        monkeypatch.setattr(
+            registry,
+            "build_adapter",
+            lambda rec: sub_adapter if rec.id == sub_row["id"] else dest_adapter if rec.id == dest_row["id"] else None,
+        )
+
+        pl_id = f"subsonic_{sub_row['id'][:8]}_sub-1"
+        db.upsert_playlist(pl_id, "Adopted Nav", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_playlist_targets(pl_id, ["u1"])
+        db.set_server_playlist_source(pl_id, sub_row["id"], "sub-1", "")
+        db.set_playlist_server_excludes(pl_id, [sub_row["id"]])
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        refreshed = json.loads(db.get_playlist(pl_id)["tracks_json"])
+        assert [t["title"] for t in refreshed] == ["Song 1", "Song 2"]
+        assert len(dest_adapter.calls) == 1
+        assert [t.title for t in dest_adapter.calls[0][0].tracks] == ["Song 1", "Song 2"]
+        assert [ep for ep, _ in fake.state.calls if ep in ("createPlaylist", "updatePlaylist")] == []
+        assert rec_by_id[sub_row["id"]].id == sub_row["id"]
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_server_adopted_keeps_snapshot_when_server_down(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    import httpx
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakeSubsonic, default_state
+
+    db = Database(":memory:")
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "alice", "alice@example.com")
+        fake = FakeSubsonic(default_state([("Song 1", "Artist 1", "Album 1")], password="pw"))
+        fake.state.transport_failure = lambda: httpx.ConnectError("down")
+        sub_adapter = SubsonicMediaServer(
+            "http://nav1:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        sub_row = db.insert_media_server_row(
+            {"kind": "subsonic", "name": "Nav Source", "url": "http://nav1:4533", "username": "admin", "password": "pw"}
+        )
+        records = registry.load_records(cfg, db)
+        registry.install(records)
+        monkeypatch.setattr(registry, "build_adapter", lambda rec: sub_adapter if rec.id == sub_row["id"] else None)
+
+        pl_id = f"subsonic_{sub_row['id'][:8]}_sub-1"
+        snapshot = json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}])
+        db.upsert_playlist(pl_id, "Adopted Nav", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, snapshot)
+        db.set_server_playlist_source(pl_id, sub_row["id"], "sub-1", "")
+        db.set_playlist_server_excludes(pl_id, [sub_row["id"]])
+
+        with caplog.at_level(logging.WARNING):
+            out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert db.get_playlist(pl_id)["tracks_json"] == snapshot
+        assert any("using stored snapshot" in r.getMessage() for r in caplog.records)
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
