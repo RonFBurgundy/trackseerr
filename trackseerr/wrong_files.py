@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections import Counter
 from typing import Any, Callable, Literal, Optional
 
+from trackseerr.compilation_artist import _has_secondary_type
 from trackseerr.rename_verification import MISMATCH, start_verification, verdict_for
 
 _NO_KEY_MESSAGE = "Add an AcoustID API key in Settings → Media Management first"
@@ -16,6 +18,7 @@ _PARENS_RE = re.compile(r"\(([^)]*)\)|\[([^\]]*)\]")
 _DASH_CUT_RE = re.compile(r"\s[-–—]\s.*")
 _APOSTROPHE_RE = re.compile(r"['’‘`]")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+_MIX_WORD_RE = re.compile(r"\bmix\b", re.IGNORECASE)
 
 
 def _tokenize(text: str) -> frozenset[str]:
@@ -103,6 +106,35 @@ def _actual_library_fields(
     }
 
 
+def _is_dj_mix_album(album: Optional[dict[str, Any]]) -> bool:
+    if not album:
+        return False
+    if _has_secondary_type(album, "dj-mix"):
+        return True
+    album_type = str(album.get("album_type") or "").strip().casefold()
+    title = str(album.get("title") or "")
+    return album_type == "compilation" and bool(_MIX_WORD_RE.search(title))
+
+
+def _apply_safety_flags(items: list[dict[str, Any]]) -> int:
+    target_counts = Counter(item["actual_track_id"] for item in items if item.get("actual_track_id"))
+    safe_count = 0
+    for item in items:
+        target_id = item.get("actual_track_id")
+        claimed = target_counts[target_id] - 1 if target_id else 0
+        is_safe = (
+            item["kind"] == "different_song"
+            and bool(target_id)
+            and claimed == 0
+            and not item["album_is_mix"]
+        )
+        item["claimed_by_others"] = claimed
+        item["safe"] = is_safe
+        if is_safe:
+            safe_count += 1
+    return safe_count
+
+
 def _build_item(
     db: Any,
     row: dict[str, Any],
@@ -131,6 +163,7 @@ def _build_item(
         "actual_album_id": verdict.get("actual_album_id"),
         "score": verdict.get("score"),
         "kind": wrong_file_kind(track_title, actual_title),
+        "album_is_mix": _is_dj_mix_album(album),
         **actual_fields,
     }
 
@@ -154,6 +187,7 @@ def list_wrong_files(db: Any) -> dict[str, Any]:
             continue
         items.append(_build_item(db, row, track, verdict, albums, artists))
 
+    safe_count = _apply_safety_flags(items)
     items.sort(
         key=lambda item: (
             item["artist_name"].casefold(),
@@ -167,6 +201,7 @@ def list_wrong_files(db: Any) -> dict[str, Any]:
         "total": len(items),
         "different_song": len(items) - different_version,
         "different_version": different_version,
+        "safe_count": safe_count,
         "checked": checked,
         "library_files": len(db.list_library_file_ids()),
     }

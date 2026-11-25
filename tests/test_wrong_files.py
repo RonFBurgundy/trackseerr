@@ -198,3 +198,76 @@ def test_wrong_files_requires_admin(app_and_client, test_db, test_config, seeded
     assert client.get("/api/library/wrong-files", headers=alice_headers).status_code == 403
     assert client.post("/api/library/wrong-files/check", headers=alice_headers).status_code == 403
     assert client.get("/api/library/wrong-files/check", headers=alice_headers).status_code == 403
+
+
+def test_shared_target_is_not_safe(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    f1, p1 = _seed(test_db, root, 1, R1, number=1)
+    f2, p2 = _seed(test_db, root, 2, R2, number=2)
+    f3, p3 = _seed(test_db, root, 3, R3, number=3)
+
+    _cache(test_db, f1, p1, [R1])  # verified
+    _cache(test_db, f2, p2, [R1], title="Song 1")  # mismatch -> trk-1
+    _cache(test_db, f3, p3, [R1], title="Song 1")  # mismatch -> trk-1
+
+    resp = client.get("/api/library/wrong-files", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    assert body["safe_count"] == 0
+    for item in body["items"]:
+        assert item["actual_track_id"] == "trk-1"
+        assert item["claimed_by_others"] == 1
+        assert item["safe"] is False
+
+
+def test_dj_mix_album_is_not_safe(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    f1, p1 = _seed(test_db, root, 1, R1, number=1, album="alb-normal")
+    f2, p2 = _seed(test_db, root, 2, R2, number=2, album="alb-djmix")
+    f3, p3 = _seed(test_db, root, 3, R3, number=3, album="alb-compmix")
+
+    test_db.upsert_library_album({
+        "id": "alb-djmix", "artist_id": "art", "title": "Revealed Vol 3",
+        "year": 2012, "monitored": True, "secondary_types": ["compilation", "dj-mix"],
+    })
+    test_db.upsert_library_album({
+        "id": "alb-compmix", "artist_id": "art", "title": "Justice XMAS Mix",
+        "year": 2007, "monitored": True, "album_type": "compilation",
+    })
+
+    _cache(test_db, f1, p1, [R1])
+    _cache(test_db, f2, p2, [R1], title="Song 1")  # different_song -> trk-1, on dj-mix album
+    _cache(test_db, f3, p3, [R2], title="Song 2")  # different_song -> trk-2, on compilation with "Mix"
+
+    resp = client.get("/api/library/wrong-files", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 2
+    assert body["safe_count"] == 0
+    for item in body["items"]:
+        assert item["album_is_mix"] is True
+        assert item["safe"] is False
+
+
+def test_clear_different_song_is_safe(app_and_client, test_db, admin):
+    _, client = app_and_client
+    headers, root = admin
+    f1, p1 = _seed(test_db, root, 1, R1, number=1)
+    f2, p2 = _seed(test_db, root, 2, R2, number=2)
+
+    _cache(test_db, f1, p1, [R1])
+    _cache(test_db, f2, p2, [R1], title="Song 1")
+
+    resp = client.get("/api/library/wrong-files", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total"] == 1
+    assert body["safe_count"] == 1
+    item = body["items"][0]
+    assert item["file_id"] == f2
+    assert item["claimed_by_others"] == 0
+    assert item["album_is_mix"] is False
+    assert item["safe"] is True
