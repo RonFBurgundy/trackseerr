@@ -345,7 +345,7 @@ def test_generic_search_route_works_on_subsonic(env):
     fake = FakeSubsonic(default_state([("Song A", "Artist 1", "Album X")]))
     fake.state.users["u"] = fake.state.users["admin"].__class__("u", True, "p")
     adapter = SubsonicMediaServer(URL, "u", "p", transport=fake.transport(), sleep=lambda _s: None)
-    with patch("trackseerr.api.dependencies.build_subsonic", return_value=adapter):
+    with patch("trackseerr.media_servers.registry.build_adapter", return_value=adapter):
         res = env.tc.get("/api/missing/search", params={"query": "song"}, headers=env.admin)
     assert res.status_code == 200 and [t["title"] for t in res.json()] == ["Song A"]
 

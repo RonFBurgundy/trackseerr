@@ -107,7 +107,7 @@ def _stub_workers():
 
 
 def _run_web(env):
-    patches = _stub_workers() + [patch("trackseerr.cli.uvicorn.Server"), patch("trackseerr.cli.PlexClient")]
+    patches = _stub_workers() + [patch("trackseerr.cli.uvicorn.Server"), patch("trackseerr.clients.plex.PlexClient")]
     started = [p.start() for p in patches]
     plex_cls = started[-1]
     try:
@@ -149,7 +149,7 @@ def test_explicit_plex_without_credentials_fails_startup_loudly(tmp_path, caplog
 
 
 def test_run_once_without_plex_skips_push_and_succeeds():
-    with patch("trackseerr.cli.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
+    with patch("trackseerr.clients.plex.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
         with patch.dict(os.environ, {"RUN_ONCE": "1"}, clear=True):
             code = main()
     assert code == 0
@@ -159,7 +159,7 @@ def test_run_once_without_plex_skips_push_and_succeeds():
 
 
 def test_headless_without_plex_runs_cycle_and_exits_cleanly():
-    with patch("trackseerr.cli.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
+    with patch("trackseerr.clients.plex.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
         with patch.dict(os.environ, {"HEADLESS": "1", "SECONDS_TO_WAIT": "1"}, clear=True):
             with patch("trackseerr.cli._shutdown_requested", True):
                 code = main()

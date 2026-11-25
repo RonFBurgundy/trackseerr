@@ -24,9 +24,9 @@ from trackseerr.clients.plex import PlexClient
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.spotify_scraper import SpotifyWebScraper
 from trackseerr.clients.core_client import SESSION_ISSUED_AT_KEY, CoreClient
-from trackseerr.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
+from trackseerr.config import Config
 from trackseerr.media_server import MediaServerUnavailable
-from trackseerr.media_servers import MediaServer, as_media_server, build_jellyfin, build_subsonic
+from trackseerr.media_servers import MediaServer, as_media_server, registry
 from trackseerr.internal_auth import (
     HEADER_SIGNATURE,
     InvalidAssertion,
@@ -109,42 +109,27 @@ def get_db() -> Database:
 
 
 def require_media_server(config: Config = Depends(get_config)) -> None:
-    """Route dependency: 409 ``media_server_unavailable`` unless a media server is configured."""
-    if config.media_server_type == MEDIA_SERVER_NONE:
+    """Route dependency: 409 ``media_server_unavailable`` unless at least one enabled media server exists."""
+    if not registry.has_servers(config):
         raise MediaServerUnavailable()
 
 
 def get_plex_client(config: Config = Depends(get_config)) -> Optional[PlexClient]:
-    """Dependency providing PlexClient instance if configured."""
-    if not config.plex_enabled:
-        return None
-    try:
-        return PlexClient(
-            base_url=config.plex_url,
-            token=config.plex_token,
-            verify_ssl=config.plex_verify_ssl,
-            music_section=config.plex_music_section,
-        )
-    except Exception as e:
-        logger.error("Failed to initialize PlexClient: %s", e)
-        return None
+    """Dependency providing the login PlexClient instance if configured and reachable."""
+    return registry.plex_login_client(config)
 
 
 def get_media_client(
     config: Config = Depends(get_config), plex_client: Optional[PlexClient] = Depends(get_plex_client)
 ) -> Optional[Union[PlexClient, MediaServer]]:
-    """The connected client of whichever media server is configured: the Plex client, or the Subsonic adapter.
+    """The connected client of whichever media server is primary: ``plex_client`` when present, else the registry primary.
 
     Generic routes depend on this (they only go through ``as_media_server``); Plex-only routes keep
-    ``get_plex_client``, which is None whenever Plex is not the active server.
+    ``get_plex_client``, which is None whenever the login server is not Plex.
     """
     if plex_client is not None:
         return plex_client
-    if config.media_server_type == MEDIA_SERVER_SUBSONIC:
-        return build_subsonic(config)
-    if config.media_server_type == MEDIA_SERVER_JELLYFIN:
-        return build_jellyfin(config)
-    return None
+    return registry.client_for(registry.primary_server(config))
 
 
 def get_active_media_server(client: Optional[Union[PlexClient, MediaServer]] = Depends(get_media_client)) -> Optional[MediaServer]:

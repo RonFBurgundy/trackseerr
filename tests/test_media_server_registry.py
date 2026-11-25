@@ -494,3 +494,119 @@ def test_plex_login_client_and_client_for(monkeypatch: pytest.MonkeyPatch) -> No
 
     registry.install([sub_rec])
     assert registry.plex_login_client() is None
+
+
+def test_get_media_server_uses_primary(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers import PlexMediaServer, get_media_server
+
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", _FakeAdapter)
+    sub_rec = registry.ServerRecord(
+        id="s1", kind="subsonic", name="Sub", source="settings", url=URL, username="u", password="p"
+    )
+    registry.install([sub_rec])
+
+    primary = registry.primary_server()
+    assert primary is not None
+    assert get_media_server(cfg(plex_url=PLEX_URL, plex_token="tok")) is primary[1]
+
+    fake_plex = object()
+    wrapped = get_media_server(cfg(plex_url=PLEX_URL, plex_token="tok", plex_music_section="Hi-Fi"), plex_client=fake_plex)
+    assert isinstance(wrapped, PlexMediaServer)
+    assert wrapped.plex_extras() is fake_plex
+    assert wrapped._music_section == "Hi-Fi"
+
+
+def test_require_media_server_uses_registry() -> None:
+    from trackseerr.api.dependencies import require_media_server
+    from trackseerr.media_server import MediaServerUnavailable
+
+    plex_cfg = cfg(plex_url=PLEX_URL, plex_token="tok")
+    # Uninstalled registry falls back to Config -> passes
+    require_media_server(plex_cfg)
+
+    # Installed empty registry overrides Config -> 409 MediaServerUnavailable
+    registry.install([])
+    with pytest.raises(MediaServerUnavailable):
+        require_media_server(plex_cfg)
+
+
+def test_get_plex_client_is_login_plex_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.api.dependencies import get_plex_client
+
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", _FakeAdapter)
+    sub_rec = registry.ServerRecord(
+        id="s1", kind="subsonic", name="Sub", source="settings", url=URL, username="u", password="p", is_login=True
+    )
+    registry.install([sub_rec])
+    assert get_plex_client(cfg(plex_url=PLEX_URL, plex_token="tok")) is None
+
+    raw_plex = object()
+
+    class _FakePlexAdapter(registry.PlexMediaServer):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def plex_extras(self) -> Any:
+            return raw_plex
+
+    monkeypatch.setattr("trackseerr.clients.plex.PlexClient", _FakePlexAdapter)
+    monkeypatch.setattr("trackseerr.media_servers.registry.PlexMediaServer", _FakePlexAdapter)
+    plex_rec = registry.ServerRecord(
+        id="env-plex", kind="plex", name="Plex", source="env", url=PLEX_URL, api_key="tok", is_login=True
+    )
+    registry.install([plex_rec, sub_rec])
+    assert get_plex_client(cfg()) is raw_plex
+
+
+def test_connect_clients_fatal_plex_when_login_plex_fails(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from trackseerr import cli
+
+    def failing_plex(*args: Any, **kwargs: Any) -> Any:
+        raise ConnectionError("plex unreachable")
+
+    monkeypatch.setattr("trackseerr.clients.plex.PlexClient", failing_plex)
+    plex_cfg = cfg(plex_url=PLEX_URL, plex_token="tok")
+    clients = cli._Clients()
+
+    with caplog.at_level(logging.WARNING):
+        assert cli._connect_clients(plex_cfg, clients, fatal_plex=True) is False
+        assert clients.plex is None
+        assert any("Failed to connect to Plex Media Server: see the earlier error" in r.getMessage() for r in caplog.records)
+
+        caplog.clear()
+        assert cli._connect_clients(plex_cfg, clients, fatal_plex=False) is True
+        assert clients.plex is None
+        assert any("Could not connect to Plex Server" in r.getMessage() and "see the earlier error" in r.getMessage() for r in caplog.records)
+
+
+def test_prepare_core_reloads_registry_and_reconnect_replaces_client(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    from unittest.mock import patch
+
+    from trackseerr import cli
+    from trackseerr.media_servers import settings as media_server_settings
+
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", _FakeAdapter)
+    db = Database(":memory:")
+    c = cfg()
+    old_plex_client = object()
+    clients = cli._Clients(plex=old_plex_client)
+
+    with patch("trackseerr.admin_bootstrap.ensure_bootstrap_admin") as bootstrap:
+        cli._prepare_core(db, c, clients, role="all-in-one")
+    bootstrap.assert_called_once_with(db)
+    assert registry.records() == ()
+
+    db.insert_media_server_row(
+        {"kind": "subsonic", "name": "My Navidrome", "url": URL, "username": "u", "password": "p"}
+    )
+    with caplog.at_level(logging.INFO):
+        media_server_settings._notify()
+
+    assert isinstance(clients.plex, _FakeAdapter)
+    assert clients.plex is not old_plex_client
+    assert any("Media server settings changed: now using My Navidrome" in r.getMessage() for r in caplog.records)

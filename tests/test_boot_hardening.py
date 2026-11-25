@@ -238,16 +238,23 @@ def test_first_sync_waits_for_clients_connected(tmp_path, monkeypatch):
 
 
 def test_plex_provider_retries_connect_and_rate_limits(tmp_path):
+    from trackseerr.media_servers import registry
+
     cfg = _config(tmp_path)
     clients = cli._Clients()
     sentinel = object()
-    with patch("trackseerr.cli.PlexClient", side_effect=[ConnectionError("down"), sentinel]) as ctor:
+    now = 1000.0
+    with (
+        patch("trackseerr.clients.plex.PlexClient", side_effect=[ConnectionError("down"), sentinel]) as ctor,
+        patch("trackseerr.media_servers.registry.time.monotonic", side_effect=lambda: now),
+    ):
         provider = cli._make_plex_provider(cfg, clients, retry_interval=0.0)
         assert provider() is None
+        now += registry.RETRY_SECONDS + 1.0
         assert provider() is sentinel
         assert provider() is sentinel
         assert ctor.call_count == 2
-    with patch("trackseerr.cli.PlexClient") as ctor:
+    with patch("trackseerr.clients.plex.PlexClient") as ctor:
         slow = cli._make_plex_provider(cfg, cli._Clients(), retry_interval=3600.0)
         assert slow() is None and slow() is None
         ctor.assert_not_called()  # bounded: no hot reconnect loop
