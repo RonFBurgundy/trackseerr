@@ -22,6 +22,7 @@ export interface UseStoredSuggestionsReturn {
   /** Ticks the sure matches among newly loaded rows; rows seen before keep the admin's choice. */
   seedDefaults: (items: readonly StoredMatchSuggestion[]) => void;
   selectAll: () => Promise<void>;
+  selectSure: () => Promise<void>;
   selectNone: () => void;
   isApplying: boolean;
   isSelectingAll: boolean;
@@ -54,20 +55,24 @@ export function useStoredSuggestions(): UseStoredSuggestionsReturn {
     setSelectedState((prev) => new Set([...prev, ...sure]));
   }, []);
 
-  const selectAll = useCallback(async () => {
+  const selectWhere = useCallback(async (predicate: (item: StoredMatchSuggestion) => boolean) => {
     setIsSelectingAll(true);
     setError(null);
     try {
       const ids = new Set<string>();
       let page = 1;
       let total = Infinity;
-      while (ids.size < total) {
+      let fetched = 0;
+      while (fetched < total) {
         const res = await getStoredSuggestions({ page, pageSize: FETCH_PAGE_SIZE });
         total = res.total;
         if (res.items.length === 0) break;
+        fetched += res.items.length;
         for (const i of res.items) {
-          ids.add(i.album_id);
           seen.current.add(i.album_id);
+          if (predicate(i)) {
+            ids.add(i.album_id);
+          }
         }
         page += 1;
       }
@@ -78,6 +83,12 @@ export function useStoredSuggestions(): UseStoredSuggestionsReturn {
       setIsSelectingAll(false);
     }
   }, []);
+
+  const selectAll = useCallback(() => selectWhere(() => true), [selectWhere]);
+  const selectSure = useCallback(
+    () => selectWhere((item) => item.confidence >= SURE_CONFIDENCE),
+    [selectWhere]
+  );
 
   const selectNone = useCallback(() => setSelectedState(new Set()), []);
 
@@ -116,5 +127,5 @@ export function useStoredSuggestions(): UseStoredSuggestionsReturn {
     return summary;
   }, [selected]);
 
-  return { selected, setSelected, seedDefaults, selectAll, selectNone, isApplying, isSelectingAll, apply, error };
+  return { selected, setSelected, seedDefaults, selectAll, selectSure, selectNone, isApplying, isSelectingAll, apply, error };
 }
