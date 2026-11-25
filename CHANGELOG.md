@@ -104,6 +104,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Task names and messages no longer say Plex when they work with any media server: the playlist task is now **Playlist Sync**, and "ready in Plex" notifications now say "ready in your library".
 - **Suggested** in Not on MusicBrainz only lists matches that are at least 60% sure, and no longer suggests a Various Artists compilation or DJ mix unless the album's title matches it, so applying suggestions doesn't move songs back under Various Artists. Select sure only and the boxes ticked when the list opens now start at 70%. Find match still shows every option.
 - **Duplicates** and **Not on MusicBrainz** in Library tools now look and work like Rename Files: filter chips, Select all / Select safe only (sure matches for MusicBrainz), a selected count, and the action buttons at the bottom. Duplicates can now keep the better quality copy, or both copies, for many albums at once.
 - On phones, the lists in Library tools (Rename Files, Retag, Wrong files, Duplicates, Not on MusicBrainz) now fill the screen instead of stopping halfway. **Find match** shows each possible match on one short line with how sure it is, how many of your songs it found, and how many tracks the release has; the reasons and track list are under **Show details**.
