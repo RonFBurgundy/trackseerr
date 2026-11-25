@@ -12,6 +12,7 @@ export * from './useTailoredMixes';
 export * from './useIssues';
 export * from './useLocalLogin';
 export * from './useAccount';
+export * from './useServerLogins';
 export * from './useAdminUsers';
 export * from './useDeploymentIdentity';
 export * from './useGatewayStatus';

@@ -21,6 +21,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/account/media-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Subsonic servers for personal login
+         * @description Return every enabled Subsonic playlist server and whether the signed-in user has a saved login.
+         */
+        get: operations["list_account_media_servers_api_account_media_servers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/media-servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Test and save a personal Subsonic login
+         * @description Verify ``username``/``password`` against ``server_id`` and store it encrypted for the signed-in user.
+         */
+        put: operations["save_account_media_server_api_account_media_servers__server_id__put"];
+        post?: never;
+        /**
+         * Remove a personal Subsonic login
+         * @description Delete the signed-in user's saved login for ``server_id``.
+         */
+        delete: operations["delete_account_media_server_api_account_media_servers__server_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/account/mfa/confirm": {
         parameters: {
             query?: never;
@@ -7023,6 +7067,31 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountMediaServerDeletedResponse */
+        AccountMediaServerDeletedResponse: {
+            /** Server Id */
+            server_id: string;
+            /** Status */
+            status: string;
+        };
+        /** AccountMediaServerItem */
+        AccountMediaServerItem: {
+            /** Name */
+            name: string;
+            /** Saved */
+            saved: boolean;
+            /** Server Id */
+            server_id: string;
+            /** Username */
+            username: string;
+        };
+        /** AccountMediaServerPayload */
+        AccountMediaServerPayload: {
+            /** Password */
+            password: string;
+            /** Username */
+            username: string;
+        };
         /** AccountResponse */
         AccountResponse: {
             /** Auth Type */
@@ -15914,6 +15983,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+        };
+    };
+    list_account_media_servers_api_account_media_servers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMediaServerItem"][];
+                };
+            };
+        };
+    };
+    save_account_media_server_api_account_media_servers__server_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMediaServerPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMediaServerItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_account_media_server_api_account_media_servers__server_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMediaServerDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

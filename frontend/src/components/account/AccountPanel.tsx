@@ -5,6 +5,7 @@ import { QuotaBars } from './QuotaBars';
 import { ChangePasswordForm } from './ChangePasswordForm';
 import { MfaPanel } from './MfaPanel';
 import { UserNotificationsSection } from './UserNotificationsSection';
+import { ServerLoginsCard } from './ServerLoginsCard';
 
 export interface AccountPanelProps {
   accountHook: UseAccountReturn;
@@ -65,6 +66,7 @@ export const AccountPanel: React.FC<AccountPanelProps> = ({
       )}
 
       {!enrollmentBlocking && <UserNotificationsSection onToast={onToast ?? (() => {})} />}
+      {!enrollmentBlocking && <ServerLoginsCard onToast={onToast} />}
     </div>
   );
 };

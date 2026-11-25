@@ -1,6 +1,8 @@
 import { apiRequest } from './apiClient';
 import type {
   AccountInfo,
+  AccountMediaServer,
+  AccountMediaServerDeletedResponse,
   ChangePasswordPayload,
   MfaConfirmResponse,
   MfaCredentialPayload,
@@ -48,4 +50,26 @@ export async function regenerateRecoveryCodes(
     method: 'POST',
     body: payload,
   });
+}
+
+export async function listServerLogins(): Promise<AccountMediaServer[]> {
+  return apiRequest<AccountMediaServer[]>('/api/account/media-servers');
+}
+
+export async function saveServerLogin(
+  serverId: string,
+  username: string,
+  password: string
+): Promise<AccountMediaServer> {
+  return apiRequest<AccountMediaServer>(`/api/account/media-servers/${encodeURIComponent(serverId)}`, {
+    method: 'PUT',
+    body: { username, password },
+  });
+}
+
+export async function removeServerLogin(serverId: string): Promise<AccountMediaServerDeletedResponse> {
+  return apiRequest<AccountMediaServerDeletedResponse>(
+    `/api/account/media-servers/${encodeURIComponent(serverId)}`,
+    { method: 'DELETE' }
+  );
 }

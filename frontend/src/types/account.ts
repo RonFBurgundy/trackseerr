@@ -145,6 +145,12 @@ export interface UpdateUserPayload {
 
 export type AccountDefaultSettings = Schema<'AccountSettings'>;
 
+// ---- Media server logins ---------------------------------------------------
+
+export type AccountMediaServer = Schema<'AccountMediaServerItem'>;
+export type AccountMediaServerPayload = Schema<'AccountMediaServerPayload'>;
+export type AccountMediaServerDeletedResponse = Schema<'AccountMediaServerDeletedResponse'>;
+
 // ---- Batch requests --------------------------------------------------------
 
 export interface BatchRequestItem {
