@@ -918,6 +918,19 @@ def _constant_thread_names() -> set[str]:
                 if isinstance(third, ast.Constant) and isinstance(third.value, str):
                     names.add(third.value)
                 continue
+            if isinstance(func, ast.Name) and func.id == "start_verification":
+                thread_kw = next(
+                    (
+                        kw.value.value
+                        for kw in node.keywords
+                        if kw.arg == "thread_name"
+                        and isinstance(kw.value, ast.Constant)
+                        and isinstance(kw.value.value, str)
+                    ),
+                    "rename-verify",
+                )
+                names.add(thread_kw)
+                continue
             is_thread = (isinstance(func, ast.Attribute) and func.attr == "Thread") or (
                 isinstance(func, ast.Name) and func.id == "Thread"
             )
