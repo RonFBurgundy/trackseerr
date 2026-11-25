@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 import unicodedata
 from collections import Counter
@@ -12,7 +13,39 @@ from trackseerr.rename_verification import MISMATCH, start_verification, verdict
 
 _NO_KEY_MESSAGE = "Add an AcoustID API key in Settings → Media Management first"
 _STOP_WORDS = frozenset({"the", "a", "an", "and", "of", "pt", "part", "pts", "parts"})
-_ROMAN_MAP = {"i": "1", "ii": "2", "iii": "3", "iv": "4"}
+_ROMAN_MAP = {
+    "i": "1",
+    "ii": "2",
+    "iii": "3",
+    "iv": "4",
+    "zero": "0",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+    "twenty": "20",
+    "thirty": "30",
+    "forty": "40",
+    "fifty": "50",
+    "u": "you",
+    "b4": "before",
+    "cum": "come",
+    "tha": "the",
+    "da": "the",
+    "wit": "with",
+}
+_CENSOR_REPLACEMENTS = (
+    (re.compile(r"\bf(?:\*{2,}|-{2,})(?!\w)"), "fuck"),
+    (re.compile(r"\bs(?:\*{2,}|-{2,})(?!\w)"), "shit"),
+    (re.compile(r"\bb(?:\*{2,}|-{2,})(?!\w)"), "bitch"),
+    (re.compile(r"\bn(?:\*{2,}|-{2,})(?!\w)"), "nigga"),
+)
 _FEAT_RE = re.compile(r"\s+(?:feat\.|ft\.|featuring)\s+.*")
 _PARENS_RE = re.compile(r"\(([^)]*)\)|\[([^\]]*)\]")
 _DASH_CUT_RE = re.compile(r"\s[-–—]\s.*")
@@ -21,20 +54,33 @@ _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _MIX_WORD_RE = re.compile(r"\bmix\b", re.IGNORECASE)
 
 
-def _tokenize(text: str) -> frozenset[str]:
+def _tokenize_list(text: str) -> list[str]:
     text = unicodedata.normalize("NFKD", text).lower()
     text = _APOSTROPHE_RE.sub("", text)
     text = text.encode("ascii", "ignore").decode("ascii")
+    for pat, repl in _CENSOR_REPLACEMENTS:
+        text = pat.sub(repl, text)
     tokens = [_ROMAN_MAP.get(tok, tok) for tok in _TOKEN_RE.findall(text)]
-    return frozenset(tok for tok in tokens if tok not in _STOP_WORDS)
+    return [tok for tok in tokens if tok not in _STOP_WORDS]
 
 
-def _base_tokens(title: str) -> frozenset[str]:
+def _tokenize(text: str) -> frozenset[str]:
+    return frozenset(_tokenize_list(text))
+
+
+def _strip_title(title: str) -> str:
     text = unicodedata.normalize("NFKD", title).lower()
     text = _FEAT_RE.sub("", text)
     text = _PARENS_RE.sub(" ", text)
-    text = _DASH_CUT_RE.sub("", text)
-    return _tokenize(text)
+    return _DASH_CUT_RE.sub("", text)
+
+
+def _base_tokens(title: str) -> frozenset[str]:
+    return _tokenize(_strip_title(title))
+
+
+def _ordered_base_tokens(title: str) -> list[str]:
+    return _tokenize_list(_strip_title(title))
 
 
 def _bracket_tokens(title: str) -> list[frozenset[str]]:
@@ -57,6 +103,13 @@ def wrong_file_kind(
         a and any(bt == a for bt in _bracket_tokens(actual_title))
     ):
         return "different_version"
+    ja = "".join(_ordered_base_tokens(track_title))
+    jb = "".join(_ordered_base_tokens(actual_title))
+    if ja and jb:
+        if ja == jb:
+            return "different_version"
+        if len(ja) >= 6 and len(jb) >= 6 and difflib.SequenceMatcher(None, ja, jb).ratio() >= 0.88:
+            return "different_version"
     return "different_song"
 
 
@@ -112,8 +165,9 @@ def _is_dj_mix_album(album: Optional[dict[str, Any]]) -> bool:
     if _has_secondary_type(album, "dj-mix"):
         return True
     album_type = str(album.get("album_type") or "").strip().casefold()
+    is_compilation = album_type == "compilation" or _has_secondary_type(album, "compilation")
     title = str(album.get("title") or "")
-    return album_type == "compilation" and bool(_MIX_WORD_RE.search(title))
+    return is_compilation and bool(_MIX_WORD_RE.search(title))
 
 
 def _apply_safety_flags(items: list[dict[str, Any]]) -> int:

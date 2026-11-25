@@ -141,6 +141,12 @@ def test_list_wrong_files_mismatch_outside_library(app_and_client, test_db, admi
         ("Sweet Little Sixteen (Demo)", "Sweet Little Sixteen", "different_version"),
         ("Baba O'Riley - Remix", "Baba O’Riley (ConfidentialMX remix)", "different_version"),
         ("Bang a Gong (Get It On) [2003 Remaster]", "Get It On", "different_version"),
+        ("Thirty Days", "30 Days", "different_version"),
+        ("I'll Call B4 I Cum", "I'll Call Before I Come", "different_version"),
+        ("They Don't Wanna Fuck Wit Me [feat. Timbaland]", "They Don’t Wanna F*** Wit Me", "different_version"),
+        ("I Want You Back", "I Want U Back", "different_version"),
+        ("Grey Gods feat. $uicideboy$", "GreyGods", "different_version"),
+        ("We Were Toung", "We Were Young", "different_version"),
     ],
 )
 def test_wrong_file_kind(track_title: str, actual_title: str, expected: str):
@@ -228,6 +234,7 @@ def test_dj_mix_album_is_not_safe(app_and_client, test_db, admin):
     f1, p1 = _seed(test_db, root, 1, R1, number=1, album="alb-normal")
     f2, p2 = _seed(test_db, root, 2, R2, number=2, album="alb-djmix")
     f3, p3 = _seed(test_db, root, 3, R3, number=3, album="alb-compmix")
+    f4, p4 = _seed(test_db, root, 4, "44444444-4444-4444-4444-444444444444", number=4, album="alb-mb-compmix")
 
     test_db.upsert_library_album({
         "id": "alb-djmix", "artist_id": "art", "title": "Revealed Vol 3",
@@ -237,15 +244,20 @@ def test_dj_mix_album_is_not_safe(app_and_client, test_db, admin):
         "id": "alb-compmix", "artist_id": "art", "title": "Justice XMAS Mix",
         "year": 2007, "monitored": True, "album_type": "compilation",
     })
+    test_db.upsert_library_album({
+        "id": "alb-mb-compmix", "artist_id": "art", "title": "Justice XMAS Mix",
+        "year": 2007, "monitored": True, "album_type": "album", "secondary_types": ["compilation"],
+    })
 
     _cache(test_db, f1, p1, [R1])
     _cache(test_db, f2, p2, [R1], title="Song 1")  # different_song -> trk-1, on dj-mix album
     _cache(test_db, f3, p3, [R2], title="Song 2")  # different_song -> trk-2, on compilation with "Mix"
+    _cache(test_db, f4, p4, [R3], title="Song 3")  # different_song -> trk-3, album_type="album" + secondary_types=["compilation"]
 
     resp = client.get("/api/library/wrong-files", headers=headers)
     assert resp.status_code == 200
     body = resp.json()
-    assert body["total"] == 2
+    assert body["total"] == 3
     assert body["safe_count"] == 0
     for item in body["items"]:
         assert item["album_is_mix"] is True

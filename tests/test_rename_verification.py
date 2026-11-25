@@ -248,6 +248,27 @@ def test_verdict_unknown_when_other_album_title_differs_only_by_feat(lib: Databa
 def test_verdict_mismatch_when_other_album_title_is_instrumental(lib: Database) -> None:
     trk = _track(lib, "t1", "al1", None, title="Legend Has It")
     _track(lib, "t2", "al2", R2, title="Legend Has It (instrumental)")
+
+
+def test_verdict_top_same_song_ignores_polluted_tail_library_hit(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", R1, title="Lovesick Blues (Single Version)")
+    _track(lib, "t2", "al2", R3, title="Moanin' the Blues")
+    matches = [_m(R2, 0.98, "Lovesick Blues", "Hank Williams"), _m(R3, 0.98, "Moanin' the Blues", "Hank Williams")]
+    v = rv.verdict_for(lib, _fp(matches=matches), trk, "/m/a.flac")
+    assert v is not None
+    assert v["status"] == rv.SAME_SONG
+    assert v["actual_track_id"] is None
+
+
+def test_verdict_mismatch_ignores_non_consensus_tail_library_hit(lib: Database) -> None:
+    trk = _track(lib, "t1", "al1", R1, title="Linked")
+    _track(lib, "t2", "al2", R3, title="Unrelated")
+    matches = [_m(R2, 0.98, "Consensus Song", "Art"), _m(R3, 0.95, "Unrelated", "Art")]
+    v = rv.verdict_for(lib, _fp(matches=matches), trk, "/m/a.flac")
+    assert v is not None
+    assert v["status"] == rv.MISMATCH
+    assert v["actual_track_id"] is None
+    assert v["actual_title"] == "Consensus Song"
     v = rv.verdict_for(lib, _fp(matches=[_m(R2)]), trk, "/m/a.flac")
     assert v is not None and v["status"] == rv.MISMATCH
 
