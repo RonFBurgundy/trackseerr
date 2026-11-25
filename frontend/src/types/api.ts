@@ -5562,6 +5562,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/settings/media-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List configured media servers
+         * @description Return all configured media servers with secrets masked.
+         */
+        get: operations["list_media_servers_api_settings_media_servers_get"];
+        put?: never;
+        /**
+         * Create or update a media server
+         * @description Create or update a media server, reload the registry, and notify listeners.
+         */
+        post: operations["save_media_server_api_settings_media_servers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-servers/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Select the Plex sign-in server
+         * @description Select the unique Plex login server, or clear it when ``server_id`` is null.
+         */
+        put: operations["set_login_media_server_api_settings_media_servers_login_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-servers/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Test a media-server connection
+         * @description Test connectivity against a media server without saving or caching the adapter.
+         */
+        post: operations["test_media_server_api_settings_media_servers_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a media server
+         * @description Delete a settings-configured media server.
+         */
+        delete: operations["delete_media_server_api_settings_media_servers__server_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/settings/musicbrainz/test": {
         parameters: {
             query?: never;
@@ -11684,6 +11768,146 @@ export interface components {
             /** Users */
             users: boolean;
         };
+        /** MediaServerDeletedResponse */
+        MediaServerDeletedResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
+        /** MediaServerItem */
+        MediaServerItem: {
+            /** Api Key */
+            api_key: string;
+            /** Capabilities */
+            capabilities: {
+                [key: string]: boolean;
+            };
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Is Login */
+            is_login: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "plex" | "subsonic" | "jellyfin";
+            /** Locked */
+            locked: boolean;
+            /** Music Section */
+            music_section: string;
+            /** Name */
+            name: string;
+            /** Password */
+            password: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Source */
+            source: string;
+            /** Url */
+            url: string;
+            /** Use Playlists */
+            use_playlists: boolean;
+            /** Use Refresh */
+            use_refresh: boolean;
+            /** Use Scrobbles */
+            use_scrobbles: boolean;
+            /** Use Users */
+            use_users: boolean;
+            /** Username */
+            username: string;
+            /** Verify Ssl */
+            verify_ssl: boolean;
+        };
+        /** MediaServerLoginPayload */
+        MediaServerLoginPayload: {
+            /** Server Id */
+            server_id?: string | null;
+        };
+        /** MediaServerLoginResponse */
+        MediaServerLoginResponse: {
+            /** Server Id */
+            server_id?: string | null;
+            /** Status */
+            status: string;
+        };
+        /** MediaServerPayload */
+        MediaServerPayload: {
+            /**
+             * Api Key
+             * @default
+             */
+            api_key: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Id */
+            id?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "plex" | "subsonic" | "jellyfin";
+            /**
+             * Music Section
+             * @default
+             */
+            music_section: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
+             * Password
+             * @default
+             */
+            password: string;
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+            /**
+             * Url
+             * @default
+             */
+            url: string;
+            /**
+             * Use Playlists
+             * @default true
+             */
+            use_playlists: boolean;
+            /**
+             * Use Refresh
+             * @default true
+             */
+            use_refresh: boolean;
+            /**
+             * Use Scrobbles
+             * @default true
+             */
+            use_scrobbles: boolean;
+            /**
+             * Use Users
+             * @default true
+             */
+            use_users: boolean;
+            /**
+             * Username
+             * @default
+             */
+            username: string;
+            /**
+             * Verify Ssl
+             * @default true
+             */
+            verify_ssl: boolean;
+        };
         /**
          * MediaServerSettingsPayload
          * @description What the Settings page submits. A secret sent back as ``********`` keeps the stored value.
@@ -11747,6 +11971,16 @@ export interface components {
         /** MediaServerTestResponse */
         MediaServerTestResponse: {
             /** Message */
+            message: string;
+            /** Ok */
+            ok: boolean;
+        };
+        /** MediaServerTestResult */
+        MediaServerTestResult: {
+            /**
+             * Message
+             * @default
+             */
             message: string;
             /** Ok */
             ok: boolean;
@@ -25650,6 +25884,156 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MediaServerTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_media_servers_api_settings_media_servers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerItem"][];
+                };
+            };
+        };
+    };
+    save_media_server_api_settings_media_servers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaServerPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_login_media_server_api_settings_media_servers_login_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaServerLoginPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerLoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_media_server_api_settings_media_servers_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaServerPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerTestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_media_server_api_settings_media_servers__server_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerDeletedResponse"];
                 };
             };
             /** @description Validation Error */

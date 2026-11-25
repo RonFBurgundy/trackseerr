@@ -1,5 +1,9 @@
 import { apiRequest } from './apiClient';
 import type {
+  MediaServerDeletedResponse,
+  MediaServerItem,
+  MediaServerLoginResponse,
+  MediaServerPayload,
   MediaServerSettings,
   MediaServerSettingsInput,
   MediaServerStatus,
@@ -64,4 +68,29 @@ export async function checkPlexAccountSignIn(pinId: number): Promise<PlexAccount
 
 export async function disconnectPlexAccount(): Promise<PlexAccountDisconnectResponse> {
   return apiRequest<PlexAccountDisconnectResponse>('/api/settings/media-server/plex-account', { method: 'DELETE' });
+}
+
+export async function listMediaServers(): Promise<MediaServerItem[]> {
+  return apiRequest<MediaServerItem[]>('/api/settings/media-servers');
+}
+
+export async function saveMediaServer(payload: MediaServerPayload): Promise<MediaServerItem> {
+  return apiRequest<MediaServerItem>('/api/settings/media-servers', { method: 'POST', body: payload });
+}
+
+export async function testMediaServer(payload: MediaServerPayload): Promise<MediaServerTestResult> {
+  return apiRequest<MediaServerTestResult>('/api/settings/media-servers/test', { method: 'POST', body: payload });
+}
+
+export async function deleteMediaServer(id: string): Promise<MediaServerDeletedResponse> {
+  return apiRequest<MediaServerDeletedResponse>(`/api/settings/media-servers/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function setLoginMediaServer(id: string | null): Promise<MediaServerLoginResponse> {
+  return apiRequest<MediaServerLoginResponse>('/api/settings/media-servers/login', {
+    method: 'PUT',
+    body: { server_id: id },
+  });
 }

@@ -26,3 +26,13 @@ export type PlexPinResponse = Schema<'PlexPinResponse'>;
 export type PlexAccountCheckResponse = Schema<'PlexAccountCheckResponse'>;
 
 export type PlexAccountDisconnectResponse = Schema<'PlexAccountDisconnectResponse'>;
+
+export type MediaServerKind = 'plex' | 'subsonic' | 'jellyfin';
+
+export type MediaServerItem = Schema<'MediaServerItem'>;
+
+export type MediaServerPayload = Schema<'MediaServerPayload'>;
+
+export type MediaServerDeletedResponse = Schema<'MediaServerDeletedResponse'>;
+
+export type MediaServerLoginResponse = Schema<'MediaServerLoginResponse'>;
