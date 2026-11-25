@@ -158,6 +158,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- The Wrong files check and Rename Files' audio check show by name in Activity and the task list, instead of "rename_verify".
 - Relinking many files at once (Wrong files, or Relink suggested in Rename Files) now handles albums where every song is shifted by one. Files swapping places in the same batch no longer count as a clash, so neither copy is sent to the recycle bin.
 - Downloads are no longer thrown away as "already own this song" when AcoustID lists a different song first for the same audio (Kendrick Lamar's "Black Boy Fly" kept being discarded as "Bitch, Don't Kill My Vibe – Remix"). TrackSeerr now checks every song AcoustID suggests and keeps a file whose own title matches the song you asked for.
 - When Self-Heal removes a wanted song, the request it came from is searched again instead of disappearing from Wanted. This brings back playlist songs removed from "Unknown Album" folders by the previous update. Removing a song with download history no longer fails, and an "Unknown Album" stuck under Various Artists goes back to the artist its folder is named after.
