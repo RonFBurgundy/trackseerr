@@ -255,6 +255,12 @@ def install(records: Sequence[ServerRecord]) -> None:
         _installed = True
 
 
+def is_installed() -> bool:
+    """Return True once ``install()`` has populated the process-wide registry."""
+    with _records_lock:
+        return _installed
+
+
 def records(config: Optional[Config] = None) -> tuple[ServerRecord, ...]:
     """Return installed ``ServerRecord`` instances, or fallback from ``config`` before ``install()``."""
     with _records_lock:
@@ -496,6 +502,7 @@ __all__ = [
     "fallback_records",
     "has_servers",
     "install",
+    "is_installed",
     "load_records",
     "login_plex_record",
     "login_server",

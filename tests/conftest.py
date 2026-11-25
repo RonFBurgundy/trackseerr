@@ -105,7 +105,7 @@ def _reset_media_server_process_state():
     never let one test's saved settings reach the next."""
     from trackseerr import media_servers
     from trackseerr.config import set_media_server_overlay, set_plex_account_token
-    from trackseerr.media_servers import registry
+    from trackseerr.media_servers import refresh_scheduler, registry
     from trackseerr.media_servers import settings as media_server_settings
 
     def _reset() -> None:
@@ -115,6 +115,7 @@ def _reset_media_server_process_state():
         with media_servers._subsonic_lock:
             media_servers._subsonic_cached = None
         registry._reset_for_tests()
+        refresh_scheduler.reset_for_tests()
 
     _reset()
     yield

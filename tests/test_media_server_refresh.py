@@ -477,3 +477,188 @@ def test_requeued_full_overrides_pending_folder_timer(monkeypatch):
     assert delay is not None
     assert abs(delay - expected_delay) < 1e-3
 
+
+def _make_fake_server(kind: str = "plex", *, folder_refresh: bool = False, roots: list[str] | None = None):
+    srv = MagicMock(spec=MediaServer)
+    srv.kind = kind
+    srv.paths_relative = False
+    srv.capabilities = MagicMock(folder_refresh=folder_refresh)
+    srv.library_roots.return_value = roots if roots is not None else []
+    srv.refresh_paths.return_value = True
+    return srv
+
+
+def _make_record(
+    server_id: str,
+    kind: str = "plex",
+    *,
+    enabled: bool = True,
+    roles: frozenset[str] | None = None,
+    name: str | None = None,
+):
+    from trackseerr.media_servers import registry
+
+    return registry.ServerRecord(
+        id=server_id,
+        kind=kind,
+        name=name or server_id,
+        source="settings",
+        url=f"http://{server_id}.local",
+        api_key="tok",
+        enabled=enabled,
+        roles=roles if roles is not None else frozenset(registry.ROLES),
+    )
+
+
+def test_fans_out_to_every_refresh_server(monkeypatch):
+    from trackseerr.media_servers import registry
+
+    rec1 = _make_record("plex-1", "plex")
+    rec2 = _make_record("jf-1", "jellyfin")
+    fakes = {"plex-1": _make_fake_server("plex"), "jf-1": _make_fake_server("jellyfin")}
+    registry.install([rec1, rec2])
+    monkeypatch.setattr(registry, "build_adapter", lambda r: fakes[r.id])
+
+    refresh_scheduler.request_library_refresh(None, reason="import")
+    assert refresh_scheduler.flush_now() is True
+
+    fakes["plex-1"].refresh_library.assert_called_once()
+    fakes["jf-1"].refresh_library.assert_called_once()
+
+
+def test_skips_servers_without_refresh_role_or_disabled(monkeypatch):
+    from trackseerr.media_servers import registry
+
+    active = _make_record("active", "plex")
+    no_role = _make_record("no-role", "jellyfin", roles=frozenset({registry.ROLE_PLAYLISTS}))
+    disabled = _make_record("disabled", "subsonic", enabled=False)
+    fakes = {
+        "active": _make_fake_server("plex"),
+        "no-role": _make_fake_server("jellyfin"),
+        "disabled": _make_fake_server("subsonic"),
+    }
+    registry.install([active, no_role, disabled])
+    monkeypatch.setattr(registry, "build_adapter", lambda r: fakes[r.id])
+
+    refresh_scheduler.request_library_refresh(None, reason="import")
+    assert refresh_scheduler.flush_now() is True
+
+    fakes["active"].refresh_library.assert_called_once()
+    fakes["no-role"].refresh_library.assert_not_called()
+    fakes["disabled"].refresh_library.assert_not_called()
+
+
+def test_installed_registry_without_refresh_servers_does_nothing(monkeypatch):
+    from trackseerr.media_servers import registry
+
+    passed_server = _make_fake_server("plex")
+    no_role = _make_record("no-role", "plex", roles=frozenset({registry.ROLE_PLAYLISTS}))
+    fakes = {"no-role": _make_fake_server("plex")}
+    registry.install([no_role])
+    monkeypatch.setattr(registry, "build_adapter", lambda r: fakes[r.id])
+
+    refresh_scheduler.request_library_refresh(passed_server, reason="import")
+    assert refresh_scheduler.flush_now() is False
+    passed_server.refresh_library.assert_not_called()
+    fakes["no-role"].refresh_library.assert_not_called()
+
+
+def test_each_server_coalesces_separately(monkeypatch):
+    from trackseerr.media_servers import registry
+
+    rec1 = _make_record("plex-1", "plex")
+    rec2 = _make_record("plex-2", "plex")
+    fakes = {"plex-1": _make_fake_server("plex"), "plex-2": _make_fake_server("plex")}
+    registry.install([rec1, rec2])
+    monkeypatch.setattr(registry, "build_adapter", lambda r: fakes[r.id])
+
+    refresh_scheduler.request_library_refresh(None, reason="import-1")
+    refresh_scheduler.request_library_refresh(None, reason="import-2")
+    assert refresh_scheduler.flush_now() is True
+
+    fakes["plex-1"].refresh_library.assert_called_once()
+    fakes["plex-2"].refresh_library.assert_called_once()
+
+
+def test_one_server_failing_does_not_stop_others(monkeypatch, caplog):
+    from trackseerr.media_servers import registry
+
+    rec1 = _make_record("failing", "plex", name="FailingPlex")
+    rec2 = _make_record("healthy", "jellyfin", name="HealthyJF")
+    failing = _make_fake_server("plex")
+    failing.refresh_library.side_effect = MediaServerError("boom", safe_detail="boom")
+    healthy = _make_fake_server("jellyfin")
+    fakes = {"failing": failing, "healthy": healthy}
+    registry.install([rec1, rec2])
+    monkeypatch.setattr(registry, "build_adapter", lambda r: fakes[r.id])
+
+    refresh_scheduler.request_library_refresh(None, reason="import")
+    with caplog.at_level(logging.WARNING):
+        assert refresh_scheduler.flush_now() is True
+
+    failing.refresh_library.assert_called_once()
+    healthy.refresh_library.assert_called_once()
+    assert "boom" in caplog.text
+
+
+def test_per_server_path_mapping_used(monkeypatch):
+    from trackseerr.media_servers import registry
+    from trackseerr.storage import Database
+
+    db = Database(":memory:")
+    row1 = db.insert_media_server_row(
+        {"kind": "plex", "name": "PlexOne", "url": "http://plex1.local", "api_key": "t1"}
+    )
+    row2 = db.insert_media_server_row(
+        {"kind": "plex", "name": "PlexTwo", "url": "http://plex2.local", "api_key": "t2"}
+    )
+    db.set_media_server_row_path_mapping(
+        row1["id"], {"local_prefix": "/music", "server_prefix": "/plex1-media"}
+    )
+    db.set_media_server_row_path_mapping(
+        row2["id"], {"local_prefix": "/music", "server_prefix": "/plex2-media"}
+    )
+
+    recs = registry.load_records(Config(plex_url="", plex_token=""), db)
+    fakes = {
+        row1["id"]: _make_fake_server("plex", folder_refresh=True, roots=["/plex1-media"]),
+        row2["id"]: _make_fake_server("plex", folder_refresh=True, roots=["/plex2-media"]),
+    }
+    registry.install(recs)
+    monkeypatch.setattr(registry, "build_adapter", lambda r: fakes[r.id])
+
+    refresh_scheduler.request_library_refresh(
+        None, reason="import", paths=["/music/Artist/Album"], db=db
+    )
+    assert refresh_scheduler.flush_now() is True
+
+    fakes[row1["id"]].refresh_paths.assert_called_once_with(["/plex1-media/Artist/Album"])
+    fakes[row2["id"]].refresh_paths.assert_called_once_with(["/plex2-media/Artist/Album"])
+
+
+def test_roots_cache_is_per_server(monkeypatch):
+    from trackseerr.media_servers import registry
+
+    rec1 = _make_record("plex-1", "plex")
+    rec2 = _make_record("plex-2", "plex")
+    srv1 = _make_fake_server("plex", folder_refresh=True, roots=["/srv1/music"])
+    srv2 = _make_fake_server("plex", folder_refresh=True, roots=["/srv2/music"])
+    fakes = {"plex-1": srv1, "plex-2": srv2}
+    registry.install([rec1, rec2])
+    monkeypatch.setattr(registry, "build_adapter", lambda r: fakes[r.id])
+
+    db = MagicMock()
+    db.get_media_server_row.return_value = None
+    db.get_media_server_path_mapping.return_value = None
+    db.get_media_management_settings.return_value = {"root_folder_path": "/music"}
+
+    refresh_scheduler.request_library_refresh(
+        None, reason="import", paths=["/music/Artist/Album"], db=db
+    )
+    assert refresh_scheduler.flush_now() is True
+
+    srv1.library_roots.assert_called_once()
+    srv2.library_roots.assert_called_once()
+    srv1.refresh_paths.assert_called_once_with(["/srv1/music/Artist/Album"])
+    srv2.refresh_paths.assert_called_once_with(["/srv2/music/Artist/Album"])
+

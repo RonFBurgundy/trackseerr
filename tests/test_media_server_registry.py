@@ -656,3 +656,11 @@ def test_login_plex_record() -> None:
 
     registry.install([sub_login, plex_login])
     assert registry.login_plex_record() == plex_login
+
+
+def test_is_installed() -> None:
+    assert registry.is_installed() is False
+    registry.install([])
+    assert registry.is_installed() is True
+    registry._reset_for_tests()
+    assert registry.is_installed() is False

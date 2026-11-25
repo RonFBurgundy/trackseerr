@@ -6,6 +6,7 @@ so Trackseerr never floods Plex, Jellyfin, or Subsonic with concurrent rescans.
 
 import logging
 import os
+import sqlite3
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -14,6 +15,7 @@ from typing import Any
 import requests
 
 from trackseerr.itunes_import import apply_mappings
+from trackseerr.media_servers import registry
 from trackseerr.media_servers.base import (
     MediaServer,
     MediaServerError,
@@ -44,11 +46,12 @@ def _parse_env_window() -> int:
         return 10
 
 
-def _get_cached_library_roots(server: MediaServer) -> list[str]:
+def _get_cached_library_roots(server: MediaServer, server_id: str | None = None) -> list[str]:
     kind = getattr(server, "kind", "") or ""
+    cache_key = server_id or kind
     now = _monotonic()
-    if kind in _roots_cache:
-        cached_at, roots = _roots_cache[kind]
+    if cache_key in _roots_cache:
+        cached_at, roots = _roots_cache[cache_key]
         if now - cached_at < 3600.0:
             return roots
     try:
@@ -56,24 +59,46 @@ def _get_cached_library_roots(server: MediaServer) -> list[str]:
     except MediaServerError as exc:
         logger.warning("Could not fetch library roots for %s: %s", kind or "media server", safe_exc(exc))
         roots = []
-    _roots_cache[kind] = (now, roots)
+    _roots_cache[cache_key] = (now, roots)
     return roots
 
 
-def _try_saved_mapping(db: Any, server: MediaServer, local: str) -> str | None:
-    if db is None or not hasattr(db, "get_media_server_path_mapping"):
+def _read_row_path_mapping(db: Any, server_id: str) -> dict[str, Any] | None:
+    if not hasattr(db, "get_media_server_row"):
         return None
     try:
-        saved = db.get_media_server_path_mapping()
-    except (AttributeError, TypeError, ValueError, OSError) as exc:
-        logger.debug("Could not read path mapping: %s", safe_exc(exc))
-        saved = None
-    if not (saved and isinstance(saved, dict)):
+        row = db.get_media_server_row(server_id)
+    except (AttributeError, TypeError, ValueError, OSError, sqlite3.Error) as exc:
+        logger.debug("Could not read path mapping for %s: %s", server_id, safe_exc(exc))
         return None
-    kind = getattr(server, "kind", "") or ""
-    sk = saved.get("server_kind", "")
-    if sk not in ("", kind):
+    if not isinstance(row, dict):
         return None
+    pm = row.get("path_mapping")
+    if isinstance(pm, dict) and (pm.get("local_prefix") or pm.get("server_prefix")):
+        return pm
+    return None
+
+
+def _try_saved_mapping(
+    db: Any, server: MediaServer, local: str, server_id: str | None = None
+) -> str | None:
+    if db is None:
+        return None
+    saved = _read_row_path_mapping(db, server_id) if server_id else None
+    if saved is None:
+        if not hasattr(db, "get_media_server_path_mapping"):
+            return None
+        try:
+            saved = db.get_media_server_path_mapping()
+        except (AttributeError, TypeError, ValueError, OSError, sqlite3.Error) as exc:
+            logger.debug("Could not read path mapping: %s", safe_exc(exc))
+            saved = None
+        if not (saved and isinstance(saved, dict)):
+            return None
+        kind = getattr(server, "kind", "") or ""
+        sk = saved.get("server_kind", "")
+        if sk not in ("", kind):
+            return None
     lp = str(saved.get("local_prefix") or "")
     sp = str(saved.get("server_prefix") or "")
     if not (lp or sp):
@@ -104,16 +129,18 @@ def _try_media_management_mapping(db: Any, roots: list[str], local: str) -> str 
     return apply_mappings(local, [{"from": local_root, "to": roots[0]}])
 
 
-def to_server_folder(db: Any, server: MediaServer, local: str) -> str | None:
+def to_server_folder(
+    db: Any, server: MediaServer, local: str, server_id: str | None = None
+) -> str | None:
     if getattr(server, "paths_relative", False) is True or not local:
         return None
 
     # a. Saved mapping
-    mapped = _try_saved_mapping(db, server, local)
+    mapped = _try_saved_mapping(db, server, local, server_id=server_id)
     if mapped is not None:
         return mapped
 
-    roots = _get_cached_library_roots(server)
+    roots = _get_cached_library_roots(server, server_id=server_id)
 
     # b. Local already under one of server.library_roots() -> unchanged
     if _try_library_roots(roots, local) is not None:
@@ -146,7 +173,10 @@ def nearest_existing_folder(path: str) -> str:
 
 
 def _resolve_and_translate_folders(
-    db: Any, server: MediaServer, paths: Iterable[str]
+    db: Any,
+    server: MediaServer,
+    paths: Iterable[str],
+    server_id: str | None = None,
 ) -> list[str] | None:
     seen: set[str] = set()
     candidate_folders: list[str] = []
@@ -160,7 +190,7 @@ def _resolve_and_translate_folders(
 
     translated: list[str] = []
     for folder in candidate_folders:
-        t = to_server_folder(db, server, folder)
+        t = to_server_folder(db, server, folder, server_id=server_id)
         if t is None:
             return None
         translated.append(t)
@@ -212,6 +242,7 @@ class RefreshScheduler:
         reason: str,
         paths: Iterable[str] | None = None,
         db: Any = None,
+        server_id: str | None = None,
     ) -> None:
         if server is None:
             return
@@ -221,7 +252,7 @@ class RefreshScheduler:
         translated_paths: list[str] = []
 
         if paths is not None and db is not None and can_folder:
-            folders = _resolve_and_translate_folders(db, server, paths)
+            folders = _resolve_and_translate_folders(db, server, paths, server_id=server_id)
             if folders is not None:
                 translated_paths = folders
                 is_folder_request = True
@@ -411,6 +442,18 @@ class RefreshScheduler:
 
 
 _scheduler = RefreshScheduler()
+_schedulers: dict[str, RefreshScheduler] = {}
+_schedulers_lock = threading.Lock()
+_window_minutes: int | None = None
+
+
+def _scheduler_for(server_id: str) -> RefreshScheduler:
+    with _schedulers_lock:
+        sched = _schedulers.get(server_id)
+        if sched is None:
+            sched = RefreshScheduler(_window_minutes)
+            _schedulers[server_id] = sched
+        return sched
 
 
 def request_library_refresh(
@@ -419,20 +462,62 @@ def request_library_refresh(
     paths: Iterable[str] | None = None,
     db: Any = None,
 ) -> None:
+    if registry.is_installed():
+        for rec, adapter in registry.media_servers(registry.ROLE_REFRESH):
+            try:
+                _scheduler_for(rec.id).request_library_refresh(
+                    adapter, reason, paths=paths, db=db, server_id=rec.id
+                )
+            except MediaServerError as exc:
+                logger.warning(
+                    "Failed to schedule library refresh for %s: %s",
+                    rec.name or rec.id,
+                    safe_exc(exc),
+                )
+        return
     _scheduler.request_library_refresh(server, reason, paths=paths, db=db)
 
 
 def configure(window_minutes: int) -> None:
+    global _window_minutes
+    _window_minutes = window_minutes
     _scheduler.configure(window_minutes)
+    with _schedulers_lock:
+        schedulers = list(_schedulers.values())
+    for sched in schedulers:
+        sched.configure(window_minutes)
 
 
 def flush_now() -> bool:
-    return _scheduler.flush_now()
+    flushed = _scheduler.flush_now()
+    with _schedulers_lock:
+        schedulers = list(_schedulers.values())
+    for sched in schedulers:
+        if sched.flush_now():
+            flushed = True
+    return flushed
 
 
 def reset_for_tests() -> None:
+    global _window_minutes
+    _window_minutes = None
     _scheduler.reset_for_tests()
+    with _schedulers_lock:
+        schedulers = list(_schedulers.values())
+        _schedulers.clear()
+    for sched in schedulers:
+        sched.reset_for_tests()
 
 
 def pending_delay() -> float | None:
-    return _scheduler.pending_delay()
+    delays: list[float] = []
+    d = _scheduler.pending_delay()
+    if d is not None:
+        delays.append(d)
+    with _schedulers_lock:
+        schedulers = list(_schedulers.values())
+    for sched in schedulers:
+        d = sched.pending_delay()
+        if d is not None:
+            delays.append(d)
+    return min(delays) if delays else None
