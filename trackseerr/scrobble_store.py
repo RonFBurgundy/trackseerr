@@ -270,11 +270,12 @@ class ScrobbleStoreMixin:
         played_at: Optional[Union[str, datetime]] = None,
         source: str = "plex_webhook",
     ) -> Optional[int]:
-        """Insert a listen; returns its id, or None when deduplicated (+/-10 min window)."""
+        """Insert a listen; returns its id, or None when deduplicated (same rating_key or artist+title within +/-10 min)."""
         uid = str(user_id)
         played = self._normalize_played_at(played_at)
         rk = str(rating_key) if rating_key not in (None, "") else None
         with self._lock:
+            dup = None
             if rk is not None:
                 dup = self.conn.execute(
                     """
@@ -285,7 +286,7 @@ class ScrobbleStoreMixin:
                     """,
                     (uid, rk, played),
                 ).fetchone()
-            else:
+            if dup is None:
                 dup = self.conn.execute(
                     """
                     SELECT 1 FROM user_listens
