@@ -22,13 +22,6 @@ def cfg(**kw: Any) -> Config:
     return Config(**base)
 
 
-@pytest.fixture(autouse=True)
-def _clean_registry() -> Any:
-    yield
-    registry.install(())
-    registry.reset_adapters()
-
-
 class _FakeAdapter:
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self.args = args
@@ -185,6 +178,8 @@ def test_adapter_cached_per_record_and_rebuilt_on_change(monkeypatch: pytest.Mon
 
 
 def test_failed_build_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 100.0
+    monkeypatch.setattr(registry.time, "monotonic", lambda: now)
     calls = 0
 
     def flaky_subsonic(*args: Any, **kwargs: Any) -> _FakeAdapter:
@@ -200,6 +195,7 @@ def test_failed_build_is_not_cached(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
     assert registry.build_adapter(rec) is None
+    now += registry.RETRY_SECONDS + 1.0
     adapter = registry.build_adapter(rec)
     assert adapter is not None
     assert calls == 2
@@ -292,3 +288,209 @@ def test_login_server_and_plex_and_jellyfin_builders(monkeypatch: pytest.MonkeyP
     db.update_media_server_row("env-plex", {"enabled": False})
     registry.reload(config, db)
     assert registry.login_server() is None
+
+
+def test_records_fall_back_to_config_before_install() -> None:
+    config = cfg(plex_url=PLEX_URL, plex_token="tok", plex_music_section="Music")
+    recs = registry.records(config)
+    assert len(recs) == 1
+    assert recs[0].id == "env-plex"
+    assert recs[0].kind == "plex"
+    assert recs[0].locked is True
+    assert recs[0].is_login is True
+
+    registry.install(())
+    assert registry.records(config) == ()
+
+
+def test_fallback_prefers_plex_then_subsonic_then_jellyfin() -> None:
+    sub_base = dict(
+        plex_url="",
+        plex_token="",
+        media_server="subsonic",
+        subsonic_url=URL,
+        subsonic_user="u",
+        subsonic_password="p",
+    )
+    both_plex_sub = Config(
+        plex_url=PLEX_URL,
+        plex_token="tok",
+        subsonic_url=URL,
+        subsonic_user="u",
+        subsonic_password="p",
+    )
+    assert [r.id for r in registry.fallback_records(both_plex_sub)] == ["env-plex"]
+
+    only_sub = Config(**sub_base)
+    sub_recs = registry.fallback_records(only_sub)
+    assert [r.id for r in sub_recs] == ["env-subsonic"]
+    assert sub_recs[0].kind == "subsonic"
+    assert sub_recs[0].source == "env"
+    assert sub_recs[0].username == "u"
+    assert sub_recs[0].password == "p"
+
+    only_jf = Config(
+        plex_url="",
+        plex_token="",
+        media_server="jellyfin",
+        jellyfin_url="http://jellyfin.example.com:8096",
+        jellyfin_user="admin",
+        jellyfin_api_key="jf-key",
+    )
+    jf_recs = registry.fallback_records(only_jf)
+    assert [r.id for r in jf_recs] == ["env-jellyfin"]
+    assert jf_recs[0].kind == "jellyfin"
+    assert jf_recs[0].source == "env"
+    assert jf_recs[0].username == "admin"
+    assert jf_recs[0].api_key == "jf-key"
+
+    assert registry.fallback_records(cfg()) == []
+
+
+def test_build_does_not_hold_lock_during_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+    lock_free_during_init = False
+
+    class _LockCheckingAdapter(_FakeAdapter):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            nonlocal lock_free_during_init
+            acquired = registry._adapters_lock.acquire(blocking=False)
+            if acquired:
+                lock_free_during_init = True
+                registry._adapters_lock.release()
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", _LockCheckingAdapter)
+    rec = registry.ServerRecord(
+        id="s1", kind="subsonic", name="S1", source="settings", url=URL, username="u", password="p"
+    )
+    adapter = registry.build_adapter(rec)
+    assert adapter is not None
+    assert lock_free_during_init is True
+
+
+def test_failed_build_backs_off_then_retries(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 100.0
+    monkeypatch.setattr(registry.time, "monotonic", lambda: now)
+    calls = 0
+
+    def flaky_subsonic(*args: Any, **kwargs: Any) -> _FakeAdapter:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise MediaServerConnectionError("down", safe_detail="down")
+        return _FakeAdapter(*args, **kwargs)
+
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", flaky_subsonic)
+    rec = registry.ServerRecord(
+        id="s1", kind="subsonic", name="S1", source="settings", url=URL, username="u", password="p"
+    )
+
+    assert registry.build_adapter(rec) is None
+    assert calls == 1
+
+    now += 10.0
+    assert registry.build_adapter(rec) is None
+    assert calls == 1
+
+    now += 51.0
+    adapter = registry.build_adapter(rec)
+    assert adapter is not None
+    assert calls == 2
+
+
+def test_changed_key_ignores_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    now = 100.0
+    monkeypatch.setattr(registry.time, "monotonic", lambda: now)
+    calls = 0
+
+    def subsonic_builder(url: str, *args: Any, **kwargs: Any) -> _FakeAdapter:
+        nonlocal calls
+        calls += 1
+        if url == URL:
+            raise MediaServerConnectionError("down", safe_detail="down")
+        return _FakeAdapter(url, *args, **kwargs)
+
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", subsonic_builder)
+    rec1 = registry.ServerRecord(
+        id="s1", kind="subsonic", name="S1", source="settings", url=URL, username="u", password="p"
+    )
+    rec2 = registry.ServerRecord(
+        id="s1", kind="subsonic", name="S1", source="settings", url="http://navidrome2:4533", username="u", password="p"
+    )
+
+    assert registry.build_adapter(rec1) is None
+    assert calls == 1
+    assert registry.build_adapter(rec2) is not None
+    assert calls == 2
+
+
+def test_primary_is_login_server_and_never_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing_plex(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("plex unreachable")
+
+    monkeypatch.setattr("trackseerr.clients.plex.PlexClient", failing_plex)
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", _FakeAdapter)
+
+    plex_rec = registry.ServerRecord(
+        id="env-plex", kind="plex", name="Plex", source="env", url=PLEX_URL, api_key="tok", is_login=True
+    )
+    sub_rec = registry.ServerRecord(
+        id="s1", kind="subsonic", name="Sub", source="settings", url=URL, username="u", password="p"
+    )
+    registry.install([plex_rec, sub_rec])
+
+    assert registry.has_servers() is True
+    assert registry.primary_server() is None
+
+
+def test_primary_without_login_is_first_buildable(monkeypatch: pytest.MonkeyPatch) -> None:
+    def failing_if_bad_url(url: str, *args: Any, **kwargs: Any) -> _FakeAdapter:
+        if "bad" in url:
+            raise MediaServerConnectionError("bad", safe_detail="bad")
+        return _FakeAdapter(url, *args, **kwargs)
+
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", failing_if_bad_url)
+    bad = registry.ServerRecord(
+        id="s1", kind="subsonic", name="Bad", source="settings", url="http://bad:4533", username="u", password="p"
+    )
+    good = registry.ServerRecord(
+        id="s2", kind="subsonic", name="Good", source="settings", url=URL, username="u", password="p"
+    )
+    registry.install([bad, good])
+
+    primary = registry.primary_server()
+    assert primary is not None
+    assert primary[0].id == "s2"
+
+
+def test_plex_login_client_and_client_for(monkeypatch: pytest.MonkeyPatch) -> None:
+    raw_plex_client = object()
+
+    class _FakePlexAdapter(registry.PlexMediaServer):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def plex_extras(self) -> Any:
+            return raw_plex_client
+
+    monkeypatch.setattr("trackseerr.clients.plex.PlexClient", _FakeAdapter)
+    monkeypatch.setattr("trackseerr.media_servers.registry.PlexMediaServer", _FakePlexAdapter)
+    monkeypatch.setattr("trackseerr.media_servers.registry.SubsonicMediaServer", _FakeAdapter)
+
+    plex_rec = registry.ServerRecord(
+        id="env-plex", kind="plex", name="Plex", source="env", url=PLEX_URL, api_key="tok", is_login=True
+    )
+    sub_rec = registry.ServerRecord(
+        id="s1", kind="subsonic", name="Sub", source="settings", url=URL, username="u", password="p"
+    )
+    registry.install([plex_rec, sub_rec])
+
+    assert registry.plex_login_client() is raw_plex_client
+    assert registry.client_for(registry.server_by_id("env-plex")) is raw_plex_client
+    sub_pair = registry.server_by_id("s1")
+    assert sub_pair is not None
+    assert registry.client_for(sub_pair) is sub_pair[1]
+    assert registry.client_for(None) is None
+
+    registry.install([sub_rec])
+    assert registry.plex_login_client() is None
