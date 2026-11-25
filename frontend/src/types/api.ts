@@ -13601,6 +13601,11 @@ export interface components {
         };
         /** RenameRelinkBatchResponse */
         RenameRelinkBatchResponse: {
+            /**
+             * Ambiguous
+             * @default 0
+             */
+            ambiguous: number;
             /** Conflicts Skipped */
             conflicts_skipped: number;
             /** Errors */
@@ -15592,10 +15597,20 @@ export interface components {
             actual_track_title?: string | null;
             /** Album Id */
             album_id?: string | null;
+            /**
+             * Album Is Mix
+             * @default false
+             */
+            album_is_mix: boolean;
             /** Album Title */
             album_title: string;
             /** Artist Name */
             artist_name: string;
+            /**
+             * Claimed By Others
+             * @default 0
+             */
+            claimed_by_others: number;
             /** File Id */
             file_id: string;
             /**
@@ -15605,6 +15620,11 @@ export interface components {
             kind: "different_song" | "different_version";
             /** Relative Path */
             relative_path?: string | null;
+            /**
+             * Safe
+             * @default false
+             */
+            safe: boolean;
             /** Score */
             score?: number | null;
             /** Track Id */
@@ -15624,6 +15644,11 @@ export interface components {
             items: components["schemas"]["WrongFileItem"][];
             /** Library Files */
             library_files: number;
+            /**
+             * Safe Count
+             * @default 0
+             */
+            safe_count: number;
             /** Total */
             total: number;
         };
