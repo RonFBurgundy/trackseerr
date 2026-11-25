@@ -60,6 +60,11 @@ def _notify() -> None:
             logger.debug("Media-server listener traceback", exc_info=True)
 
 
+def notify_changed() -> None:
+    """Notify registered media-server change listeners."""
+    _notify()
+
+
 def load_into_process(db: Any) -> None:
     """Install the saved values (core startup). A database error leaves the environment-only behaviour in place."""
     try:
