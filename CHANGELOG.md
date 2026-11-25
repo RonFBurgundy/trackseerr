@@ -104,6 +104,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- **Duplicates** and **Not on MusicBrainz** in Library tools now look and work like Rename Files: filter chips, Select all / Select safe only (sure matches for MusicBrainz), a selected count, and the action buttons at the bottom. Duplicates can now keep the better quality copy, or both copies, for many albums at once.
 - Songs from compilations are now filed under their own artist's single or album, so Plexamp shows far fewer "Various Artists" albums. This covers compilations from your Lidarr import, song requests, playlists and new downloads. A compilation stays together only when you monitor that album yourself, or when you switch on **Keep compilations together** in Settings → Media Management (off by default). Library Self-Heal does the moving; run Rename Files and Retag afterwards. Songs MusicBrainz only knows from compilations stay where they are.
 - Library Self-Heal shows which step it is on ("Step 4 of 11 · Linking albums") instead of a counter that keeps restarting, and scheduled runs now show progress too.
 - Switching on one song in an album now also monitors its album and artist, so the song is really searched for. The album's other songs stay as they were.
