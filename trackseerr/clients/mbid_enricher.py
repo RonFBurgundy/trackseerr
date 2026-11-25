@@ -246,7 +246,7 @@ def artist_name_key(name: str) -> str:
     text = unicodedata.normalize("NFKD", str(name or ""))
     text = "".join(ch for ch in text if not unicodedata.combining(ch)).lower()
     text = re.sub("[\u2010\u2011\u2013\u2014\u2212]", "-", text)
-    text = text.replace(" & ", " and ").replace(" + ", " and ").replace("\u2019", "'")
+    text = text.replace("&", " and ").replace("+", " and ").replace("\u2019", "'")
     text = _strip_article(text)
     return clean_library_name(text).replace(" ", "").replace("-", "")
 

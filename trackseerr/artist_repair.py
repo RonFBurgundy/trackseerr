@@ -691,13 +691,63 @@ def refile_joined_credit_artists(db: Any, enricher: Any, counts: dict[str, int],
             logger.warning("Refiling joined-credit artist %r failed: %s", row["name"], safe_exc(exc))
 
 
+def _pick_same_name_keeper(
+    rows: list[sqlite3.Row], mb_name: Optional[str], album_counts: dict[str, int]
+) -> sqlite3.Row:
+    """Prefer rows with an MBID, then exact MB name, then most albums, then oldest row."""
+    with_mbid = [r for r in rows if not _empty(r["mbid"])]
+    return _pick_keeper(with_mbid or rows, mb_name, album_counts)
+
+
+def merge_same_name_duplicate_artists(
+    db: Any, enricher: Any, counts: dict[str, int], should_stop: StopFn = None
+) -> None:
+    """Merges same-name duplicate rows when at most one distinct MBID exists in the cluster."""
+    rows = _fetchall(
+        db,
+        "SELECT id, name, mbid, created_at FROM library_artists ORDER BY created_at, rowid",
+    )
+    by_key: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        if str(row["mbid"] or "").strip().lower() == VARIOUS_ARTISTS_MBID.lower():
+            continue
+        key = artist_name_key(str(row["name"]))
+        if key:
+            by_key.setdefault(key, []).append(row)
+    album_counts = {
+        str(r["artist_id"]): int(r["n"])
+        for r in _fetchall(db, "SELECT artist_id, COUNT(*) AS n FROM library_albums GROUP BY artist_id")
+    }
+    for cluster in by_key.values():
+        if len(cluster) < 2:
+            continue
+        if should_stop is not None and should_stop():
+            return
+        mbids = {str(r["mbid"]).strip().lower() for r in cluster if not _empty(r["mbid"])}
+        if len(mbids) > 1:
+            continue
+        mb_name = (_mb_name(enricher, next(iter(mbids))) or None) if len(mbids) == 1 else None
+        keeper = _pick_same_name_keeper(cluster, mb_name, album_counts)
+        for dupe in cluster:
+            if dupe["id"] == keeper["id"]:
+                continue
+            try:
+                counts["albums_merged"] += _merge_artist_into(db, str(keeper["id"]), str(dupe["id"]))
+                counts["artists_merged"] += 1
+                album_counts[str(keeper["id"])] = album_counts.get(str(keeper["id"]), 0) + album_counts.get(
+                    str(dupe["id"]), 0
+                )
+            except sqlite3.Error:
+                counts["errors"] += 1
+
+
 # --- entry points ----------------------------------------------------------------------------------------------------
 
 
 def run_artist_repair(
     db: Any, enricher: Any, should_stop: StopFn = None, on_progress: ProgressFn = None
 ) -> dict[str, int]:
-    """Runs the three repair passes in order and returns what changed."""
+    """Runs the repair passes in order and returns what changed."""
     counts = dict.fromkeys(_COUNT_KEYS, 0)
     merge_duplicate_mbid_artists(db, enricher, counts, should_stop)
     if should_stop is not None and should_stop():
@@ -706,6 +756,9 @@ def run_artist_repair(
     if should_stop is not None and should_stop():
         return counts
     refile_joined_credit_artists(db, enricher, counts, should_stop)
+    if should_stop is not None and should_stop():
+        return counts
+    merge_same_name_duplicate_artists(db, enricher, counts, should_stop)
     if should_stop is not None and should_stop():
         return counts
     prune_various_artists_albums(db, counts)

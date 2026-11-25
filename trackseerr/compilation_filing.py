@@ -245,6 +245,19 @@ def _artist_for_mbid(db: Any, mbid: str, name: str) -> Optional[dict[str, Any]]:
     clean_name = str(name or "").strip()
     if not clean_name:
         return None
+    by_name = db.get_library_artist_by_name(clean_name)
+    if by_name is not None and not str(by_name.get("mbid") or "").strip():
+        created = db.upsert_library_artist(
+            LibraryArtist(
+                id=str(by_name["id"]),
+                name=str(by_name.get("name") or clean_name),
+                mbid=clean_mbid,
+                monitored=bool(by_name.get("monitored")),
+                monitor_option=str(by_name.get("monitor_option") or "none"),
+            ),
+            preserve_monitoring=True,
+        )
+        return dict(created)
     created = db.upsert_library_artist(
         LibraryArtist(
             id=str(uuid.uuid4()),
@@ -362,6 +375,56 @@ def file_album_under_various(
     return merged
 
 
+def _delete_unused_artist(db: Any, artist_id: str) -> None:
+    """Deletes a newly created artist row when no home release group or album was found."""
+    with db._lock:
+        db.conn.execute("DELETE FROM library_artists WHERE id = ?", (artist_id,))
+        db.conn.commit()
+
+
+def _lookup_existing_artist(db: Any, mbid: str, name: str) -> Optional[dict[str, Any]]:
+    if mbid:
+        existing = db.get_library_artist_by_mbid(mbid)
+        if existing is not None:
+            return existing
+    if name:
+        return db.get_library_artist_by_name(name)
+    return None
+
+
+def _resolve_deezer_or_own_comp(
+    db: Any,
+    discovery: Any,
+    credit_mbid: str,
+    credit_name: str,
+    groups: list[dict[str, Any]],
+    track: dict[str, Any],
+    album: Optional[dict[str, Any]],
+    title: str,
+) -> tuple[Optional[tuple[dict[str, Any], Optional[dict[str, Any]], str, Optional[str]]], Optional[dict[str, Any]]]:
+    from trackseerr.deezer_home import deezer_home_album
+
+    deezer_artist = _lookup_existing_artist(db, credit_mbid, credit_name)
+    was_existing = deezer_artist is not None
+    if discovery is not None:
+        if deezer_artist is None and credit_mbid and credit_name:
+            deezer_artist = _artist_for_mbid(db, credit_mbid, credit_name)
+        if deezer_artist is not None:
+            holder_id = deezer_home_album(db, discovery, deezer_artist, track, album or {})
+            if holder_id is not None:
+                return (deezer_artist, None, "deezer", holder_id), deezer_artist
+    if credit_mbid and credit_name:
+        own_comp = home_release_group(groups, credit_mbid, title, allow_own_compilation=True)
+        if own_comp is not None:
+            target_artist = deezer_artist or _artist_for_mbid(db, credit_mbid, credit_name)
+            if target_artist is not None:
+                return (target_artist, own_comp, "own_compilation", None), target_artist
+    if not was_existing and deezer_artist is not None:
+        _delete_unused_artist(db, str(deezer_artist["id"]))
+        deezer_artist = None
+    return None, deezer_artist
+
+
 def _resolve_per_track_target(
     db: Any,
     enricher: Any,
@@ -372,32 +435,28 @@ def _resolve_per_track_target(
     discovery: Any = None,
 ) -> tuple[Optional[tuple[dict[str, Any], Optional[dict[str, Any]], str, Optional[str]]], str]:
     """Resolves ((artist, home_group, source, holder_id), reason) for a track in per-track mode."""
-    from trackseerr.deezer_home import deezer_home_album
-
     title = str(track.get("title") or "")
-    target_artist = performer_artist(db, str(track["id"]))
-    groups = per_rec_groups.get(rec, [])
-    home = home_release_group(groups, target_artist.get("mbid"), title) if target_artist is not None else None
-    if target_artist is not None and home is not None:
-        return (target_artist, home, "recording", None), ""
     credit = _primary_track_credit(db, str(track["id"]))
     if credit is None:
         return None, "no_credit"
+    credit_mbid = str(credit.get("artist_mbid") or "").strip()
+    credit_name = str(credit.get("artist_name") or "").strip()
+    groups = per_rec_groups.get(rec, [])
+    if credit_mbid and credit_name:
+        home = home_release_group(groups, credit_mbid, title)
+        if home is not None:
+            target_artist = _artist_for_mbid(db, credit_mbid, credit_name)
+            if target_artist is not None:
+                return (target_artist, home, "recording", None), ""
     hit, reason = _search_home(db, enricher, track, credit, own_rec=rec)
     if hit is not None:
         return (hit[0], hit[1], "search", None), ""
-    deezer_artist = target_artist
-    if deezer_artist is None and credit.get("artist_name"):
-        deezer_artist = db.get_library_artist_by_name(str(credit["artist_name"]))
-    if discovery is not None and deezer_artist is not None:
-        holder_id = deezer_home_album(db, discovery, deezer_artist, track, album or {})
-        if holder_id is not None:
-            return (deezer_artist, None, "deezer", holder_id), ""
-    if target_artist is not None:
-        own_comp = home_release_group(groups, target_artist.get("mbid"), title, allow_own_compilation=True)
-        if own_comp is not None:
-            return (target_artist, own_comp, "own_compilation", None), ""
-    if deezer_artist is None:
+    resolved, performer = _resolve_deezer_or_own_comp(
+        db, discovery, credit_mbid, credit_name, groups, track, album, title
+    )
+    if resolved is not None:
+        return resolved, ""
+    if performer is None and not (credit_mbid and credit_name):
         return None, "no_performer"
     return None, reason
 
@@ -593,11 +652,30 @@ def _sole_performer_mbid(db: Any, owned_tracks: list[dict[str, Any]]) -> Optiona
 
 
 def _move_wrongly_linked_album(
-    db: Any, album: dict[str, Any], owned_tracks: list[dict[str, Any]], group: dict[str, Any], counts: dict[str, int]
+    db: Any,
+    enricher: Any,
+    album: dict[str, Any],
+    owned_tracks: list[dict[str, Any]],
+    group: dict[str, Any],
+    counts: dict[str, int],
 ) -> None:
     sole_mbid = _sole_performer_mbid(db, owned_tracks)
     group_artists = {str(a).lower() for a in group.get("artist_ids") or []}
     if sole_mbid is None:
+        no_credit_mbids = all(
+            not str((_primary_track_credit(db, str(t["id"])) or {}).get("artist_mbid") or "").strip()
+            for t in owned_tracks
+        )
+        if no_credit_mbids and len(group_artists) == 1:
+            sole_gp_mbid = next(iter(group_artists))
+            artist = db.get_library_artist_by_mbid(sole_gp_mbid)
+            if artist is None and enricher is not None:
+                details = enricher.get_artist_details(sole_gp_mbid)
+                artist = _artist_for_mbid(db, sole_gp_mbid, str((details or {}).get("name") or ""))
+            if artist is not None:
+                db.move_album_to_artist(str(album["id"]), str(artist["id"]))
+                counts["moved_to_artist"] += 1
+                return
         reason = "wrong_link_mixed_performers"
         counts["skipped"] += 1
         counts[f"left_{reason}"] = counts.get(f"left_{reason}", 0) + 1
@@ -635,7 +713,7 @@ def _refile_out_of_various_one(
         group = _group_by_id(rg_id, per_rec)
         if group is not None and not group.get("is_various"):
             counts["albums"] += 1
-            _move_wrongly_linked_album(db, album, owned_tracks, group, counts)
+            _move_wrongly_linked_album(db, enricher, album, owned_tracks, group, counts)
             return
     if not rg_id or not keeps_compilation(db, album):
         counts["albums"] += 1

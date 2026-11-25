@@ -286,7 +286,7 @@ def test_merge_rolls_back_on_failure(db: Database, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(artist_repair, "_repoint_artist_refs", boom)
     counts = run_artist_repair(db, FakeEnricher({JAYZ: "JAY-Z"}))
 
-    assert counts["errors"] == 1 and counts["artists_merged"] == 0
+    assert counts["errors"] == 2 and counts["artists_merged"] == 0
     assert _names(db) == ["JAY-Z", "Jay Z"]
     assert db.conn.execute("SELECT artist_id FROM library_albums WHERE id = 'x'").fetchone()[0] == "a1"
 
@@ -604,3 +604,28 @@ def test_prune_va_albums_no_va_artist_noop(db: Database):
     counts: dict[str, int] = {"va_albums_pruned": 0}
     artist_repair.prune_various_artists_albums(db, counts)
     assert counts["va_albums_pruned"] == 0
+
+
+def test_artist_name_key_folds_ampersand_without_spaces():
+    assert artist_name_key("Blatta&Inesha") == artist_name_key("Blatta & Inesha")
+
+
+def test_merges_idless_duplicate_artists_and_replaced_mbid_collisions(db: Database):
+    _artist(db, "cd-1", "Champagne Drip", None)
+    _artist(db, "cd-2", "Champagne Drip", FELIX_REAL)
+    _album(db, "cd-alb", "cd-1", "Timewarp")
+    _artist(db, "ser-1", "Seryoga", None)
+    _artist(db, "ser-2", "Seryoga", None)
+    _artist(db, "df-1", "David Foster", FELIX_REAL)
+    _artist(db, "df-2", "David Foster", JAXX)
+    enricher = FakeEnricher({JAXX: "Basement Jaxx"}, {"David Foster": FELIX_REAL})
+
+    counts = run_artist_repair(db, enricher)
+
+    assert counts["errors"] == 0
+    for name in ("Champagne Drip", "Seryoga", "David Foster"):
+        rows = db.conn.execute("SELECT * FROM library_artists WHERE name = ?", (name,)).fetchall()
+        assert len(rows) == 1
+    cd_row = db.conn.execute("SELECT id, mbid FROM library_artists WHERE name = 'Champagne Drip'").fetchone()
+    assert cd_row["mbid"] == FELIX_REAL
+    assert _count(db, "SELECT COUNT(*) FROM library_albums WHERE id = 'cd-alb' AND artist_id = ?", cd_row["id"]) == 1
