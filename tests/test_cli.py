@@ -5,6 +5,26 @@ from trackseerr.cli import main
 from trackseerr.gateway_link import HANDSHAKE_OK, HandshakeResult
 
 
+_ENV_PLEX_ROW = {
+    "id": "env-plex",
+    "kind": "plex",
+    "name": "Plex",
+    "source": "env",
+    "url": "",
+    "username": "",
+    "password": "",
+    "api_key": "",
+    "music_section": "",
+    "verify_ssl": True,
+    "enabled": True,
+    "is_login": True,
+    "use_refresh": True,
+    "use_playlists": True,
+    "use_users": True,
+    "use_scrobbles": True,
+}
+
+
 def test_cli_explicit_plex_without_credentials_fails():
     """No PLEX_* is fine (media server defaults to none); an explicit MEDIA_SERVER=plex without them is not."""
     with patch.dict(os.environ, {"MEDIA_SERVER": "plex"}, clear=True):
@@ -12,7 +32,7 @@ def test_cli_explicit_plex_without_credentials_fails():
         assert code == 1
 
 
-@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.clients.plex.PlexClient")
 @patch("trackseerr.cli.SyncCoordinator")
 def test_cli_run_once_success(mock_coord_class, mock_plex_class):
     mock_coord = MagicMock()
@@ -29,7 +49,7 @@ def test_cli_run_once_success(mock_coord_class, mock_plex_class):
         mock_coord.run_sync_cycle.assert_called_once()
 
 
-@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.clients.plex.PlexClient")
 @patch("trackseerr.cli.SyncCoordinator")
 def test_cli_headless_mode(mock_coord_class, mock_plex_class):
     mock_coord = MagicMock()
@@ -50,7 +70,7 @@ def test_cli_headless_mode(mock_coord_class, mock_plex_class):
 
 @patch("trackseerr.cli.uvicorn.Server")
 @patch("trackseerr.cli.Database")
-@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.clients.plex.PlexClient")
 def test_cli_web_mode_default(mock_plex_class, mock_db_class, mock_server_class, tmp_path):
     mock_plex = MagicMock()
     mock_plex.get_home_users.return_value = [
@@ -61,6 +81,7 @@ def test_cli_web_mode_default(mock_plex_class, mock_db_class, mock_server_class,
     mock_db = MagicMock()
     mock_db.is_tombstoned.return_value = False  # discovery skips admin-deleted (tombstoned) users
     mock_db.get_user.return_value = None
+    mock_db.list_media_server_rows.return_value = [_ENV_PLEX_ROW]
     mock_db_class.return_value = mock_db
 
     mock_server = MagicMock()
@@ -85,11 +106,12 @@ def test_cli_web_mode_default(mock_plex_class, mock_db_class, mock_server_class,
 
 @patch("trackseerr.cli.uvicorn.Server")
 @patch("trackseerr.cli.Database")
-@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.clients.plex.PlexClient")
 def test_cli_web_mode_custom_port(mock_plex_class, mock_db_class, mock_server_class, tmp_path):
     mock_plex = MagicMock()
     mock_plex.get_home_users.return_value = []
     mock_plex_class.return_value = mock_plex
+    mock_db_class.return_value.list_media_server_rows.return_value = [_ENV_PLEX_ROW]
 
     mock_server = MagicMock()
     mock_server_class.return_value = mock_server
@@ -109,7 +131,7 @@ def test_cli_web_mode_custom_port(mock_plex_class, mock_db_class, mock_server_cl
 
 
 @patch("trackseerr.cli.Database")
-@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.clients.plex.PlexClient")
 def test_cli_web_mode_database_permission_error(mock_plex_class, mock_db_class, tmp_path):
     mock_db_class.side_effect = PermissionError("Permission denied: /data/sync_db.sqlite")
 
@@ -130,7 +152,7 @@ def test_cli_web_mode_database_permission_error(mock_plex_class, mock_db_class, 
 )
 @patch("trackseerr.cli.uvicorn.Server")
 @patch("trackseerr.cli.SyncCoordinator")
-@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.clients.plex.PlexClient")
 def test_cli_gateway_role_starts_without_plex_vars(
     mock_plex_class, mock_coord_class, mock_server_class, _hs, _worker, tmp_path
 ):
@@ -162,7 +184,7 @@ def test_cli_gateway_role_starts_without_plex_vars(
 @patch("trackseerr.cli.uvicorn.Server")
 @patch("trackseerr.cli.Database")
 @patch("trackseerr.cli.SyncCoordinator")
-@patch("trackseerr.cli.PlexClient")
+@patch("trackseerr.clients.plex.PlexClient")
 def test_cli_gateway_role_fallback_to_ephemeral_db(
     mock_plex_class, mock_coord_class, mock_db_class, mock_server_class, _hs, _worker
 ):

@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import uuid
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
@@ -201,6 +202,76 @@ class PlaylistStoreMixin:
                 (str(playlist_id),),
             )
             return [row["user_id"] for row in cur.fetchall()]
+
+    # -------------------------------------------------------------------------
+    # Playlist Media Server Excludes & Per-Server Sync State
+    # -------------------------------------------------------------------------
+
+    def get_playlist_server_excludes(self, playlist_id: str) -> set[str]:
+        """Return the set of media server IDs opted out of syncing ``playlist_id``."""
+        with self.reader() as conn:
+            cur = conn.execute(
+                "SELECT server_id FROM playlist_server_excludes WHERE playlist_id = ?",
+                (str(playlist_id),),
+            )
+            return {row["server_id"] for row in cur.fetchall()}
+
+    def set_playlist_server_excludes(self, playlist_id: str, server_ids: Iterable[str]) -> None:
+        """Replace all excluded media server IDs for ``playlist_id``."""
+        p_id = str(playlist_id)
+        unique_sids = list(dict.fromkeys(str(sid) for sid in server_ids))
+        with self._lock:
+            self.conn.execute(
+                "DELETE FROM playlist_server_excludes WHERE playlist_id = ?",
+                (p_id,),
+            )
+            for s_id in unique_sids:
+                self.conn.execute(
+                    "INSERT INTO playlist_server_excludes (playlist_id, server_id) VALUES (?, ?)",
+                    (p_id, s_id),
+                )
+            self.conn.commit()
+
+    def record_playlist_server_state(
+        self,
+        playlist_id: str,
+        server_id: str,
+        status: str,
+        matched: int = 0,
+        missing: int = 0,
+        error: str = "",
+    ) -> None:
+        """Upsert per-server sync outcome for ``(playlist_id, server_id)``."""
+        err_text = str(error or "")[:500]
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO playlist_server_state (playlist_id, server_id, status, matched, missing, error, synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(playlist_id, server_id) DO UPDATE SET
+                    status = excluded.status,
+                    matched = excluded.matched,
+                    missing = excluded.missing,
+                    error = excluded.error,
+                    synced_at = CURRENT_TIMESTAMP
+                """,
+                (str(playlist_id), str(server_id), str(status), int(matched), int(missing), err_text),
+            )
+            self.conn.commit()
+
+    def list_playlist_server_state(self, playlist_id: str) -> list[dict[str, Any]]:
+        """Return per-server sync state rows for ``playlist_id``, ordered by server ID."""
+        with self.reader() as conn:
+            cur = conn.execute(
+                """
+                SELECT playlist_id, server_id, status, matched, missing, error, synced_at
+                FROM playlist_server_state
+                WHERE playlist_id = ?
+                ORDER BY server_id ASC
+                """,
+                (str(playlist_id),),
+            )
+            return [dict(row) for row in cur.fetchall()]
 
     # -------------------------------------------------------------------------
     # Plex Playlist Control: registry + mix snapshots

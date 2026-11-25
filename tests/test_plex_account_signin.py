@@ -255,18 +255,18 @@ def test_disconnect_clears_token(env) -> None:
     assert get_plex_account_token() == ""
 
 
-def test_get_media_server_reports_connected_without_token(env) -> None:
-    res_empty = env.tc.get("/api/settings/media-server", headers=env.admin)
+def test_plex_account_status_route(env) -> None:
+    assert env.tc.get("/api/settings/media-server/plex-account").status_code in (401, 403)
+    assert env.tc.get("/api/settings/media-server/plex-account", headers=env.alice).status_code == 403
+
+    res_empty = env.tc.get("/api/settings/media-server/plex-account", headers=env.admin)
     assert res_empty.status_code == 200
-    assert res_empty.json()["plex_account_connected"] is False
-    assert res_empty.json()["plex_account_username"] == ""
+    assert res_empty.json() == {"connected": False, "username": ""}
 
     env.db.set_plex_account("super-secret-plex-token", "plex_owner")
-    res_conn = env.tc.get("/api/settings/media-server", headers=env.admin)
+    res_conn = env.tc.get("/api/settings/media-server/plex-account", headers=env.admin)
     assert res_conn.status_code == 200
-    body = res_conn.json()
-    assert body["plex_account_connected"] is True
-    assert body["plex_account_username"] == "plex_owner"
+    assert res_conn.json() == {"connected": True, "username": "plex_owner"}
     assert "super-secret-plex-token" not in res_conn.text
 
 
@@ -279,16 +279,12 @@ def test_saving_media_server_page_keeps_plex_account(env, monkeypatch) -> None:
 
     env.db.set_plex_account("super-secret-plex-token", "plex_owner")
 
-    res_jf = env.tc.put(
-        "/api/settings/media-server",
-        json={"type": "jellyfin", "url": "http://jf.example:8096", "username": "bob", "password": "", "api_key": "jf-key"},
+    res_jf = env.tc.post(
+        "/api/settings/media-servers",
+        json={"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf.example:8096", "username": "bob", "password": "", "api_key": "jf-key"},
         headers=env.admin,
     )
     assert res_jf.status_code == 200
-    assert env.db.get_plex_account() == {"token": "super-secret-plex-token", "username": "plex_owner"}
-
-    res_none = env.tc.put("/api/settings/media-server", json={"type": "none"}, headers=env.admin)
-    assert res_none.status_code == 200
     assert env.db.get_plex_account() == {"token": "super-secret-plex-token", "username": "plex_owner"}
 
 

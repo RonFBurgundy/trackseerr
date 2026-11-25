@@ -84,7 +84,9 @@ def _plex_login_unavailable(config: Optional[Config]) -> bool:
     sign-in is intended, so neither is blocked here."""
     if config is None or config.role == "gateway" or os.getenv("PLEX_MACHINE_IDENTIFIER"):
         return False
-    return config.media_server_type != MEDIA_SERVER_PLEX  # Subsonic servers have no Plex OAuth either
+    from trackseerr.media_servers import registry
+
+    return registry.login_plex_record(config) is None
 
 
 @router.post("/plex/pin", response_model=PlexPinResponse, response_model_exclude_unset=True)
@@ -460,7 +462,9 @@ def local_login(
             client_ip=client_ip,
         )
     except LoginError as exc:
-        if exc.status_code == 401 and config.media_server_type != MEDIA_SERVER_PLEX:
+        from trackseerr.media_servers import registry
+
+        if exc.status_code == 401 and registry.login_plex_record(config) is None:
             hint = admin_bootstrap.setup_hint(db)
             if hint:
                 raise HTTPException(status_code=401, detail=hint) from exc

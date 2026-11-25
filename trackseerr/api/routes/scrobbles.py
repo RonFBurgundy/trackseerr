@@ -285,6 +285,13 @@ async def plex_webhook(
     if not token or not hmac.compare_digest(token.encode("utf-8"), expected.encode("utf-8")):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook token")
 
+    from trackseerr.media_servers import registry
+
+    if registry.is_installed():
+        rec = registry.login_plex_record(config)
+        if rec is None or registry.ROLE_SCROBBLES not in rec.roles:
+            return {"status": "ignored"}
+
     too_large = HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload too large")
     declared = request.headers.get("content-length")
     if declared is not None:

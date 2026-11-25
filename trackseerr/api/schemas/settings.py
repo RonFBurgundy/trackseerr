@@ -30,6 +30,11 @@ class LidarrOptionsResponse(ApiModel):
     tags: list[LidarrTagOption]
 
 
+class PlexAccountStatusResponse(ApiModel):
+    connected: bool
+    username: str
+
+
 class PlexAccountCheckResponse(ApiModel):
     connected: bool
     pending: bool

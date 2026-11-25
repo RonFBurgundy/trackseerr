@@ -19,6 +19,16 @@ export async function toggleUserTarget(playlistId: number | string, targetUserId
   });
 }
 
+export async function setPlaylistServers(
+  playlistId: number | string,
+  excludedServerIds: string[]
+): Promise<Schema<'PlaylistServersResponse'>> {
+  return apiRequest<Schema<'PlaylistServersResponse'>>(`/api/playlists/${playlistId}/servers`, {
+    method: 'PUT',
+    body: { excluded_server_ids: excludedServerIds },
+  });
+}
+
 export async function togglePlaylistActive(playlistId: number | string, isEnabled: boolean): Promise<void> {
   await apiRequest<void>(`/api/playlists/${playlistId}/enabled`, {
     method: 'PUT',

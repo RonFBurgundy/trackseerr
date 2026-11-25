@@ -1,6 +1,7 @@
 """Background sync routes and SSE live log streaming."""
 
 import asyncio
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 import json
 import logging
@@ -25,11 +26,12 @@ from trackseerr.api.dependencies import (
 from trackseerr.api.schemas.sync import SyncStatusResponse, SyncTriggerResponse, SyncWebhookResponse
 from trackseerr.clients.deezer import DeezerClient
 from trackseerr.clients.plex import PlexClient
-from trackseerr.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error
+from trackseerr.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error, registry
 from trackseerr.media_servers.plex import read_playlist_items, refresh_mix_snapshots
+from trackseerr.media_servers.registry import ServerRecord
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.youtube_music import get_shared_youtube_music_client
-from trackseerr.config import MEDIA_SERVER_NONE, Config
+from trackseerr.config import Config
 from trackseerr.job_tracker import tracked
 from trackseerr.list_monitoring import apply_playlist_missing_safely
 from trackseerr.listening_playlists import fetch_listening_tracks
@@ -96,15 +98,87 @@ _FULL_RESYNC_AFTER = timedelta(hours=24)  # an unchanged playlist is still fully
 _IMPORT_RESCAN_GRACE = timedelta(minutes=30)  # library changes this close to a sync may predate the media-server scan
 
 
-def _sync_fingerprint(tracks: list[Track], target_usernames: list[str], push: bool, monitor_mode: Optional[str]) -> str:
-    """Hash of everything that decides a playlist's sync result apart from the library: tracks, targets, push, mode."""
+def _sync_fingerprint(
+    tracks: list[Track],
+    target_usernames: list[str],
+    push: bool,
+    monitor_mode: Optional[str],
+    server_ids: Sequence[str] = (),
+) -> str:
+    """Hash of everything that decides a playlist's sync result apart from the library: tracks, targets, push, mode, servers."""
     payload = {
         "tracks": [[t.title, t.artist, t.album, t.url, t.duration_seconds] for t in tracks],
         "targets": sorted(target_usernames),
         "push": push,
         "monitor_mode": monitor_mode or "",
+        "servers": sorted(server_ids),
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _playlist_servers(
+    db: Database, pl: dict[str, Any], fallback_server: Optional[Any]
+) -> list[tuple[Optional[ServerRecord], Any]]:
+    """Return ``(record, adapter)`` pairs for pushing ``pl``, primary first, minus per-playlist excludes."""
+    if registry.is_installed():
+        excludes = set(db.get_playlist_server_excludes(pl["id"]))
+        pairs: list[tuple[Optional[ServerRecord], Any]] = [
+            (rec, adapter)
+            for rec, adapter in registry.media_servers(registry.ROLE_PLAYLISTS)
+            if rec.id not in excludes
+        ]
+        primary = registry.primary_record()
+        if primary is not None:
+            pairs.sort(key=lambda pair: 0 if pair[0] is not None and pair[0].id == primary.id else 1)
+        return pairs
+    return [(None, fallback_server)] if fallback_server else []
+
+
+def _push_to_extra_server(
+    db: Database,
+    config: Config,
+    rec: ServerRecord,
+    adapter: Any,
+    model_playlist: Playlist,
+    target_usernames: list[str],
+) -> None:
+    """Push ``model_playlist`` to an additional playlist server and record only its per-server state."""
+    try:
+        results = adapter.sync_playlist(
+            model_playlist,
+            target_usernames,
+            PlaylistSyncOptions.from_config(config, db=db),
+        )
+        matched, missing = adapter.match_playlist_tracks(
+            model_playlist.tracks,
+            threshold=config.search_similarity_threshold,
+        )
+        success = any(r.success for r in results) if results else False
+        db.record_playlist_server_state(
+            model_playlist.id,
+            rec.id,
+            "success" if success else "failed",
+            matched=len(matched),
+            missing=len(missing),
+        )
+    except MediaServerError as e:
+        logger.error("Error syncing playlist '%s' to %s: %s", model_playlist.name, rec.name, e.safe_detail)
+        db.record_playlist_server_state(
+            model_playlist.id,
+            rec.id,
+            "failed",
+            error=e.safe_detail,
+        )
+    except Exception as e:  # one extra server must not stop remaining servers or alter overall status
+        detail = describe_error(e)
+        logger.error("Error syncing playlist '%s' to %s: %s", model_playlist.name, rec.name, detail)
+        logger.debug("Extra server playlist sync traceback", exc_info=True)
+        db.record_playlist_server_state(
+            model_playlist.id,
+            rec.id,
+            "failed",
+            error=detail,
+        )
 
 
 class SyncState:
@@ -282,8 +356,9 @@ class SyncState:
         ignored_ids: set[int],
         stats: dict[str, int],
         fingerprint: str,
-    ) -> None:
-        """Pushes a playlist to the media server for its target users and records the outcome."""
+        server_name: str = "Plex",
+    ) -> tuple[bool, int, int]:
+        """Pushes a playlist to the primary media server for its target users and records the outcome."""
         pl_id = pl["id"]
         try:
             results = server.sync_playlist(
@@ -307,10 +382,56 @@ class SyncState:
                 stats["success_count"] += 1
             stats["total_matched"] += len(matched)
             stats["total_missing"] += len(missing)
+            return success, len(matched), len(missing)
         except Exception as e:
-            logger.error("Error syncing playlist '%s' to Plex: %s", pl["name"], describe_error(e))
+            logger.error("Error syncing playlist '%s' to %s: %s", pl["name"], server_name, describe_error(e))
             logger.debug("Playlist sync traceback", exc_info=True)
             db.record_sync_result(playlist_id=pl_id, status="failed")
+            return False, 0, 0
+
+    def _push_to_servers(
+        self,
+        db: Database,
+        config: Config,
+        servers: list[tuple[Optional[ServerRecord], Any]],
+        pl: dict[str, Any],
+        model_playlist: Playlist,
+        target_usernames: list[str],
+        skip_rating_keys: Optional[set[str]],
+        original_by_effective: dict[int, Track],
+        ignored_ids: set[int],
+        stats: dict[str, int],
+        fingerprint: str,
+    ) -> None:
+        """Push to the primary/first server (driving playlist status) and fan out to remaining servers."""
+        first_rec, first_server = servers[0]
+        first_skip = skip_rating_keys if (first_rec is None or first_rec.is_login) else None
+        server_name = first_rec.name if first_rec is not None else "Plex"
+        success, matched_count, missing_count = self._push_playlist(
+            db,
+            config,
+            first_server,
+            pl,
+            model_playlist,
+            target_usernames,
+            first_skip,
+            original_by_effective,
+            ignored_ids,
+            stats,
+            fingerprint,
+            server_name=server_name,
+        )
+        if first_rec is not None:
+            db.record_playlist_server_state(
+                pl["id"],
+                first_rec.id,
+                "success" if success else "failed",
+                matched=matched_count,
+                missing=missing_count,
+            )
+        for rec, adapter in servers[1:]:
+            if rec is not None:
+                _push_to_extra_server(db, config, rec, adapter, model_playlist, target_usernames)
 
     @staticmethod
     def _unchanged_since_last_sync(
@@ -357,7 +478,8 @@ class SyncState:
         pl_id = pl["id"]
         # Target users only matter for pushing to a media server; without targets (or without a
         # media server) the playlist is still matched against the native library.
-        no_media_server = config.media_server_type == MEDIA_SERVER_NONE
+        servers = _playlist_servers(db, pl, server)
+        no_media_server = not servers
         target_usernames = [] if no_media_server else self._resolve_targets(db, pl)
         push = bool(target_usernames)
 
@@ -376,7 +498,8 @@ class SyncState:
             return
 
         tracks, original_by_effective, ignored_ids = _effective_tracks(db, tracks, pl["name"])
-        fingerprint = _sync_fingerprint(tracks, target_usernames, push, pl.get("monitor_mode"))
+        server_ids = [rec.id for rec, _ in servers if rec is not None]
+        fingerprint = _sync_fingerprint(tracks, target_usernames, push, pl.get("monitor_mode"), server_ids=server_ids)
         if not force and self._unchanged_since_last_sync(db, pl, fingerprint, latest_library_change):
             stats["skipped_unchanged"] += 1
             logger.debug("Playlist '%s' unchanged since last sync; skipped", pl["name"])
@@ -395,13 +518,13 @@ class SyncState:
             # Nothing is pushed (no media server, or no target users): the source playlist is matched
             # against the native library so its missing tracks reach monitoring / wanted.
             self._match_natively(db, config, pl, tracks, original_by_effective, ignored_ids, stats, fingerprint)
-        elif server:
-            self._push_playlist(
-                db, config, server, pl, model_playlist, target_usernames, skip_rating_keys,
+        elif servers[0][1]:
+            self._push_to_servers(
+                db, config, servers, pl, model_playlist, target_usernames, skip_rating_keys,
                 original_by_effective, ignored_ids, stats, fingerprint,
             )
         else:
-            logger.warning("Plex client not available; recorded simulated sync for '%s'", pl["name"])
+            logger.warning("No media server available; recorded simulated sync for '%s'", pl["name"])
             db.record_sync_result(playlist_id=pl_id, status="unconfigured")
             return
         logger.info(
@@ -412,7 +535,7 @@ class SyncState:
             stats["total_missing"] - missing_before,
         )
 
-    @tracked("playlist_sync", "Plex Playlist Sync")
+    @tracked("playlist_sync", "Playlist Sync")
     def execute_sync(
         self,
         db: Database,

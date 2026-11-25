@@ -117,19 +117,9 @@ class MixWorker:
     def _get_plex(self, config: Config) -> Optional[PlexClient]:
         if self._plex is not None:
             return self._plex
-        if not config.plex_enabled:
-            return None
-        try:
-            self._plex = PlexClient(
-                config.plex_url,
-                config.plex_token,
-                verify_ssl=config.plex_verify_ssl,
-                music_section=config.plex_music_section,
-            )
-        except (PlexApiException, requests.RequestException) as exc:
-            logger.warning("MixWorker: could not connect to Plex (%s)", type(exc).__name__)
-            self._plex = None
-        return self._plex
+        from trackseerr.media_servers import registry
+
+        return registry.plex_login_client(config)
 
     def start(
         self,

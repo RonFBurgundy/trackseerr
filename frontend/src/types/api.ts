@@ -4149,6 +4149,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/playlists/{playlist_id}/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Playlist Servers
+         * @description Update the excluded media server IDs for a playlist (admin only).
+         */
+        put: operations["update_playlist_servers_api_playlists__playlist_id__servers_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/playlists/{playlist_id}/targets": {
         parameters: {
             query?: never;
@@ -5470,27 +5490,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/settings/media-server": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get the saved media-server settings (secrets masked) */
-        get: operations["get_media_server_settings_api_settings_media_server_get"];
-        /**
-         * Save the media-server settings (Admin Only)
-         * @description Saves the choice. The environment takes precedence: while it configures a media server this is refused (409).
-         */
-        put: operations["update_media_server_settings_api_settings_media_server_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/settings/media-server/plex-account": {
         parameters: {
             query?: never;
@@ -5498,7 +5497,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get the stored Plex owner account status (Admin Only) */
+        get: operations["get_plex_account_status_api_settings_media_server_plex_account_get"];
         put?: never;
         post?: never;
         /** Disconnect the stored Plex owner account token (Admin Only) */
@@ -5542,7 +5542,51 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/settings/media-server/test": {
+    "/api/settings/media-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List configured media servers
+         * @description Return all configured media servers with secrets masked.
+         */
+        get: operations["list_media_servers_api_settings_media_servers_get"];
+        put?: never;
+        /**
+         * Create or update a media server
+         * @description Create or update a media server, reload the registry, and notify listeners.
+         */
+        post: operations["save_media_server_api_settings_media_servers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-servers/login": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Select the Plex sign-in server
+         * @description Select the unique Plex login server, or clear it when ``server_id`` is null.
+         */
+        put: operations["set_login_media_server_api_settings_media_servers_login_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-servers/test": {
         parameters: {
             query?: never;
             header?: never;
@@ -5552,11 +5596,31 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Test a media-server connection without saving it (Admin Only)
-         * @description Builds the adapter from the submitted values (masked secrets resolved from the saved ones) and pings it.
+         * Test a media-server connection
+         * @description Test connectivity against a media server without saving or caching the adapter.
          */
-        post: operations["test_media_server_settings_api_settings_media_server_test_post"];
+        post: operations["test_media_server_api_settings_media_servers_test_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/settings/media-servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a media server
+         * @description Delete a settings-configured media server.
+         */
+        delete: operations["delete_media_server_api_settings_media_servers__server_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -11684,57 +11748,145 @@ export interface components {
             /** Users */
             users: boolean;
         };
-        /**
-         * MediaServerSettingsPayload
-         * @description What the Settings page submits. A secret sent back as ``********`` keeps the stored value.
-         */
-        MediaServerSettingsPayload: {
+        /** MediaServerDeletedResponse */
+        MediaServerDeletedResponse: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+        };
+        /** MediaServerItem */
+        MediaServerItem: {
+            /** Api Key */
+            api_key: string;
+            /** Capabilities */
+            capabilities: {
+                [key: string]: boolean;
+            };
+            /** Enabled */
+            enabled: boolean;
+            /** Id */
+            id: string;
+            /** Is Login */
+            is_login: boolean;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "plex" | "subsonic" | "jellyfin";
+            /** Locked */
+            locked: boolean;
+            /** Music Section */
+            music_section: string;
+            /** Name */
+            name: string;
+            /** Password */
+            password: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Source */
+            source: string;
+            /** Url */
+            url: string;
+            /** Use Playlists */
+            use_playlists: boolean;
+            /** Use Refresh */
+            use_refresh: boolean;
+            /** Use Scrobbles */
+            use_scrobbles: boolean;
+            /** Use Users */
+            use_users: boolean;
+            /** Username */
+            username: string;
+            /** Verify Ssl */
+            verify_ssl: boolean;
+        };
+        /** MediaServerLoginPayload */
+        MediaServerLoginPayload: {
+            /** Server Id */
+            server_id?: string | null;
+        };
+        /** MediaServerLoginResponse */
+        MediaServerLoginResponse: {
+            /** Server Id */
+            server_id?: string | null;
+            /** Status */
+            status: string;
+        };
+        /** MediaServerPayload */
+        MediaServerPayload: {
             /**
              * Api Key
              * @default
              */
             api_key: string;
             /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Id */
+            id?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "plex" | "subsonic" | "jellyfin";
+            /**
+             * Music Section
+             * @default
+             */
+            music_section: string;
+            /**
+             * Name
+             * @default
+             */
+            name: string;
+            /**
              * Password
              * @default
              */
             password: string;
             /**
-             * Type
-             * @enum {string}
+             * Sort Order
+             * @default 0
              */
-            type: "subsonic" | "jellyfin" | "none";
+            sort_order: number;
             /**
              * Url
              * @default
              */
             url: string;
             /**
+             * Use Playlists
+             * @default true
+             */
+            use_playlists: boolean;
+            /**
+             * Use Refresh
+             * @default true
+             */
+            use_refresh: boolean;
+            /**
+             * Use Scrobbles
+             * @default true
+             */
+            use_scrobbles: boolean;
+            /**
+             * Use Users
+             * @default true
+             */
+            use_users: boolean;
+            /**
              * Username
              * @default
              */
             username: string;
-        };
-        /** MediaServerSettingsResponse */
-        MediaServerSettingsResponse: {
-            /** Api Key */
-            api_key: string;
-            /** Effective Type */
-            effective_type: string;
-            /** Locked By Env */
-            locked_by_env: boolean;
-            /** Password */
-            password: string;
-            /** Plex Account Connected */
-            plex_account_connected: boolean;
-            /** Plex Account Username */
-            plex_account_username: string;
-            /** Type */
-            type: string;
-            /** Url */
-            url: string;
-            /** Username */
-            username: string;
+            /**
+             * Verify Ssl
+             * @default true
+             */
+            verify_ssl: boolean;
         };
         /** MediaServerStatus */
         MediaServerStatus: {
@@ -11744,9 +11896,12 @@ export interface components {
             /** Type */
             type: string;
         };
-        /** MediaServerTestResponse */
-        MediaServerTestResponse: {
-            /** Message */
+        /** MediaServerTestResult */
+        MediaServerTestResult: {
+            /**
+             * Message
+             * @default
+             */
             message: string;
             /** Ok */
             ok: boolean;
@@ -12544,6 +12699,8 @@ export interface components {
             description: string;
             /** Enabled */
             enabled: boolean;
+            /** Excluded Servers */
+            excluded_servers?: string[];
             /** Id */
             id: string;
             /** Last Synced At */
@@ -12557,6 +12714,8 @@ export interface components {
              * @default
              */
             poster_url: string;
+            /** Server States */
+            server_states?: components["schemas"]["PlaylistServerState"][];
             /** Service */
             service: string;
             /** Source Kind */
@@ -12576,6 +12735,42 @@ export interface components {
             tracks_json?: string | null;
             /** Updated At */
             updated_at: string;
+        };
+        /** PlaylistServerState */
+        PlaylistServerState: {
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Matched
+             * @default 0
+             */
+            matched: number;
+            /**
+             * Missing
+             * @default 0
+             */
+            missing: number;
+            /** Server Id */
+            server_id: string;
+            /** Status */
+            status: string;
+            /** Synced At */
+            synced_at?: string | null;
+        };
+        /** PlaylistServersRequest */
+        PlaylistServersRequest: {
+            /** Excluded Server Ids */
+            excluded_server_ids: string[];
+        };
+        /** PlaylistServersResponse */
+        PlaylistServersResponse: {
+            /** Excluded Servers */
+            excluded_servers: string[];
+            /** Id */
+            id: string;
         };
         /** PlaylistTargetsRequest */
         PlaylistTargetsRequest: {
@@ -12647,6 +12842,13 @@ export interface components {
         PlexAccountDisconnectResponse: {
             /** Connected */
             connected: boolean;
+        };
+        /** PlexAccountStatusResponse */
+        PlexAccountStatusResponse: {
+            /** Connected */
+            connected: boolean;
+            /** Username */
+            username: string;
         };
         /** PlexIdentityResponse */
         PlexIdentityResponse: {
@@ -22951,6 +23153,41 @@ export interface operations {
             };
         };
     };
+    update_playlist_servers_api_playlists__playlist_id__servers_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaylistServersRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistServersResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     update_playlist_targets_api_playlists__playlist_id__targets_put: {
         parameters: {
             query?: never;
@@ -25504,7 +25741,7 @@ export interface operations {
             };
         };
     };
-    get_media_server_settings_api_settings_media_server_get: {
+    get_plex_account_status_api_settings_media_server_plex_account_get: {
         parameters: {
             query?: never;
             header?: never;
@@ -25519,40 +25756,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MediaServerSettingsResponse"];
-                };
-            };
-        };
-    };
-    update_media_server_settings_api_settings_media_server_put: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["MediaServerSettingsPayload"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["MediaServerSettingsResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["PlexAccountStatusResponse"];
                 };
             };
         };
@@ -25630,7 +25834,27 @@ export interface operations {
             };
         };
     };
-    test_media_server_settings_api_settings_media_server_test_post: {
+    list_media_servers_api_settings_media_servers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerItem"][];
+                };
+            };
+        };
+    };
+    save_media_server_api_settings_media_servers_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -25639,7 +25863,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MediaServerSettingsPayload"];
+                "application/json": components["schemas"]["MediaServerPayload"];
             };
         };
         responses: {
@@ -25649,7 +25873,104 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MediaServerTestResponse"];
+                    "application/json": components["schemas"]["MediaServerItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_login_media_server_api_settings_media_servers_login_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaServerLoginPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerLoginResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_media_server_api_settings_media_servers_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MediaServerPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerTestResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_media_server_api_settings_media_servers__server_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerDeletedResponse"];
                 };
             };
             /** @description Validation Error */

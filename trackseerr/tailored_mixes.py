@@ -322,7 +322,9 @@ def generate_and_sync(  # noqa: C901
 
     server = as_media_server(plex_client)
     if server is None:
-        no_server = getattr(app_config, "media_server_type", None) == "none"
+        from trackseerr.media_servers import registry
+
+        no_server = app_config is None or not registry.has_servers(app_config)
         result.sync_error = "No media server connected" if no_server else "Plex is not configured"
     elif not user:
         result.sync_error = "Mix owner not found"

@@ -107,7 +107,7 @@ def _stub_workers():
 
 
 def _run_web(env):
-    patches = _stub_workers() + [patch("trackseerr.cli.uvicorn.Server"), patch("trackseerr.cli.PlexClient")]
+    patches = _stub_workers() + [patch("trackseerr.cli.uvicorn.Server"), patch("trackseerr.clients.plex.PlexClient")]
     started = [p.start() for p in patches]
     plex_cls = started[-1]
     try:
@@ -149,7 +149,7 @@ def test_explicit_plex_without_credentials_fails_startup_loudly(tmp_path, caplog
 
 
 def test_run_once_without_plex_skips_push_and_succeeds():
-    with patch("trackseerr.cli.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
+    with patch("trackseerr.clients.plex.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
         with patch.dict(os.environ, {"RUN_ONCE": "1"}, clear=True):
             code = main()
     assert code == 0
@@ -159,7 +159,7 @@ def test_run_once_without_plex_skips_push_and_succeeds():
 
 
 def test_headless_without_plex_runs_cycle_and_exits_cleanly():
-    with patch("trackseerr.cli.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
+    with patch("trackseerr.clients.plex.PlexClient") as plex_cls, patch("trackseerr.cli.SyncCoordinator") as coord_cls:
         with patch.dict(os.environ, {"HEADLESS": "1", "SECONDS_TO_WAIT": "1"}, clear=True):
             with patch("trackseerr.cli._shutdown_requested", True):
                 code = main()
@@ -400,7 +400,7 @@ def test_media_server_endpoint_none(no_server):
 
 def test_media_server_endpoint_plex_connected(tmp_path):
     env = build_client(tmp_path, url="http://plex", token="tok", plex=MagicMock())
-    with patch("trackseerr.api.routes.system.status.get_plex_client", return_value=MagicMock()):
+    with patch("trackseerr.clients.plex.PlexClient", return_value=MagicMock()):
         body = env.tc.get("/api/system/media-server").json()
     assert body == {
         "type": "plex",
@@ -411,14 +411,14 @@ def test_media_server_endpoint_plex_connected(tmp_path):
 
 def test_media_server_endpoint_plex_unreachable_is_still_plex(tmp_path):
     env = build_client(tmp_path, url="http://plex", token="tok")
-    with patch("trackseerr.api.routes.system.status.get_plex_client", return_value=None):
+    with patch("trackseerr.clients.plex.PlexClient", side_effect=RuntimeError("down")):
         body = env.tc.get("/api/system/media-server").json()
     assert body["type"] == "plex" and body["connected"] is False and body["capabilities"]["playlists"] is True
 
 
 def test_media_server_probe_is_cached_for_unauthenticated_callers(tmp_path):
     env = build_client(tmp_path, url="http://plex", token="tok")
-    with patch("trackseerr.api.routes.system.status.get_plex_client", return_value=MagicMock()) as connect:
+    with patch("trackseerr.clients.plex.PlexClient", return_value=MagicMock()) as connect:
         for _ in range(5):
             assert env.tc.get("/api/system/media-server").json()["connected"] is True
     assert connect.call_count == 1

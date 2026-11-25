@@ -226,7 +226,7 @@ def _run_main(env, *extra_patches):
 def test_main_emits_boot_banner_and_timed_steps(tmp_path, caplog):
     with caplog.at_level(logging.INFO):
         with patch("trackseerr.cli.uvicorn.Server") as server_cls, patch(
-            "trackseerr.cli.PlexClient"
+            "trackseerr.clients.plex.PlexClient"
         ) as plex_cls:
             plex_cls.return_value.get_home_users.return_value = []
             server_cls.return_value = MagicMock()
@@ -240,7 +240,7 @@ def test_main_emits_boot_banner_and_timed_steps(tmp_path, caplog):
     assert "[boot] migrations: initialized fresh database at baseline v" in joined
     assert "[boot] step: binding web server on" in joined
     assert "[boot] step: starting background workers done in" in joined
-    assert "[boot] step: connecting to Plex done in" in joined
+    assert "[boot] step: connecting to media servers done in" in joined
     assert "[boot] ready after" in joined
     assert "[boot] complete after" in joined
     assert "token" not in joined.lower().replace("plex_token", "")  # no credential values echoed
@@ -249,7 +249,7 @@ def test_main_emits_boot_banner_and_timed_steps(tmp_path, caplog):
 def test_main_logs_schema_up_to_date_on_second_boot(tmp_path, caplog):
     Database(str(tmp_path / "sync_db.sqlite")).close()
     with caplog.at_level(logging.INFO):
-        with patch("trackseerr.cli.uvicorn.Server"), patch("trackseerr.cli.PlexClient"):
+        with patch("trackseerr.cli.uvicorn.Server"), patch("trackseerr.clients.plex.PlexClient"):
             _run_main(_web_env(tmp_path))
     assert any("[boot] migrations: schema up to date" in r.getMessage() for r in caplog.records)
 
@@ -273,7 +273,7 @@ def test_slow_plex_probe_does_not_delay_readiness(tmp_path):
         release_plex.set()
 
     with patch("trackseerr.cli.uvicorn.Server") as server_cls, patch(
-        "trackseerr.cli.PlexClient", side_effect=slow_plex
+        "trackseerr.clients.plex.PlexClient", side_effect=slow_plex
     ):
         server_cls.return_value.run.side_effect = run_server
         t0 = time.monotonic()

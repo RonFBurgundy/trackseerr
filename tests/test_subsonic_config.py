@@ -10,9 +10,8 @@ from trackseerr import media_server
 from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_media_client, get_plex_client
 from trackseerr.auth import create_session_token, get_or_create_secret_key
-from trackseerr.config import Config, ConfigError, get_media_server_overlay, set_media_server_overlay
+from trackseerr.config import Config, ConfigError
 from trackseerr.media_servers import SubsonicMediaServer, build_subsonic, capabilities_for
-from trackseerr.media_servers import settings as ms_settings
 from trackseerr.role_guard import GATEWAY_FORBIDDEN_ENV, check_role_environment, core_like_reasons
 from trackseerr.storage import Database
 from tests.subsonic_fake import FakeSubsonic, default_state
@@ -83,79 +82,19 @@ def test_subsonic_secrets_are_forbidden_on_the_gateway():
 def test_gateway_db_with_saved_media_server_secret_is_core_like():
     db = Database(":memory:")
     assert not any("media server" in r for r in core_like_reasons(db.conn))
-    db.save_media_server_settings({"type": "subsonic", "url": URL, "username": "u", "password": "p"})
+    db.conn.execute(
+        "INSERT INTO media_server_settings (id, type, url, username, password) VALUES (1, 'subsonic', ?, 'u', 'p')",
+        (URL,),
+    )
+    db.conn.commit()
     assert "a media server password" in core_like_reasons(db.conn)
 
 
-# ----------------------------------------------------------------------------- Settings overlay
-
-
-def test_settings_overlay_applies_when_env_is_silent(monkeypatch):
-    for name in ("MEDIA_SERVER", "PLEX_URL", "PLEX_TOKEN", "SUBSONIC_URL", "SUBSONIC_USER", "SUBSONIC_PASSWORD", "SUBSONIC_API_KEY"):
-        monkeypatch.delenv(name, raising=False)
-    set_media_server_overlay({"type": "subsonic", "url": URL, "username": "u", "password": "p"})
-    cfg = Config.from_env()
-    assert cfg.media_server_type == "subsonic" and cfg.subsonic_configured and cfg.media_server_source == "settings"
-    assert not cfg.media_server_env_controlled
-    cfg.validate_media_server()  # never blocks boot
-    set_media_server_overlay(None)
-    assert Config.from_env().media_server_type == "none"
-
-
-@pytest.mark.parametrize("env", [{"PLEX_URL": "http://plex", "PLEX_TOKEN": "t"}, {"MEDIA_SERVER": "none"}])
-def test_environment_wins_over_saved_settings(monkeypatch, env):
-    for name in ("MEDIA_SERVER", "PLEX_URL", "PLEX_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
-    for k, v in env.items():
-        monkeypatch.setenv(k, v)
-    set_media_server_overlay({"type": "subsonic", "url": URL, "username": "u", "password": "p"})
-    cfg = Config.from_env()
-    assert cfg.media_server_source == "env" and cfg.media_server_env_controlled
-    assert cfg.media_server_type != "subsonic" and not cfg.subsonic_url
-
-
-def test_reapplying_overlay_on_a_live_config_follows_changes():
-    cfg = Config(plex_url="", plex_token="")
-    cfg.apply_media_server_overlay({"type": "subsonic", "url": URL, "username": "u", "password": "p"})
-    assert cfg.subsonic_configured
-    cfg.apply_media_server_overlay({"type": "none"})
-    assert cfg.media_server_type == "none" and not cfg.subsonic_url and not cfg.subsonic_password
-    cfg.apply_media_server_overlay({})
-    assert cfg.media_server_source == "env" and cfg.media_server_type == "none"
-
-
-def test_db_roundtrip_and_validation():
+def test_gateway_db_with_media_servers_secret_is_core_like():
     db = Database(":memory:")
-    assert db.get_media_server_settings() == {
-        "type": "", "url": "", "username": "", "password": "", "api_key": "", "credentials_type": ""
-    }
-    saved = ms_settings.save(db, {"type": "subsonic", "url": URL, "username": "u", "password": "p", "api_key": ""})
-    assert saved["password"] == "p" and get_media_server_overlay()["type"] == "subsonic"
-    # masked secret keeps the stored value
-    again = ms_settings.save(db, {"type": "subsonic", "url": URL, "username": "u", "password": "********", "api_key": ""})
-    assert again["password"] == "p" and again["username"] == "u"
-    # switching to none only deactivates: the saved credentials (and which type they belong to) are kept
-    assert ms_settings.save(db, {"type": "none"}) == {
-        "type": "none", "url": URL, "username": "u", "password": "p", "api_key": "", "credentials_type": "subsonic"
-    }
-    assert get_media_server_overlay()["type"] == "none"
-    for bad in (
-        {"type": "subsonic", "url": "navidrome", "username": "u", "password": "p"},
-        {"type": "subsonic", "url": URL, "username": "u"},
-        {"type": "plex"},
-        {"type": "jellyfin"},
-    ):
-        with pytest.raises(ms_settings.MediaServerSettingsError):
-            ms_settings.validate(bad)
-
-
-def test_save_notifies_listeners_and_survives_a_failing_one():
-    db = Database(":memory:")
-    calls = []
-    ms_settings.on_change(lambda: (_ for _ in ()).throw(ValueError("boom")))
-    ms_settings.on_change(lambda: calls.append(1))
-    ms_settings.save(db, {"type": "none"})
-    assert calls == [1]
+    assert not any("media server" in r for r in core_like_reasons(db.conn))
+    db.insert_media_server_row({"kind": "subsonic", "name": "Subsonic", "url": URL, "username": "u", "password": "p"})
+    assert "a media server password" in core_like_reasons(db.conn)
 
 
 # ----------------------------------------------------------------------------- factory & dependency
@@ -215,107 +154,13 @@ def env(tmp_path):
     media_server.reset_probe_cache()
 
 
-BODY = {"type": "subsonic", "url": URL, "username": "bob", "password": "hunter2", "api_key": ""}
-
-
-def test_settings_requires_admin(env):
-    assert env.tc.get("/api/settings/media-server").status_code in (401, 403)
-    assert env.tc.get("/api/settings/media-server", headers=env.alice).status_code == 403
-    assert env.tc.put("/api/settings/media-server", json=BODY, headers=env.alice).status_code == 403
-    assert env.tc.post("/api/settings/media-server/test", json=BODY, headers=env.alice).status_code == 403
-
-
-def test_save_masks_secrets_and_activates(env, monkeypatch):
-    for name in ("MEDIA_SERVER", "PLEX_URL", "PLEX_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
-    res = env.tc.put("/api/settings/media-server", json=BODY, headers=env.admin)
-    assert res.status_code == 200, res.text
-    body = res.json()
-    assert body["password"] == "********" and "hunter2" not in res.text
-    assert body["effective_type"] == "subsonic" and body["locked_by_env"] is False
-    assert env.db.get_media_server_settings()["password"] == "hunter2"
-    assert "hunter2" not in env.tc.get("/api/settings/media-server", headers=env.admin).text
-    # the round trip of the masked value keeps the stored secret
-    again = env.tc.put("/api/settings/media-server", json={**BODY, "password": "********"}, headers=env.admin)
-    assert again.status_code == 200 and env.db.get_media_server_settings()["password"] == "hunter2"
-    assert Config.from_env().subsonic_configured
-
-
-def test_save_none_deactivates_but_keeps_the_saved_credentials(env, monkeypatch):
-    for name in ("MEDIA_SERVER", "PLEX_URL", "PLEX_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
-    env.tc.put("/api/settings/media-server", json=BODY, headers=env.admin)
-    res = env.tc.put("/api/settings/media-server", json={"type": "none"}, headers=env.admin)
-    assert res.status_code == 200 and res.json()["effective_type"] == "none"
-    stored = env.db.get_media_server_settings()
-    assert stored["type"] == "none" and stored["password"] == "hunter2" and stored["credentials_type"] == "subsonic"
-    assert not Config.from_env().subsonic_configured  # inactive: nothing is connected to
-    # switching back with the masked secret still resolves it (same type, URL and username)
-    back = env.tc.put("/api/settings/media-server", json={**BODY, "password": "********"}, headers=env.admin)
-    assert back.status_code == 200 and env.db.get_media_server_settings()["password"] == "hunter2"
-    assert Config.from_env().subsonic_configured
-
-
-def test_incomplete_and_unsafe_saves_are_rejected(env):
-    assert env.tc.put("/api/settings/media-server", json={**BODY, "password": ""}, headers=env.admin).status_code == 422
-    assert env.tc.put("/api/settings/media-server", json={**BODY, "url": "ftp://x"}, headers=env.admin).status_code == 400
-    unsafe = env.tc.put("/api/settings/media-server", json={**BODY, "url": "http://169.254.169.254"}, headers=env.admin)
-    assert unsafe.status_code == 400
-    assert env.tc.put("/api/settings/media-server", json={**BODY, "type": "plex"}, headers=env.admin).status_code == 422
-    assert env.db.get_media_server_settings()["type"] == ""
-
-
-def test_save_is_refused_while_the_environment_configures_a_server(env):
-    env.cfg.media_server = "plex"
-    env.cfg.plex_url, env.cfg.plex_token = "http://plex", "t"
-    res = env.tc.put("/api/settings/media-server", json=BODY, headers=env.admin)
-    assert res.status_code == 409
-    assert env.tc.get("/api/settings/media-server", headers=env.admin).json()["locked_by_env"] is True
-
-
-@pytest.fixture
-def fake_server(monkeypatch):
-    fake = FakeSubsonic(default_state([("Song A", "Artist 1", "Album X")]))
-    real = SubsonicMediaServer
-
-    def factory(*a, **kw):
-        return real(*a, transport=fake.transport(), sleep=lambda _s: None, **kw)
-
-    monkeypatch.setattr("trackseerr.api.routes.settings.SubsonicMediaServer", factory)
-    return fake
-
-
-def test_test_connection_reports_ok_and_failure(env, fake_server):
-    fake_server.state.users["bob"] = fake_server.state.users["admin"].__class__("bob", True, "hunter2")
-    ok = env.tc.post("/api/settings/media-server/test", json=BODY, headers=env.admin).json()
-    assert ok["ok"] is True and "Connected" in ok["message"]
-    bad = env.tc.post("/api/settings/media-server/test", json={**BODY, "password": "wrong"}, headers=env.admin).json()
-    assert bad["ok"] is False and "40" in bad["message"] and "wrong" not in bad["message"]
-
-
-def test_test_connection_resolves_masked_secret_from_saved(env, fake_server, monkeypatch):
-    fake_server.state.users["bob"] = fake_server.state.users["admin"].__class__("bob", True, "hunter2")
-    for name in ("MEDIA_SERVER", "PLEX_URL", "PLEX_TOKEN"):
-        monkeypatch.delenv(name, raising=False)
-    env.tc.put("/api/settings/media-server", json=BODY, headers=env.admin)
-    res = env.tc.post("/api/settings/media-server/test", json={**BODY, "password": "********"}, headers=env.admin).json()
-    assert res["ok"] is True
-
-
-def test_test_connection_validates_input(env):
-    assert env.tc.post("/api/settings/media-server/test", json={**BODY, "password": ""}, headers=env.admin).json()["ok"] is False
-    unsafe = env.tc.post("/api/settings/media-server/test", json={**BODY, "url": "http://169.254.169.254"}, headers=env.admin).json()
-    assert unsafe["ok"] is False and "SSRF" in unsafe["message"]
-    assert env.tc.post("/api/settings/media-server/test", json={"type": "none"}, headers=env.admin).json()["ok"] is False
-
-
 def test_status_endpoint_reports_subsonic(env):
     env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
     fake = FakeSubsonic(default_state([]))
     fake.state.users["u"] = fake.state.users["admin"].__class__("u", True, "p")
     adapter = SubsonicMediaServer(URL, "u", "p", transport=fake.transport(), sleep=lambda _s: None)
-    with patch("trackseerr.api.routes.system.status.build_subsonic", return_value=adapter):
+    with patch("trackseerr.media_servers.registry.build_adapter", return_value=adapter):
         body = env.tc.get("/api/system/media-server").json()
     assert body == {
         "type": "subsonic",
@@ -327,7 +172,7 @@ def test_status_endpoint_reports_subsonic(env):
 def test_status_endpoint_subsonic_unreachable(env):
     env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
-    with patch("trackseerr.api.routes.system.status.build_subsonic", return_value=None):
+    with patch("trackseerr.media_servers.registry.build_adapter", return_value=None):
         body = env.tc.get("/api/system/media-server").json()
     assert body["type"] == "subsonic" and body["connected"] is False
 
@@ -338,7 +183,7 @@ def test_generic_search_route_works_on_subsonic(env):
     fake = FakeSubsonic(default_state([("Song A", "Artist 1", "Album X")]))
     fake.state.users["u"] = fake.state.users["admin"].__class__("u", True, "p")
     adapter = SubsonicMediaServer(URL, "u", "p", transport=fake.transport(), sleep=lambda _s: None)
-    with patch("trackseerr.api.dependencies.build_subsonic", return_value=adapter):
+    with patch("trackseerr.media_servers.registry.build_adapter", return_value=adapter):
         res = env.tc.get("/api/missing/search", params={"query": "song"}, headers=env.admin)
     assert res.status_code == 200 and [t["title"] for t in res.json()] == ["Song A"]
 

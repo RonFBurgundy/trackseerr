@@ -39,6 +39,7 @@ from trackseerr.api.routes import (
     lidarr_compat,
     library,
     library_health,
+    media_servers,
     seed_cleanup,
     slskd_challenges,
     recycle_bin,
@@ -272,6 +273,7 @@ def _build_api_router(app: FastAPI) -> APIRouter:
         download_clients.router, prefix="/settings/download-clients", tags=["download_clients"]
     )
     api_router.include_router(indexers.router, prefix="/settings/indexers", tags=["indexers"])
+    api_router.include_router(media_servers.router, prefix="/settings/media-servers", tags=["media_servers"])
     api_router.include_router(
         quality_profiles.router, prefix="/settings/quality-profiles", tags=["quality_profiles"]
     )

@@ -2,7 +2,7 @@
 
 TrackSeerr pushes playlists to your media server, tells it to rescan after imports, and checks that it sees every file in your library.
 
-You can use one media server at a time, or none.
+You can use several media servers at once, for example Plex for your users and Navidrome for yourself, or none at all.
 
 ## What each server supports
 
@@ -23,9 +23,24 @@ Without a media server, TrackSeerr still manages your library, downloads music, 
 
 Users without a media server account sign in with a local TrackSeerr account. See [Users and requests](USERS_AND_REQUESTS.md).
 
+## Several servers
+
+Add each server under **Settings > Media Management > Media Server**. Every server gets its own switches:
+
+- **Refresh library after imports**: the server rescans after TrackSeerr imports music.
+- **Push playlists**: playlists are sent to this server.
+- **Import users**: the server's accounts show up as playlist targets.
+- **Read play history**: listens on this server are sent to Last.fm and ListenBrainz. Only Plex can do this today.
+
+Every playlist goes to every server that has **Push playlists** on. To keep a playlist off a server, open the playlist and turn that server off under **Servers**. The same place shows how many songs each server matched.
+
+One Plex server is the one people sign in with. Pick it with **Use for sign-in** on its card. A server set with environment variables is in the list too. You can rename it, turn it off, or change its switches there, but its address and token stay in your environment.
+
+If your Subsonic server, such as Navidrome, already sends plays to Last.fm or ListenBrainz, leave **Read play history** off for it, or every play is counted twice.
+
 ## Plex
 
-Plex is set with environment variables only.
+Add Plex in **Settings > Media Management > Media Server** with its address and token, or with environment variables:
 
 ```yaml
 environment:
@@ -85,16 +100,16 @@ environment:
 
 ## No media server
 
-Set `MEDIA_SERVER=none`, or choose **None** in **Settings > Media Management > Media Server**. Set `ADMIN_PASSWORD` before the first start so you can sign in.
+Leave the server list empty and set no `PLEX_*`, `SUBSONIC_*` or `JELLYFIN_*` variables. Set `ADMIN_PASSWORD` before the first start so you can sign in.
 
 ## Library health
 
 TrackSeerr compares the files on disk with the files your media server knows about. It lists files the server skipped, for example because of bad tags or an unsupported format.
 
-Run the check from **Activity > Needs review**. You can set it to run weekly.
+Run the check from **Activity > Needs review**. You can set it to run weekly. With several servers, the check looks at the main one: the sign-in Plex, or else the first server in the list.
 
 The media server and TrackSeerr often see the library at different paths, for example `/data/media/music` in TrackSeerr and `/music` in Jellyfin. TrackSeerr guesses the mapping from a sample of files. You can check and change it under **Path mapping** on the same page.
 
 ## Switching servers
 
-You can change the media server at any time. Your library, requests, and playlists are stored in TrackSeerr, not on the server, so nothing is lost. On the next sync, playlists are written to the new server.
+You can add, turn off, or remove servers at any time. Your library, requests, and playlists are stored in TrackSeerr, not on the server, so nothing is lost. On the next sync, playlists are written to every server that has **Push playlists** on. If you had a server saved before this version, it shows up in the list on its own.

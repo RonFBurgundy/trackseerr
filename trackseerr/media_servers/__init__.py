@@ -38,35 +38,16 @@ logger = logging.getLogger(__name__)
 
 
 def get_media_server(config: Config, *, plex_client: Optional[Any] = None) -> Optional[MediaServer]:
-    """The adapter for the configured media server, or None when none is configured or it cannot be reached.
+    """The adapter for the primary media server, or None when none is configured or it cannot be reached.
 
     ``plex_client`` lets callers that already hold a connected client (workers, tests) avoid reconnecting.
     """
-    if config.media_server_type == MEDIA_SERVER_PLEX:
-        if plex_client is not None:
-            return as_media_server(plex_client, music_section=config.plex_music_section)
-        from trackseerr.clients.plex import PlexClient
+    if plex_client is not None:
+        return as_media_server(plex_client, music_section=config.plex_music_section)
+    from trackseerr.media_servers import registry
 
-        if not config.plex_enabled:
-            return None
-        try:
-            return PlexMediaServer(
-                PlexClient(
-                    config.plex_url,
-                    config.plex_token,
-                    verify_ssl=config.plex_verify_ssl,
-                    music_section=config.plex_music_section,
-                ),
-                music_section=config.plex_music_section,
-            )
-        except Exception as exc:  # noqa: BLE001 - PlexServer raises plexapi/requests/ssl errors; cause is logged
-            logger.error("Failed to initialize media server: %s", safe_exc(exc))
-            return None
-    if config.media_server_type == MEDIA_SERVER_SUBSONIC:
-        return build_subsonic(config)
-    if config.media_server_type == MEDIA_SERVER_JELLYFIN:
-        return build_jellyfin(config)
-    return None
+    pair = registry.primary_server(config)
+    return pair[1] if pair is not None else None
 
 
 def _saved_url_is_unsafe(source: str, kind: str, url: str) -> bool:

@@ -909,7 +909,7 @@ class TestEdgeCasesAndBranchCoverage:
 
         # Test get_plex_client exception handling
         cfg_bad_plex = Config(plex_url="invalid://url", plex_token="bad", data_dir=str(tmp_path))
-        with patch("trackseerr.api.dependencies.PlexClient", side_effect=Exception("Plex init fail")):
+        with patch("trackseerr.clients.plex.PlexClient", side_effect=Exception("Plex init fail")):
             assert get_plex_client(cfg_bad_plex) is None
 
         # Test get_spotify_client exception handling

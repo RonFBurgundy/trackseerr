@@ -310,29 +310,36 @@ def test_clients_holder_has_a_lock_for_reconnects():
 
 def _saved_subsonic_db(path: Path) -> None:
     db = Database(str(path / "sync_db.sqlite"))
-    db.save_media_server_settings(
-        {"type": "subsonic", "url": SUB_URL, "username": "u", "password": "p", "api_key": "", "credentials_type": "subsonic"}
+    db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Subsonic", "url": SUB_URL, "username": "u", "password": "p"}
     )
     db.close()
 
 
 def test_run_once_loads_the_saved_media_server(tmp_path, monkeypatch):
+    from trackseerr.media_servers import registry
+
+    registry._reset_for_tests()
     _saved_subsonic_db(tmp_path)
     monkeypatch.delenv("CONFIG_DIR", raising=False)
     cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path), config_dir=str(tmp_path / "nope"))
     with patch("trackseerr.cli.os.path.isdir", return_value=False):
         _apply_saved_media_server_settings(cfg)
-    assert cfg.subsonic_configured and cfg.media_server_source == "settings"
+    recs = registry.records(cfg)
+    assert len(recs) == 1 and recs[0].kind == "subsonic" and recs[0].url == SUB_URL
+    registry._reset_for_tests()
 
 
 def test_run_once_main_connects_with_the_saved_server(tmp_path):
     from trackseerr.cli import main
+    from trackseerr.media_servers import registry
 
+    registry._reset_for_tests()
     _saved_subsonic_db(tmp_path)
     seen: dict[str, bool] = {}
 
     def connect(config, clients, fatal_plex):
-        seen["subsonic"] = config.subsonic_configured
+        seen["subsonic"] = any(r.kind == "subsonic" for r in registry.records(config))
         return True
 
     env = {"RUN_ONCE": "1", "DATA_DIR": str(tmp_path)}
@@ -341,14 +348,19 @@ def test_run_once_main_connects_with_the_saved_server(tmp_path):
     ), patch("trackseerr.cli.os.path.isdir", return_value=False):
         assert main() == 0
     assert seen == {"subsonic": True}
+    registry._reset_for_tests()
 
 
 def test_run_once_ignores_saved_settings_when_the_environment_names_a_server(tmp_path):
+    from trackseerr.media_servers import registry
+
+    registry._reset_for_tests()
     _saved_subsonic_db(tmp_path)
     cfg = Config(plex_url="http://plex", plex_token="t", data_dir=str(tmp_path))
     with patch("trackseerr.cli.os.path.isdir", return_value=False):
         _apply_saved_media_server_settings(cfg)
     assert cfg.media_server_type == "plex" and not cfg.subsonic_configured
+    registry._reset_for_tests()
 
 
 def test_run_once_without_a_database_creates_none_and_keeps_env_behaviour(tmp_path):
@@ -422,9 +434,6 @@ def test_saved_settings_url_resolving_to_metadata_is_not_connected_but_env_is_tr
     assert any("not an allowed service address" in r.getMessage() for r in caplog.records)
 
 
-# ----------------------------------------------------------------------------- J6 / S3 / S7 / S8: settings API
-
-
 def _headers(db, cfg, user):
     token = create_session_token(
         user_id=user["id"], username=user["username"], is_admin=user["is_admin"], secret_key=get_or_create_secret_key(data_dir=cfg.data_dir)
@@ -449,101 +458,12 @@ def env(tmp_path, monkeypatch):
     media_server.reset_probe_cache()
 
 
-SUB = {"type": "subsonic", "url": SUB_URL, "username": "bob", "password": "hunter2", "api_key": ""}
-JF = {"type": "jellyfin", "url": "http://jellyfin:8096", "username": "", "password": "", "api_key": "jf-secret"}
-MASK = "********"
-
-
-@pytest.mark.parametrize(
-    "change",
-    [{"url": "http://elsewhere:4533"}, {"username": "mallory"}],
-    ids=["new-url", "new-username"],
-)
-def test_masked_subsonic_password_is_not_resolved_for_a_different_url_or_user(env, change):
-    assert env.tc.put("/api/settings/media-server", json=SUB, headers=env.admin).status_code == 200
-    body = {**SUB, "password": MASK, **change}
-    assert env.tc.put("/api/settings/media-server", json=body, headers=env.admin).status_code == 400
-    assert env.tc.post("/api/settings/media-server/test", json=body, headers=env.admin).status_code == 400
-    assert env.db.get_media_server_settings()["url"] == SUB_URL  # nothing was saved
-
-
-def test_masked_subsonic_api_key_is_not_resolved_for_a_different_url(env):
-    keyed = {**SUB, "password": "", "api_key": "sub-key"}
-    assert env.tc.put("/api/settings/media-server", json=keyed, headers=env.admin).status_code == 200
-    moved = {**keyed, "api_key": MASK, "url": "http://elsewhere:4533"}
-    assert env.tc.put("/api/settings/media-server", json=moved, headers=env.admin).status_code == 400
-    assert env.tc.post("/api/settings/media-server/test", json=moved, headers=env.admin).status_code == 400
-
-
-def test_a_stored_key_is_never_merged_across_server_types(env):
-    assert env.tc.put("/api/settings/media-server", json=JF, headers=env.admin).status_code == 200
-    # same URL, other type: the saved Jellyfin key must not become a Subsonic API key
-    as_subsonic = {**SUB, "url": JF["url"], "password": "", "api_key": MASK}
-    assert env.tc.put("/api/settings/media-server", json=as_subsonic, headers=env.admin).status_code == 400
-    assert env.tc.post("/api/settings/media-server/test", json=as_subsonic, headers=env.admin).status_code == 400
-    assert env.tc.put("/api/settings/media-server", json={**SUB, "password": MASK}, headers=env.admin).status_code in (400, 422)
-    # and the other way round
-    keyed_subsonic = {**SUB, "password": "", "api_key": "sub-key"}
-    assert env.tc.put("/api/settings/media-server", json=keyed_subsonic, headers=env.admin).status_code == 200
-    as_jellyfin = {**JF, "url": SUB_URL, "api_key": MASK}
-    assert env.tc.put("/api/settings/media-server", json=as_jellyfin, headers=env.admin).status_code == 400
-    assert env.tc.post("/api/settings/media-server/test", json=as_jellyfin, headers=env.admin).status_code == 400
-
-
-def test_merge_secrets_unit_rules():
-    stored = {"type": "jellyfin", "credentials_type": "jellyfin", "url": "http://j", "username": "", "password": "", "api_key": "k"}
-    with pytest.raises(ms_settings.SecretReuseError):
-        ms_settings.merge_secrets({"type": "subsonic", "url": "http://j", "api_key": MASK, "username": "", "password": ""}, stored)
-    same = ms_settings.merge_secrets({"type": "jellyfin", "url": "http://J/", "api_key": MASK, "username": "", "password": ""}, stored)
-    assert same["api_key"] == "k"
-    sub_stored = {"type": "subsonic", "credentials_type": "subsonic", "url": "http://s", "username": "u", "password": "p", "api_key": ""}
-    sub_keyed = {**sub_stored, "api_key": "sub-key"}
-    with pytest.raises(ms_settings.SecretReuseError):
-        ms_settings.merge_secrets({"type": "jellyfin", "url": "http://s", "api_key": MASK, "username": "", "password": ""}, sub_keyed)
-    ok = ms_settings.merge_secrets({"type": "subsonic", "url": "http://s/", "username": "u", "password": MASK, "api_key": ""}, sub_stored)
-    assert ok["password"] == "p"
-
-
-def test_saving_none_keeps_the_credentials_of_the_previous_type(env):
-    assert env.tc.put("/api/settings/media-server", json=JF, headers=env.admin).status_code == 200
-    assert env.tc.put("/api/settings/media-server", json={"type": "none"}, headers=env.admin).status_code == 200
-    stored = env.db.get_media_server_settings()
-    assert (stored["type"], stored["api_key"], stored["url"], stored["credentials_type"]) == ("none", "jf-secret", JF["url"], "jellyfin")
-    assert not Config.from_env().jellyfin_configured
-    # the kept key still only resolves for its own type and URL
-    assert env.tc.put("/api/settings/media-server", json={**SUB, "url": JF["url"], "password": "", "api_key": MASK}, headers=env.admin).status_code == 400
-    assert env.tc.put("/api/settings/media-server", json={**JF, "api_key": MASK}, headers=env.admin).status_code == 200
-    assert env.db.get_media_server_settings()["api_key"] == "jf-secret"
-    # a second "none" keeps them too
-    env.tc.put("/api/settings/media-server", json={"type": "none"}, headers=env.admin)
-    env.tc.put("/api/settings/media-server", json={"type": "none"}, headers=env.admin)
-    assert env.db.get_media_server_settings()["api_key"] == "jf-secret"
-
-
-
-def test_settings_get_and_test_require_the_core_tier():
-    from fastapi import HTTPException
-
-    from trackseerr.api.routes import settings as settings_routes
-
-    wanted = {("/media-server", "GET"), ("/media-server/test", "POST")}
-    found = set()
-    for route in settings_routes.router.routes:
-        for method in getattr(route, "methods", ()) or ():
-            if (getattr(route, "path", ""), method) in wanted:
-                assert require_core_tier in [d.dependency for d in route.dependencies], (route.path, method)
-                found.add((route.path, method))
-    assert found == wanted
-    with pytest.raises(HTTPException) as refused:
-        require_core_tier(Config(plex_url="", plex_token="", role="gateway"))
-    assert refused.value.status_code == 403
-
-
 def test_save_and_test_routes_reject_a_hostname_that_resolves_to_metadata(env):
+    body = {"kind": "subsonic", "name": "Subsonic", "url": "http://sneaky.example:4533", "username": "bob", "password": "hunter2", "api_key": ""}
     with patch("trackseerr.security._resolve_host", return_value=["169.254.169.254"]):
-        assert env.tc.put("/api/settings/media-server", json={**SUB, "url": "http://sneaky.example:4533"}, headers=env.admin).status_code == 400
-        res = env.tc.post("/api/settings/media-server/test", json={**SUB, "url": "http://sneaky.example:4533"}, headers=env.admin).json()
-    assert res["ok"] is False and "SSRF" in res["message"]
+        assert env.tc.post("/api/settings/media-servers", json=body, headers=env.admin).status_code == 422
+        res = env.tc.post("/api/settings/media-servers/test", json=body, headers=env.admin)
+    assert res.status_code == 422 and "SSRF" in res.json()["detail"]
 
 
 # ----------------------------------------------------------------------------- J3 through the admin API
@@ -553,6 +473,8 @@ def test_user_refresh_skips_colliding_names_and_survives_a_bad_row(env):
     from trackseerr.api.dependencies import get_media_client
 
     env.cfg.media_server = "jellyfin"
+    env.cfg.jellyfin_url = "http://jellyfin:8096"
+    env.cfg.jellyfin_api_key = "k"
     local_admin(env.db, "kid")  # a local account already owns the name Jellyfin also has
     server = SimpleNamespace(
         kind="jellyfin",

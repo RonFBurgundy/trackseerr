@@ -18,7 +18,7 @@ from .api.routes.system.logs import get_log_file_path, log_ring_buffer
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
 from .media_server import NO_MEDIA_SERVER_BOOT_MESSAGE
-from .media_servers import MediaServer, MediaServerError, build_jellyfin, build_subsonic, import_server_users
+from .media_servers import MediaServer, MediaServerError, import_server_users, registry
 from .media_servers import settings as media_server_settings
 from .clients.spotify import SpotifyClient
 from .clients.spotify_scraper import SpotifyWebScraper
@@ -160,39 +160,31 @@ class _Clients:
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
-def _connect_clients(config: Config, clients: _Clients, *, fatal_plex: bool) -> bool:
-    """Connects Plex (when it is the configured media server), Spotify and Deezer. Returns False only when
-    Plex is configured, ``fatal_plex`` is set and Plex is unreachable. With no media server nothing is connected."""
-    if config.subsonic_configured:
-        with boot_state.step_timer("connecting to Subsonic"):
-            adapter = build_subsonic(config)  # lazy: no network here; unreachability surfaces per operation
-            with clients.lock:
-                clients.plex = adapter
-    if config.jellyfin_configured:
-        with boot_state.step_timer("connecting to Jellyfin"):
-            adapter = build_jellyfin(config)  # lazy: no network here; unreachability surfaces per operation
-            with clients.lock:
-                clients.plex = adapter
-    if config.plex_enabled:
-        with boot_state.step_timer("connecting to Plex"):
-            try:
-                clients.plex = PlexClient(
-                    base_url=config.plex_url,
-                    token=config.plex_token,
-                    verify_ssl=config.plex_verify_ssl,
-                    music_section=config.plex_music_section,
-                )
-            except Exception as e:  # PlexServer raises a wide set (requests, plexapi, ssl); root cause is logged
+def _connect_media_server(config: Config, clients: _Clients, *, fatal_plex: bool) -> bool:
+    """Connect the primary media server into ``clients.plex``; return False only when login Plex fails fatally."""
+    with boot_state.step_timer("connecting to media servers"):
+        pair = registry.primary_server(config)
+        with clients.lock:
+            clients.plex = registry.client_for(pair)
+        if pair is None:
+            login_rec = next((r for r in registry.records(config) if r.enabled and r.is_login), None)
+            if login_rec is not None and login_rec.kind == MEDIA_SERVER_PLEX:
                 if fatal_plex:
-                    logger.error("Failed to connect to Plex Media Server: %s", safe_exc(e))
-                    logger.debug("Plex connect traceback", exc_info=True)
+                    logger.error("Failed to connect to Plex Media Server: see the earlier error")
                     return False
                 logger.warning(
-                    "Could not connect to Plex Server at %s on startup: %s. "
+                    "Could not connect to Plex Server at %s on startup: see the earlier error. "
                     "Starting Web Server; connection will be retried during sync.",
-                    redact_text(config.plex_url),
-                    safe_exc(e),
+                    redact_text(login_rec.url),
                 )
+    return True
+
+
+def _connect_clients(config: Config, clients: _Clients, *, fatal_plex: bool) -> bool:
+    """Connects the primary media server, Spotify and Deezer. Returns False only when
+    login Plex is configured, ``fatal_plex`` is set and Plex is unreachable."""
+    if not _connect_media_server(config, clients, fatal_plex=fatal_plex):
+        return False
 
     with boot_state.step_timer("initializing Spotify/Deezer clients"):
         if config.has_spotify:
@@ -218,14 +210,14 @@ def _connect_clients(config: Config, clients: _Clients, *, fatal_plex: bool) -> 
 
 def _make_plex_provider(
     config: Config, clients: _Clients, retry_interval: float = 60.0
-) -> Callable[[], Optional[PlexClient]]:
-    """Returns a callable yielding the current Plex client, re-attempting a connection when Plex was
+) -> Callable[[], Optional[Union[PlexClient, MediaServer]]]:
+    """Returns a callable yielding the current media server client, re-attempting connection when it was
     unreachable at boot. Attempts are spaced at least ``retry_interval`` seconds apart (no hot loop)."""
     lock = threading.Lock()
     state = {"last_attempt": time.monotonic(), "warned": False}  # the boot connect counts as attempt #1
 
-    def provider() -> Optional[PlexClient]:
-        if clients.plex is not None or not config.plex_enabled:
+    def provider() -> Optional[Union[PlexClient, MediaServer]]:
+        if clients.plex is not None or not registry.has_servers(config):
             return clients.plex
         with lock:
             if clients.plex is not None:
@@ -234,17 +226,14 @@ def _make_plex_provider(
             if now - state["last_attempt"] < retry_interval:
                 return None
             state["last_attempt"] = now
-            try:
-                clients.plex = PlexClient(
-                    base_url=config.plex_url,
-                    token=config.plex_token,
-                    verify_ssl=config.plex_verify_ssl,
-                    music_section=config.plex_music_section,
-                )
-                logger.info("Connected to Plex Media Server after an earlier failure")
-            except Exception as e:  # PlexServer raises a wide set (requests, plexapi, ssl); root cause is logged
+            client = registry.client_for(registry.primary_server(config))
+            if client is not None:
+                with clients.lock:
+                    clients.plex = client
+                logger.info("Connected to the media server after an earlier failure")
+            else:
                 log = logger.debug if state["warned"] else logger.warning
-                log("Plex still unreachable (will retry in %.0fs): %s", retry_interval, safe_exc(e))
+                log("Media server still unreachable (will retry in %.0fs)", retry_interval)
                 state["warned"] = True
             return clients.plex
 
@@ -272,7 +261,7 @@ def _apply_saved_media_server_settings(config: Config) -> None:
         return
     try:
         media_server_settings.load_into_process(db)
-        config.apply_media_server_overlay()
+        registry.reload(config, db)
     finally:
         db.close()
 
@@ -315,6 +304,40 @@ def _discover_media_server_users(db: Database, server: MediaServer) -> None:
         logger.debug("User import traceback", exc_info=True)
         return
     logger.info("Discovered %d %s users (%d imported, %d skipped)", len(users), server.kind, imported, skipped)
+
+
+def _discover_all_server_users(db: Database, config: Config, plex_client: Any = None) -> None:
+    """Discover users from all enabled servers with ``ROLE_USERS`` (or fall back to ``plex_client``)."""
+    if not registry.is_installed():
+        if isinstance(plex_client, MediaServer) and plex_client.capabilities.users:
+            try:
+                _discover_media_server_users(db, plex_client)
+            except Exception as e:
+                logger.error("%s user discovery failed; continuing degraded: %s", plex_client.kind, safe_exc(e))
+                logger.debug("User discovery traceback", exc_info=True)
+        elif plex_client is not None and not isinstance(plex_client, MediaServer):
+            try:
+                _discover_plex_users(db, plex_client)
+            except Exception as e:
+                logger.error("Plex user discovery failed; continuing degraded: %s", safe_exc(e))
+                logger.debug("Plex discovery traceback", exc_info=True)
+        return
+
+    from .media_servers.plex import PlexMediaServer
+
+    for _rec, adapter in registry.media_servers(registry.ROLE_USERS):
+        if isinstance(adapter, PlexMediaServer):
+            try:
+                _discover_plex_users(db, adapter.plex_extras())
+            except Exception as e:
+                logger.error("Plex user discovery failed; continuing degraded: %s", safe_exc(e))
+                logger.debug("Plex discovery traceback", exc_info=True)
+        elif adapter.capabilities.users:
+            try:
+                _discover_media_server_users(db, adapter)
+            except Exception as e:
+                logger.error("%s user discovery failed; continuing degraded: %s", adapter.kind, safe_exc(e))
+                logger.debug("User discovery traceback", exc_info=True)
 
 
 def _start_sync_scheduler(
@@ -634,20 +657,8 @@ def _background_init(
         logger.debug("Client connect traceback", exc_info=True)
     finally:
         clients_ready.set()  # success or failure: the scheduler must not wait forever
-    if isinstance(clients.plex, MediaServer) and clients.plex.capabilities.users:
-        try:
-            with boot_state.step_timer(f"discovering {clients.plex.kind} users", publish=False):
-                _discover_media_server_users(db, clients.plex)
-        except Exception as e:  # mirrors the Plex path: user discovery degrades, it never blocks the workers below
-            logger.error("%s user discovery failed; continuing degraded: %s", clients.plex.kind, safe_exc(e))
-            logger.debug("User discovery traceback", exc_info=True)
-    if clients.plex is not None and not isinstance(clients.plex, MediaServer):  # a raw Plex client, not a MediaServer adapter
-        try:
-            with boot_state.step_timer("discovering Plex Home users", publish=False):
-                _discover_plex_users(db, clients.plex)
-        except Exception as e:
-            logger.error("Plex user discovery failed; continuing degraded: %s", safe_exc(e))
-            logger.debug("Plex discovery traceback", exc_info=True)
+    with boot_state.step_timer("discovering media server users", publish=False):
+        _discover_all_server_users(db, config, clients.plex)
     try:
         from .acquisition_worker import acquisition_worker
 
@@ -788,34 +799,30 @@ def _prepare_core(db: Database, config: Config, clients: _Clients, role: str) ->
         logger.warning("Could not record the deployment role: %s", safe_exc(e))
 
     if role != "gateway":
-        # The Settings page may name the media server when the environment does not; follow later saves live.
+        # The Settings page may name media servers when the environment does not; follow later saves live.
         media_server_settings.load_into_process(db)
-        config.apply_media_server_overlay()
+        registry.reload(config, db)
 
         def _reconnect_media_server() -> None:
-            with clients.lock:  # one reconnect at a time: the overlay, the new adapter and the assignment go together
-                config.apply_media_server_overlay()
-                adapter: Optional[Union[PlexClient, MediaServer]] = clients.plex
-                if clients.plex is None or isinstance(clients.plex, MediaServer):  # never replace a connected Plex client
-                    if config.subsonic_configured:
-                        adapter = build_subsonic(config)
-                    elif config.jellyfin_configured:
-                        adapter = build_jellyfin(config)
-                    else:
-                        adapter = None
-                    clients.plex = adapter  # a sync in flight keeps the adapter it already holds
-            if isinstance(adapter, MediaServer) and adapter.capabilities.users:
-                threading.Thread(  # off the request thread: the server may be slow or down
-                    target=_discover_media_server_users,
-                    args=(db, adapter),
-                    name="media-server-user-discovery",
-                    daemon=True,
-                ).start()
-            logger.info("Media server settings changed: now using '%s'", config.media_server_type)
+            with clients.lock:  # one reconnect at a time: the reload and the assignment go together
+                registry.reload(config, db)
+                pair = registry.primary_server(config)
+                adapter = registry.client_for(pair)
+                clients.plex = adapter  # a sync in flight keeps the adapter it already holds
+            threading.Thread(  # off the request thread: the server may be slow or down
+                target=_discover_all_server_users,
+                args=(db, config),
+                name="media-server-user-discovery",
+                daemon=True,
+            ).start()
+            name = pair[0].name if pair is not None else "no media server"
+            logger.info("Media server settings changed: now using %s", name)
 
         media_server_settings.on_change(_reconnect_media_server)
 
-    if role != "gateway" and config.media_server_type != MEDIA_SERVER_PLEX:  # no Plex owner can sign in as first admin
+    if role != "gateway" and not any(
+        r.kind == MEDIA_SERVER_PLEX and r.is_login and r.enabled for r in registry.records(config)
+    ):  # no Plex owner can sign in as first admin
         from .admin_bootstrap import ensure_bootstrap_admin
 
         ensure_bootstrap_admin(db)

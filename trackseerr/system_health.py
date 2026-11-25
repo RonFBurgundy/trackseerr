@@ -309,8 +309,9 @@ def _check_download_clients(
 def _check_media_server(
     db: Any, config: Any, now: datetime, settings: dict[str, Any]
 ) -> tuple[int, int, int]:
-    server_type = getattr(config, "media_server_type", None) or MEDIA_SERVER_NONE
-    if server_type == MEDIA_SERVER_NONE:
+    from trackseerr.media_servers import registry
+
+    if not registry.has_servers(config):
         try:
             db.delete_health_checks_except("media_server", [])
         except sqlite3.Error as exc:
