@@ -21,6 +21,7 @@ from trackseerr.api.dependencies import (
     get_media_client,
     get_spotify_client,
     has_permission,
+    require_admin,
     require_permission,
 )
 from trackseerr.api.routes.issues import _Stripped, _is_admin, _reject_control_chars, file_issue
@@ -34,6 +35,8 @@ from trackseerr.api.schemas.playlists import (
     PlaylistImportResponse,
     PlaylistMonitorModeResponse,
     PlaylistRecord,
+    PlaylistServersRequest,
+    PlaylistServersResponse,
     PlaylistTargetsResponse,
     PlaylistTrackItem,
     PlaylistTracksResponse,
@@ -298,6 +301,27 @@ def _guard_existing_playlist(
     return existing
 
 
+def _attach_server_fields(db: Database, playlist: dict[str, Any], is_admin: bool) -> None:
+    """Populate admin-only per-server exclusions and sync state; non-admins get empty defaults."""
+    if is_admin:
+        pid = str(playlist["id"])
+        playlist["excluded_servers"] = sorted(db.get_playlist_server_excludes(pid))
+        playlist["server_states"] = [
+            {
+                "server_id": st["server_id"],
+                "status": st["status"],
+                "matched": st["matched"],
+                "missing": st["missing"],
+                "error": st["error"],
+                "synced_at": st["synced_at"],
+            }
+            for st in db.list_playlist_server_state(pid)
+        ]
+    else:
+        playlist["excluded_servers"] = []
+        playlist["server_states"] = []
+
+
 def _subscribe_to_existing(
     db: Database,
     playlist_id: str,
@@ -316,6 +340,7 @@ def _subscribe_to_existing(
     logger.info("User %s subscribed to existing playlist %s", uid, playlist_id)
     playlist = db.get_playlist(playlist_id) or existing
     playlist["targets"] = db.get_playlist_targets(playlist_id)
+    _attach_server_fields(db, playlist, bool(current_user.get("is_admin")))
     playlist["subscribed"] = True
     return playlist
 
@@ -348,8 +373,10 @@ def list_playlists(
     else:
         playlists = db.list_playlists(user_id=str(current_user["id"]))
 
+    is_admin = bool(current_user.get("is_admin"))
     for p in playlists:
         p["targets"] = db.get_playlist_targets(p["id"])
+        _attach_server_fields(db, p, is_admin)
 
     return playlists
 
@@ -569,6 +596,7 @@ def create_playlist(
     initial_targets = _resolve_targets(db, pl_id, existing, current_user, req.targets)
     db.set_playlist_targets(pl_id, initial_targets)
     playlist["targets"] = db.get_playlist_targets(pl_id)
+    _attach_server_fields(db, playlist, bool(current_user.get("is_admin")))
 
     return playlist
 
@@ -910,6 +938,33 @@ def update_playlist_targets(
     return {
         "id": playlist_id,
         "targets": db.get_playlist_targets(playlist_id),
+    }
+
+
+@router.put("/{playlist_id}/servers", response_model=PlaylistServersResponse, response_model_exclude_unset=True)
+def update_playlist_servers(
+    playlist_id: str,
+    req: PlaylistServersRequest,
+    _admin: dict[str, Any] = Depends(require_admin),
+    db: Database = Depends(get_db),
+) -> dict[str, Any]:
+    """Update the excluded media server IDs for a playlist (admin only)."""
+    if not db.get_playlist(playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Playlist not found",
+        )
+    known_ids = {str(row["id"]) for row in db.list_media_server_rows()}
+    unknown = [sid for sid in req.excluded_server_ids if sid not in known_ids]
+    if unknown:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown media server id(s): {', '.join(unknown)}",
+        )
+    db.set_playlist_server_excludes(playlist_id, req.excluded_server_ids)
+    return {
+        "id": playlist_id,
+        "excluded_servers": sorted(db.get_playlist_server_excludes(playlist_id)),
     }
 
 

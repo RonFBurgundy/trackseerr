@@ -20,7 +20,8 @@ import type { Schema } from '@/types/apiSchema';
 import type { DiscoveryItem, Playlist, User } from '@/types/models';
 import { parseTrackCount } from '@/lib/trackCount';
 import type { ImportPlaylistPayload } from '@/services/playlistService';
-import type { MediaServerType } from '@/types/mediaServer';
+import { setPlaylistServers } from '@/services/playlistService';
+import type { MediaServerItem, MediaServerType } from '@/types/mediaServer';
 import {
   TabStrip,
   ActionBar,
@@ -76,6 +77,7 @@ import { NoMediaServerNote } from '@/components/mediaServer';
 export interface PlaylistsViewProps {
   playlists: Playlist[];
   users: User[];
+  playlistServers?: MediaServerItem[];
   currentUserId?: string;
   onSync: () => Promise<void>;
   onToggleTarget: (playlistId: number | string, userIds: string[]) => Promise<void>;
@@ -235,9 +237,123 @@ const SyncTargetsSection: React.FC<SyncTargetsSectionProps> = ({
   );
 };
 
+interface ServerPillsProps {
+  servers: MediaServerItem[];
+  excludedServerIds: readonly string[];
+  onToggle: (serverId: string) => void;
+}
+
+const ServerPills: React.FC<ServerPillsProps> = ({
+  servers,
+  excludedServerIds,
+  onToggle,
+}) => {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {servers.map((s) => {
+        const isIncluded = !excludedServerIds.includes(s.id);
+        return (
+          <button
+            key={s.id}
+            type="button"
+            onClick={() => onToggle(s.id)}
+            className={`target-pill px-2.5 py-1 rounded-[3px] text-xs font-mono transition-all cursor-pointer ${
+              isIncluded
+                ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
+                : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
+            }`}
+          >
+            {s.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+interface SyncServersSectionProps {
+  playlist: Playlist;
+  servers: MediaServerItem[];
+  excludedServerIds: readonly string[];
+  isOpen: boolean;
+  onToggleOpen: () => void;
+  onToggleServer: (serverId: string) => void;
+}
+
+const SyncServersSection: React.FC<SyncServersSectionProps> = ({
+  playlist,
+  servers,
+  excludedServerIds,
+  isOpen,
+  onToggleOpen,
+  onToggleServer,
+}) => {
+  const includedCount = servers.filter((s) => !excludedServerIds.includes(s.id)).length;
+  const containerId = `pl-servers-${playlist.id}`;
+  const serverNames = new Map(servers.map((s) => [s.id, s.name]));
+  const serverStates = playlist.server_states ?? [];
+
+  return (
+    <div className="space-y-2 pt-3 border-t border-[#1f1f1f]">
+      <button
+        type="button"
+        aria-expanded={isOpen}
+        aria-controls={containerId}
+        onClick={onToggleOpen}
+        className="w-full min-h-[44px] flex items-center justify-between text-left rounded-[3px] focus:outline-none focus-visible:ring-1 focus-visible:ring-[#e5a00d]"
+      >
+        <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+          Servers
+        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] font-mono text-neutral-500">
+            {includedCount} of {servers.length} servers
+          </span>
+          <ChevronDown
+            className={`h-4 w-4 text-neutral-400 transition-transform duration-150 ${
+              isOpen ? 'rotate-180' : ''
+            }`}
+          />
+        </div>
+      </button>
+      {isOpen && (
+        <div id={containerId} className="space-y-2">
+          <ServerPills
+            servers={servers}
+            excludedServerIds={excludedServerIds}
+            onToggle={onToggleServer}
+          />
+          {serverStates.length > 0 && (
+            <div className="space-y-0.5">
+              {serverStates.map((st) => {
+                const name = serverNames.get(st.server_id) ?? st.server_id;
+                const isError = st.status === 'error' || Boolean(st.error);
+                const text = isError
+                  ? `${name}: failed — ${st.error || st.status}`
+                  : `${name}: ${st.matched ?? 0} matched, ${st.missing ?? 0} missing`;
+                return (
+                  <p
+                    key={st.server_id}
+                    className={`text-[11px] font-mono ${
+                      isError ? 'text-[var(--status-error)]' : 'text-neutral-400'
+                    }`}
+                  >
+                    {text}
+                  </p>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   playlists,
   users,
+  playlistServers = [],
   currentUserId,
   onSync,
   onToggleTarget,
@@ -279,6 +395,12 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   const [tracksModalPlaylist, setTracksModalPlaylist] = useState<{ id: string; name: string } | null>(null);
   const [isOverridesModalOpen, setIsOverridesModalOpen] = useState<boolean>(false);
   const [openTargets, setOpenTargets] = useState<ReadonlySet<string>>(new Set());
+  const [openServers, setOpenServers] = useState<ReadonlySet<string>>(new Set());
+  const [optimisticExcludes, setOptimisticExcludes] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    setOptimisticExcludes({});
+  }, [playlists]);
 
   const selectedMissingTracks = useMemo(
     () => (selectedMissingPlaylistId ? missingHook.missingTracks.filter((t) => t.playlist_id === selectedMissingPlaylistId) : []),
@@ -318,6 +440,27 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
       ? existing.filter((id) => id !== userIdStr)
       : [...existing, userIdStr];
     await onToggleTarget(playlist.id, updated);
+  };
+
+  const handleServerClick = async (playlist: Playlist, serverId: string) => {
+    const plId = String(playlist.id);
+    const existing = optimisticExcludes[plId] ?? playlist.excluded_servers ?? [];
+    const updated = existing.includes(serverId)
+      ? existing.filter((id) => id !== serverId)
+      : [...existing, serverId];
+    setOptimisticExcludes((prev) => ({ ...prev, [plId]: updated }));
+    try {
+      await setPlaylistServers(playlist.id, updated);
+      await onPlaylistsChanged?.();
+    } catch (err: unknown) {
+      setOptimisticExcludes((prev) => {
+        const next = { ...prev };
+        delete next[plId];
+        return next;
+      });
+      await onPlaylistsChanged?.();
+      showToast(errorMessage(err, 'Could not update playlist servers'), 'error');
+    }
   };
 
   const openTracksForCreated = (created: Schema<'PlaylistRecord'> | null) => {
@@ -569,6 +712,28 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                     });
                   }}
                   onToggleTarget={(userIdStr) => handleTargetClick(pl, userIdStr)}
+                />
+              )}
+
+              {hasMediaServer && isAdmin && playlistServers.length > 1 && (
+                <SyncServersSection
+                  playlist={pl}
+                  servers={playlistServers}
+                  excludedServerIds={optimisticExcludes[String(pl.id)] ?? pl.excluded_servers ?? []}
+                  isOpen={openServers.has(String(pl.id))}
+                  onToggleOpen={() => {
+                    const plIdStr = String(pl.id);
+                    setOpenServers((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(plIdStr)) {
+                        next.delete(plIdStr);
+                      } else {
+                        next.add(plIdStr);
+                      }
+                      return next;
+                    });
+                  }}
+                  onToggleServer={(serverId) => void handleServerClick(pl, serverId)}
                 />
               )}
 

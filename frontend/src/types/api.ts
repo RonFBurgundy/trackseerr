@@ -4149,6 +4149,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/playlists/{playlist_id}/servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Update Playlist Servers
+         * @description Update the excluded media server IDs for a playlist (admin only).
+         */
+        put: operations["update_playlist_servers_api_playlists__playlist_id__servers_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/playlists/{playlist_id}/targets": {
         parameters: {
             query?: never;
@@ -12679,6 +12699,8 @@ export interface components {
             description: string;
             /** Enabled */
             enabled: boolean;
+            /** Excluded Servers */
+            excluded_servers?: string[];
             /** Id */
             id: string;
             /** Last Synced At */
@@ -12692,6 +12714,8 @@ export interface components {
              * @default
              */
             poster_url: string;
+            /** Server States */
+            server_states?: components["schemas"]["PlaylistServerState"][];
             /** Service */
             service: string;
             /** Source Kind */
@@ -12711,6 +12735,42 @@ export interface components {
             tracks_json?: string | null;
             /** Updated At */
             updated_at: string;
+        };
+        /** PlaylistServerState */
+        PlaylistServerState: {
+            /**
+             * Error
+             * @default
+             */
+            error: string;
+            /**
+             * Matched
+             * @default 0
+             */
+            matched: number;
+            /**
+             * Missing
+             * @default 0
+             */
+            missing: number;
+            /** Server Id */
+            server_id: string;
+            /** Status */
+            status: string;
+            /** Synced At */
+            synced_at?: string | null;
+        };
+        /** PlaylistServersRequest */
+        PlaylistServersRequest: {
+            /** Excluded Server Ids */
+            excluded_server_ids: string[];
+        };
+        /** PlaylistServersResponse */
+        PlaylistServersResponse: {
+            /** Excluded Servers */
+            excluded_servers: string[];
+            /** Id */
+            id: string;
         };
         /** PlaylistTargetsRequest */
         PlaylistTargetsRequest: {
@@ -23080,6 +23140,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PlaylistMonitorModeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_playlist_servers_api_playlists__playlist_id__servers_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                playlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PlaylistServersRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistServersResponse"];
                 };
             };
             /** @description Validation Error */

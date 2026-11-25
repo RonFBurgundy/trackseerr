@@ -2,7 +2,27 @@
 
 from typing import Literal, Optional
 
+from pydantic import Field
+
 from trackseerr.api.response_models import ApiModel
+
+
+class PlaylistServerState(ApiModel):
+    server_id: str
+    status: str
+    matched: int = 0
+    missing: int = 0
+    error: str = ""
+    synced_at: Optional[str] = None
+
+
+class PlaylistServersRequest(ApiModel):
+    excluded_server_ids: list[str]
+
+
+class PlaylistServersResponse(ApiModel):
+    id: str
+    excluded_servers: list[str]
 
 
 class PlaylistRecord(ApiModel):
@@ -25,6 +45,8 @@ class PlaylistRecord(ApiModel):
     created_at: str
     updated_at: str
     targets: list[str]
+    excluded_servers: list[str] = Field(default_factory=list)
+    server_states: list[PlaylistServerState] = Field(default_factory=list)
     subscribed: bool = False  # create only: the playlist already existed (added by another user) and the caller was subscribed to it
 
 
