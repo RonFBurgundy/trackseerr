@@ -342,3 +342,23 @@ def test_batch_relink_two_files_same_target_are_refused(test_db, env):
     assert [r["id"] for r in test_db.list_library_files_for_track("trk-1")] == ["fl-1"]
     assert test_db.list_library_files_for_track("trk-2") == []
     assert [r["id"] for r in test_db.list_library_files_for_track("trk-3")] == ["fl-3"]
+
+
+def test_batch_relink_unknown_file_does_not_block_valid_one(test_db, env):
+    _, root, bin_dir = env
+    _three(test_db, root)
+    test_db.delete_library_file("fl-2")
+    res = relink_files(
+        test_db,
+        [
+            {"file_id": "fl-1", "target_track_id": "trk-2"},
+            {"file_id": "unknown_file", "target_track_id": "trk-2"},
+        ],
+        conflict="skip",
+    )
+    assert res["relinked"] == 1
+    assert res["ambiguous"] == 0
+    assert res["errors"] == 1
+    assert [r["status"] for r in res["results"]] == ["relinked", "error"]
+    assert _recycled(bin_dir) == []
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-2")] == ["fl-1"]

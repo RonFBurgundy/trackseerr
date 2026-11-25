@@ -190,7 +190,12 @@ def relink_files(
     ambiguous_count = 0
     errors_count = 0
 
-    target_counts = Counter(_item_ids(item)[1] for item in items)
+    target_counts: Counter[str] = Counter()
+    for item in items:
+        file_id, target_track_id = _item_ids(item)
+        existing = db.get_library_file(file_id)
+        if existing is not None and existing.get("track_id") != target_track_id:
+            target_counts[target_track_id] += 1
     ambiguous_targets = {tid for tid, count in target_counts.items() if count > 1}
     per_file_conflict = None if conflict == "skip" else conflict
     still_moving = _moving_file_ids(db, items, ambiguous_targets)
