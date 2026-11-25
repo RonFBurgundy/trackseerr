@@ -1251,3 +1251,50 @@ def test_refile_various_album_does_not_create_va_artist(db: Database, tmp_path: 
     assert counts["filed_home"] == 0
     assert db.get_library_artist_by_mbid(VARIOUS_ARTISTS_MBID) is None
     enricher.get_recording_release_groups.assert_not_called()
+
+
+def test_refile_out_of_various_does_not_leave_artist_when_no_home_found(db: Database, tmp_path: Path):
+    seryoga_mbid = "8178a020-3825-418d-9c94-e9a103acb686"
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-va", "Now That's What I Call Music! 44",
+        [{"num": 1, "title": "Cherni Bumer", "rec_id": "rec-seryoga"}],
+        rg_id="rg-now44", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    db.replace_track_artists("alb-va-1", [
+        {"artist_name": "Seryoga", "artist_mbid": seryoga_mbid, "role": "primary", "position": 0, "source": "tags"}
+    ])
+    enricher = _enricher(
+        {"rec-seryoga": [NOW_44]},
+        search_results={("Seryoga", "Cherni Bumer"): []},
+    )
+    discovery = MagicMock()
+    discovery.search_tracks.return_value = []
+
+    counts = refile_out_of_various(db, enricher, discovery=discovery)
+
+    assert counts["filed_home"] == 0
+    assert db.get_library_artist_by_mbid(seryoga_mbid) is None
+    assert db.get_library_artist_by_name("Seryoga") is None
+
+
+def test_refile_out_of_various_wrongly_linked_single_artist_album_without_track_credits(
+    db: Database, tmp_path: Path
+):
+    va_id = various_artists_id(db)
+    _seed_album(
+        db, tmp_path, "alb-crazy", "The Crazy Penis Collection",
+        [{"num": 1, "title": "You Started Something", "rec_id": "rec-crazy"}],
+        rg_id="rg-crazy", artist_id=va_id, artist_name="Various Artists", artist_mbid=VARIOUS_ARTISTS_MBID,
+    )
+    crazy_group = _group("rg-crazy", "The Crazy Penis Collection", artist_ids=[BOB_MBID], various=False)
+    enricher = _enricher({"rec-crazy": [crazy_group]})
+    enricher.get_artist_details.return_value = {"name": "Crazy P"}
+
+    counts = refile_out_of_various(db, enricher)
+
+    assert counts["moved_to_artist"] == 1
+    crazy_artist = db.get_library_artist_by_name("Crazy P")
+    assert crazy_artist is not None
+    album = db.get_library_album("alb-crazy")
+    assert album is not None and album["artist_id"] == crazy_artist["id"]
