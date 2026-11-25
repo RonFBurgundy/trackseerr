@@ -163,7 +163,7 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
       maxWidth="sm:max-w-4xl"
       footer={footer}
     >
-      <div className="space-y-4">
+      <div className="h-full sm:h-auto flex flex-col min-h-0 flex-1 gap-4 sm:block sm:flex-none sm:space-y-4">
         {loading && (
           <div className="flex flex-col items-center justify-center gap-2 py-14 text-xs font-mono uppercase tracking-widest text-[var(--text-secondary)]">
             <Loader2 className="h-6 w-6 animate-spin text-[var(--accent-amber)]" />
@@ -299,9 +299,9 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                 </p>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="flex flex-col min-h-0 flex-1 gap-3 sm:block sm:flex-none sm:space-y-3">
                 {/* Header Toolbar */}
-                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#222222] pb-2 text-xs font-mono">
+                <div className="shrink-0 flex flex-wrap items-center justify-between gap-3 border-b border-[#222222] pb-2 text-xs font-mono">
                   <div className="flex items-center gap-2">
                     <SelectionCheckbox
                       name="retag-select-all"
@@ -368,8 +368,7 @@ export const RetagModal: React.FC<RetagModalProps> = ({ scope, onClose, onRetagg
                   tabIndex={0}
                   role="region"
                   aria-label="Retag preview files (scrollable)"
-                  className="virtual-scroll overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
-                  style={{ maxHeight: 'min(500px, 60vh)' }}
+                  className="virtual-scroll flex-1 min-h-[16rem] sm:flex-none sm:max-h-[min(500px,60vh)] overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
                 >
                   <div
                     style={{

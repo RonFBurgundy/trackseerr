@@ -433,7 +433,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
         maxWidth="sm:max-w-4xl"
         footer={footer}
       >
-        <div className="space-y-4">
+        <div className="h-full sm:h-auto flex flex-col min-h-0 flex-1 gap-4 sm:block sm:flex-none sm:space-y-4">
           {isLoading && (
             <div className="flex flex-col items-center justify-center gap-2 py-14 text-xs font-mono uppercase tracking-widest text-[var(--text-secondary)]">
               <Loader2 className="h-6 w-6 animate-spin text-[var(--accent-amber)]" />
@@ -453,7 +453,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
           {!isLoading && (
             <>
               {items.length === 0 ? (
-                <div className="space-y-4">
+                <div className="h-full sm:h-auto flex flex-col min-h-0 flex-1 gap-4 sm:block sm:flex-none sm:space-y-4">
                   <div className="py-12 text-center space-y-2">
                     <FileCheck className="h-8 w-8 text-[var(--accent-amber)] mx-auto opacity-70" />
                     <p className="text-sm font-medium text-white">No wrong files found</p>
@@ -511,8 +511,8 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                   {statusAndErrors}
                 </div>
               ) : (
-                <div className="space-y-3">
-                  <p className="text-xs font-mono text-neutral-400">
+                <div className="flex flex-col min-h-0 flex-1 gap-3 sm:block sm:flex-none sm:space-y-3">
+                  <p className="shrink-0 text-xs font-mono text-neutral-400">
                     Showing <strong className="text-white">{filteredItems.length}</strong> of{' '}
                     <strong className="text-white">{total}</strong> wrong files
                   </p>
@@ -521,7 +521,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                   <div
                     role="group"
                     aria-label="Filter by kind"
-                    className="tab-strip overflow-x-auto pb-0.5"
+                    className="shrink-0 tab-strip overflow-x-auto pb-0.5"
                   >
                     {KIND_ORDER.map((kind) => {
                       const info = KIND_META[kind];
@@ -557,7 +557,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                   </div>
 
                   {/* Header Toolbar */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono">
+                  <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 border-b border-[#222222] pb-2 text-xs font-mono">
                     <div className="flex items-center gap-2">
                       <SelectionCheckbox
                         name="wrong-files-select-all"
@@ -635,7 +635,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                   </div>
 
                   {/* Collapsible timing note directly under the header toolbar */}
-                  <div className="space-y-1.5">
+                  <div className="shrink-0 space-y-1.5">
                     <TapeDeckButton
                       size="sm"
                       onClick={() => setNoteExpanded((prev) => !prev)}
@@ -663,8 +663,7 @@ export const WrongFilesModal: React.FC<WrongFilesModalProps> = ({ isOpen, onClos
                     tabIndex={0}
                     role="region"
                     aria-label="Wrong files (scrollable)"
-                    className="virtual-scroll overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
-                    style={{ maxHeight: 'min(450px, 55vh)' }}
+                    className="virtual-scroll flex-1 min-h-[16rem] sm:flex-none sm:max-h-[min(450px,55vh)] overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c]"
                   >
                     <div
                       style={{
