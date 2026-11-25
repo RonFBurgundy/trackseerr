@@ -34,7 +34,7 @@ from trackseerr.clients.acquisition import (
     get_indexer_driver,
 )
 from trackseerr.clients.plex import PlexClient
-from trackseerr.media_servers import as_media_server, build_jellyfin, build_subsonic
+from trackseerr.media_servers import as_media_server, registry
 from trackseerr.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_SUBSONIC, Config
 from trackseerr.media_server import media_server_status
 from trackseerr.models import (
@@ -566,12 +566,13 @@ def _get_worker_statuses() -> WorkerStatus:
 
 def _connected_media_client(config: Config) -> Optional[Any]:
     """A reachable client of the configured media server, or None (probe helper for the status endpoint)."""
-    if config.media_server_type in (MEDIA_SERVER_SUBSONIC, MEDIA_SERVER_JELLYFIN):
-        server = build_subsonic(config) if config.media_server_type == MEDIA_SERVER_SUBSONIC else build_jellyfin(config)
-        if server is None:
-            return None
-        return True if server.test_connection().ok else None  # the probe only needs "reachable or not"
-    return get_plex_client(config)
+    pair = registry.primary_server(config)
+    if pair is None:
+        return None
+    rec, adapter = pair
+    if rec.kind == "plex":
+        return registry.client_for(pair)
+    return True if adapter.test_connection().ok else None  # the probe only needs "reachable or not"
 
 
 @router.get("/media-server", response_model=MediaServerStatus, response_model_exclude_unset=True, summary="Active media server and the features it enables")

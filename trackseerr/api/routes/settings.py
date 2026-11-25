@@ -950,10 +950,12 @@ def create_plex_account_pin(
     config: Config = Depends(get_config),
     admin_user: dict[str, Any] = Depends(require_admin),
 ) -> PlexPinResponse:
-    if config.media_server_type != MEDIA_SERVER_PLEX:
+    from trackseerr.media_servers import registry
+
+    if registry.login_plex_record(config) is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Plex is not the active media server.",
+            detail="No Plex server is set up for sign-in.",
         )
     try:
         pin_data = create_plex_pin()
@@ -980,10 +982,12 @@ def check_plex_account_pin(
     plex: PlexClient | None = Depends(get_plex_client),
     admin_user: dict[str, Any] = Depends(require_admin),
 ) -> PlexAccountCheckResponse:
-    if config.media_server_type != MEDIA_SERVER_PLEX:
+    from trackseerr.media_servers import registry
+
+    if registry.login_plex_record(config) is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Plex is not the active media server.",
+            detail="No Plex server is set up for sign-in.",
         )
     try:
         token = check_plex_pin(payload.pin_id)
