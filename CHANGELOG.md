@@ -13,6 +13,8 @@ heading becomes the version and date.
 
 ### Added
 
+- **Several media servers at once** (Settings → Media Management → Media Server): add Plex, Jellyfin and Subsonic servers such as Navidrome side by side. Each server has its own switches for refreshing after imports, pushing playlists, importing users and reading play history, and you pick which Plex server people sign in with. A server you saved before shows up in the list on its own.
+- Playlists go to every server that has **Push playlists** on. Under **Servers** on a playlist you can keep it off a server and see how many songs each server matched.
 - **Wrong files** in Library tools: checks every file's audio with AcoustID and lists files that hold a different song from the one they're filed as. Move each one to the song it really is, or delete it. The first check listens to every file (about 100 a minute) and can take several hours for a large library; you can close the window while it runs, and later checks only look at new or changed files. It works like Rename Files: the list is split into a different song and a different version (a remix or remaster AcoustID can't always tell apart), Select safe only picks the clear mix-ups, and you can relink or delete many files at once.
 - **Name compilations by series or label** (Settings → Media Management): compilations kept under Various Artists get their series, film or game, or record label as album artist instead (UKF Drum & Bass, Rocky IV, OWSLA). Each song keeps its own artist and MusicBrainz IDs, and folders don't change. The Various Artists MusicBrainz ID is removed from these albums so players like Plex don't show them as Various Artists. Run Retag to apply.
 - When a requested song downloads but isn't on any album in your library (a bonus track from a reissue, for example), TrackSeerr looks it up on MusicBrainz, adds it to the right album and imports it, instead of leaving it for a manual import. Songs already waiting for a manual import get one try after you update.
@@ -104,6 +106,7 @@ heading becomes the version and date.
 
 ### Changed
 
+- Plex can now be added in Settings as well as with `PLEX_URL` and `PLEX_TOKEN`.
 - **Suggested** in Not on MusicBrainz only lists matches that are at least 60% sure, and no longer suggests a Various Artists compilation or DJ mix unless the album's title matches it, so applying suggestions doesn't move songs back under Various Artists. Select sure only and the boxes ticked when the list opens now start at 70%. Find match still shows every option.
 - **Duplicates** and **Not on MusicBrainz** in Library tools now look and work like Rename Files: filter chips, Select all / Select safe only (sure matches for MusicBrainz), a selected count, and the action buttons at the bottom. Duplicates can now keep the better quality copy, or both copies, for many albums at once.
 - On phones, the lists in Library tools (Rename Files, Retag, Wrong files, Duplicates, Not on MusicBrainz) now fill the screen instead of stopping halfway. **Find match** shows each possible match on one short line with how sure it is, how many of your songs it found, and how many tracks the release has; the reasons and track list are under **Show details**.
