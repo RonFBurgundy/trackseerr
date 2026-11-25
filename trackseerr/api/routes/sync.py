@@ -357,7 +357,9 @@ class SyncState:
         pl_id = pl["id"]
         # Target users only matter for pushing to a media server; without targets (or without a
         # media server) the playlist is still matched against the native library.
-        no_media_server = config.media_server_type == MEDIA_SERVER_NONE
+        from trackseerr.media_servers import registry
+
+        no_media_server = not registry.has_servers(config)
         target_usernames = [] if no_media_server else self._resolve_targets(db, pl)
         push = bool(target_usernames)
 

@@ -419,19 +419,40 @@ def login_server(config: Optional[Config] = None) -> Optional[tuple[ServerRecord
     return None
 
 
-def primary_server(config: Optional[Config] = None) -> Optional[tuple[ServerRecord, MediaServer]]:
-    """Return the primary server: the login server (never falling back on outage), else first buildable enabled."""
+def primary_record(config: Optional[Config] = None) -> Optional[ServerRecord]:
+    """Return the primary ``ServerRecord`` (enabled login record, else first enabled record) without building an adapter."""
     recs = records(config)
     for rec in recs:
         if rec.enabled and rec.is_login:
-            adapter = build_adapter(rec)
-            return (rec, adapter) if adapter is not None else None
+            return rec
     for rec in recs:
-        if not rec.enabled:
-            continue
+        if rec.enabled:
+            return rec
+    return None
+
+
+def login_plex_record(config: Optional[Config] = None) -> Optional[ServerRecord]:
+    """Return the enabled login ``ServerRecord`` when its kind is Plex, else None."""
+    for rec in records(config):
+        if rec.enabled and rec.is_login and rec.kind == MEDIA_SERVER_PLEX:
+            return rec
+    return None
+
+
+def primary_server(config: Optional[Config] = None) -> Optional[tuple[ServerRecord, MediaServer]]:
+    """Return the primary server: the login server (never falling back on outage), else first buildable enabled."""
+    rec = primary_record(config)
+    if rec is None:
+        return None
+    if rec.is_login:
         adapter = build_adapter(rec)
+        return (rec, adapter) if adapter is not None else None
+    for r in records(config):
+        if not r.enabled:
+            continue
+        adapter = build_adapter(r)
         if adapter is not None:
-            return (rec, adapter)
+            return (r, adapter)
     return None
 
 
@@ -476,9 +497,11 @@ __all__ = [
     "has_servers",
     "install",
     "load_records",
+    "login_plex_record",
     "login_server",
     "media_servers",
     "plex_login_client",
+    "primary_record",
     "primary_server",
     "records",
     "reload",

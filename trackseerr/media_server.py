@@ -14,8 +14,8 @@ from typing import Any, Callable, Optional
 from fastapi.responses import JSONResponse
 from starlette.requests import Request
 
-from trackseerr.config import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
-from trackseerr.media_servers import MediaServerUnavailable, capabilities_for
+from trackseerr.config import MEDIA_SERVER_NONE, Config
+from trackseerr.media_servers import MediaServerUnavailable, capabilities_for, registry
 from trackseerr.redaction import safe_exc
 
 logger = logging.getLogger(__name__)
@@ -61,17 +61,13 @@ def _run_probe(key: tuple[str, str], connect: Callable[[], Optional[Any]]) -> No
             _probe_inflight.discard(key)
 
 
-def _plex_reachable(config: Config, connect: Callable[[], Optional[Any]]) -> bool:
-    """Whether Plex answers, cached for ``_PROBE_TTL_SECONDS``. The status endpoint is unauthenticated, so it must
-    never block on Plex: one caller starts a background refresh and waits at most ``_PROBE_TIMEOUT_SECONDS`` for
-    it; every other caller gets the cached (possibly stale) value immediately. With no cache yet, they get False."""
-    view = config.media_server_view()  # one snapshot: a settings save must not mix its URL with the old credentials
-    if config.media_server_type == MEDIA_SERVER_SUBSONIC:
-        key = (f"subsonic:{view.subsonic_url}", f"{view.subsonic_user}:{view.subsonic_password}:{view.subsonic_api_key}")
-    elif config.media_server_type == MEDIA_SERVER_JELLYFIN:
-        key = (f"jellyfin:{view.jellyfin_url}", f"{view.jellyfin_user}:{view.jellyfin_api_key}")
-    else:
-        key = (config.plex_url, config.plex_token)
+def _server_reachable(config: Config, connect: Callable[[], Optional[Any]]) -> bool:
+    """Whether the primary media server answers, cached for ``_PROBE_TTL_SECONDS``. The status endpoint is
+    unauthenticated, so it must never block on the server: one caller starts a background refresh and waits at most
+    ``_PROBE_TIMEOUT_SECONDS`` for it; every other caller gets the cached (possibly stale) value immediately. With no
+    cache yet, they get False."""
+    rec = registry.primary_record(config)
+    key = (f"{rec.kind}:{rec.url}", f"{rec.username}:{rec.password}:{rec.api_key}") if rec is not None else ("", "")
     with _probe_lock:
         hit = _probe_cache.get(key)
         if hit is not None and time.monotonic() - hit[0] < _PROBE_TTL_SECONDS:
@@ -92,9 +88,10 @@ def media_server_status(config: Config, connect: Callable[[], Optional[Any]]) ->
 
     ``connect`` returns a connected client or None; it is only called when a media server is configured.
     """
-    server_type = config.media_server_type
-    has_server = server_type != MEDIA_SERVER_NONE
-    connected = has_server and _plex_reachable(config, connect)
+    rec = registry.primary_record(config)
+    server_type = rec.kind if rec else MEDIA_SERVER_NONE
+    has_server = rec is not None
+    connected = has_server and _server_reachable(config, connect)
     return {
         "type": server_type,
         "connected": connected,

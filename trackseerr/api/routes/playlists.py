@@ -1035,7 +1035,7 @@ def _sync_stored_playlist(
                 db.record_sync_result(playlist_id, status="error")
             else:
                 _apply_missing_in_background(db, config, playlist_id)
-    elif config.media_server_type == MEDIA_SERVER_NONE and model_tracks:
+    elif model_tracks and not __import__("trackseerr.media_servers", fromlist=["registry"]).registry.has_servers(config):
         # No media server: nothing to push, but the playlist is still matched against the native library so its
         # missing tracks feed monitoring / wanted.
         try:

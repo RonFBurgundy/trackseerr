@@ -610,3 +610,49 @@ def test_prepare_core_reloads_registry_and_reconnect_replaces_client(
     assert isinstance(clients.plex, _FakeAdapter)
     assert clients.plex is not old_plex_client
     assert any("Media server settings changed: now using My Navidrome" in r.getMessage() for r in caplog.records)
+
+
+def test_primary_record_does_not_build(monkeypatch: pytest.MonkeyPatch) -> None:
+    def boom(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("adapter should not be built")
+
+    monkeypatch.setattr(registry, "build_adapter", boom)
+    sub = registry.ServerRecord(
+        id="s1", kind="subsonic", name="S1", source="settings", url=URL, username="u", password="p", enabled=True
+    )
+    plex_login = registry.ServerRecord(
+        id="p1", kind="plex", name="P1", source="settings", url=URL, api_key="tok", enabled=True, is_login=True
+    )
+    disabled_login = registry.ServerRecord(
+        id="p0", kind="plex", name="P0", source="settings", url=URL, api_key="tok", enabled=False, is_login=True
+    )
+
+    registry.install([disabled_login, sub, plex_login])
+    assert registry.primary_record() == plex_login
+
+    registry.install([disabled_login, sub])
+    assert registry.primary_record() == sub
+
+    registry.install([disabled_login])
+    assert registry.primary_record() is None
+
+
+def test_login_plex_record() -> None:
+    sub_login = registry.ServerRecord(
+        id="s1", kind="subsonic", name="S1", source="settings", url=URL, username="u", password="p", enabled=True, is_login=True
+    )
+    plex_login = registry.ServerRecord(
+        id="p1", kind="plex", name="P1", source="settings", url=URL, api_key="tok", enabled=True, is_login=True
+    )
+    plex_disabled = registry.ServerRecord(
+        id="p2", kind="plex", name="P2", source="settings", url=URL, api_key="tok", enabled=False, is_login=True
+    )
+
+    registry.install([sub_login])
+    assert registry.login_plex_record() is None
+
+    registry.install([plex_disabled])
+    assert registry.login_plex_record() is None
+
+    registry.install([sub_login, plex_login])
+    assert registry.login_plex_record() == plex_login
