@@ -227,11 +227,7 @@ export function useWrongFiles(enabled: boolean): UseWrongFilesReturn {
 
   const selectSafe = useCallback((): void => {
     setSelectedIds(
-      new Set(
-        items
-          .filter((item) => item.kind === 'different_song' && Boolean(item.actual_track_id))
-          .map((item) => item.file_id)
-      )
+      new Set(items.filter((item) => item.safe).map((item) => item.file_id))
     );
   }, [items]);
 
