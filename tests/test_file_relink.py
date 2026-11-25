@@ -317,8 +317,8 @@ def test_batch_relink_real_conflict_still_conflicts(test_db, env):
     assert [r["id"] for r in test_db.list_library_files_for_track("trk-2")] == ["fl-2"]
 
 
-def test_batch_relink_two_items_same_target_still_conflict(test_db, env):
-    _, root, _ = env
+def test_batch_relink_two_files_same_target_are_refused(test_db, env):
+    _, root, bin_dir = env
     _three(test_db, root)
     test_db.delete_library_file("fl-2")
     res = relink_files(
@@ -327,10 +327,18 @@ def test_batch_relink_two_items_same_target_still_conflict(test_db, env):
             {"file_id": "fl-1", "target_track_id": "trk-2"},
             {"file_id": "fl-3", "target_track_id": "trk-2"},
         ],
-        conflict="skip",
+        conflict="prefer_quality",
     )
-    assert res["relinked"] == 1
-    assert res["conflicts_skipped"] == 1
-    assert res["results"][0]["status"] == "relinked"
-    assert res["results"][1]["status"] == "conflict_skipped"
-    assert [r["id"] for r in test_db.list_library_files_for_track("trk-2")] == ["fl-1"]
+    assert res["relinked"] == 0
+    assert res["conflicts_skipped"] == 0
+    assert res["errors"] == 0
+    assert res["ambiguous"] == 2
+    assert [r["status"] for r in res["results"]] == ["ambiguous_target", "ambiguous_target"]
+    assert all(
+        r["message"] == "More than one selected file points at this song — relink them one at a time"
+        for r in res["results"]
+    )
+    assert _recycled(bin_dir) == []
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-1")] == ["fl-1"]
+    assert test_db.list_library_files_for_track("trk-2") == []
+    assert [r["id"] for r in test_db.list_library_files_for_track("trk-3")] == ["fl-3"]

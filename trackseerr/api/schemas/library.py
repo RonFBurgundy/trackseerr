@@ -814,6 +814,7 @@ class RenameRelinkBatchResponse(ApiModel):
     relinked: int
     conflicts_skipped: int
     errors: int
+    ambiguous: int = 0
 
 
 # -------------------------------------------------------------------------------------------------------- retag

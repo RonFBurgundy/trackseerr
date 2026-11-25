@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import functools
 import logging
+from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 LOSSLESS_CODECS = frozenset({"FLAC", "ALAC", "WAV", "AIFF", "APE", "WV"})
 CONFLICT_CHOICES = frozenset({"keep_incoming", "keep_existing", "prefer_quality"})
 SOURCE = "Relink"
+_AMBIGUOUS_TARGET_MESSAGE = "More than one selected file points at this song — relink them one at a time"
 
 
 class RelinkConflict(Exception):
@@ -158,11 +160,13 @@ def _item_ids(item: Any) -> tuple[str, str]:
     return str(file_id), str(target_track_id)
 
 
-def _moving_file_ids(db: Any, items: list[Any]) -> set[str]:
-    """IDs of batch files whose target track differs from their current track."""
+def _moving_file_ids(db: Any, items: list[Any], ambiguous_targets: set[str]) -> set[str]:
+    """IDs of batch files whose target track differs from their current track and is not ambiguous."""
     moving: set[str] = set()
     for item in items:
         file_id, target_track_id = _item_ids(item)
+        if target_track_id in ambiguous_targets:
+            continue
         row = db.get_library_file(file_id)
         if row and str(row["track_id"]) != target_track_id:
             moving.add(file_id)
@@ -183,13 +187,25 @@ def relink_files(
     relinked_count = 0
     swaps_count = 0
     conflicts_skipped_count = 0
+    ambiguous_count = 0
     errors_count = 0
 
+    target_counts = Counter(_item_ids(item)[1] for item in items)
+    ambiguous_targets = {tid for tid, count in target_counts.items() if count > 1}
     per_file_conflict = None if conflict == "skip" else conflict
-    still_moving = _moving_file_ids(db, items)
+    still_moving = _moving_file_ids(db, items, ambiguous_targets)
 
     for item in items:
         file_id, target_track_id = _item_ids(item)
+        if target_track_id in ambiguous_targets:
+            results.append({
+                "file_id": file_id,
+                "status": "ambiguous_target",
+                "message": _AMBIGUOUS_TARGET_MESSAGE,
+            })
+            ambiguous_count += 1
+            continue
+
         ignore_ids = frozenset(still_moving - {file_id})
         had_moving_occupant = any(str(r["id"]) in ignore_ids for r in db.list_library_files_for_track(target_track_id))
         res_entry: dict[str, Any] = {"file_id": file_id}
@@ -215,13 +231,14 @@ def relink_files(
         results.append(res_entry)
 
     logger.info(
-        "Batch relink: %d relinked, %d swaps inside the batch, %d conflicts skipped, %d errors",
-        relinked_count, swaps_count, conflicts_skipped_count, errors_count,
+        "Batch relink: %d relinked, %d swaps inside the batch, %d conflicts skipped, %d ambiguous, %d errors",
+        relinked_count, swaps_count, conflicts_skipped_count, ambiguous_count, errors_count,
     )
     return {
         "results": results,
         "relinked": relinked_count,
         "conflicts_skipped": conflicts_skipped_count,
         "errors": errors_count,
+        "ambiguous": ambiguous_count,
     }
 

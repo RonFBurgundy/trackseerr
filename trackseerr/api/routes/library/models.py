@@ -239,6 +239,9 @@ class WrongFileItem(ApiModel):
     actual_artist_name: Optional[str] = None
     score: Optional[float] = None
     kind: Literal["different_song", "different_version"]
+    claimed_by_others: int = 0
+    album_is_mix: bool = False
+    safe: bool = False
 
 
 class WrongFilesResponse(ApiModel):
@@ -246,6 +249,7 @@ class WrongFilesResponse(ApiModel):
     total: int
     different_song: int
     different_version: int
+    safe_count: int = 0
     checked: int
     library_files: int
 
