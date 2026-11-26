@@ -523,10 +523,19 @@ class JellyfinMediaServer(MediaServer):
         if isrc_match is not None:
             return isrc_match
         if skip_search:
-            title = norm_title(track.title.replace("$", "s")) or (
-                "" if is_censored(track.title) else clean_library_name(track.title)
+            cleaned = clean_title(track.title)
+            normed = norm_title(cleaned.replace("$", "s")) or (
+                "" if is_censored(track.title) else clean_library_name(cleaned)
             )
-            return self._search_and_pick(track, title, threshold) if title else None
+            queries: list[str] = [normed] if normed else []
+            raw_norm = "" if is_censored(track.title) else clean_library_name(track.title)
+            if raw_norm and raw_norm != normed:
+                queries.append(raw_norm)
+            for query in dict.fromkeys(q for q in queries if q):
+                match = self._search_and_pick(track, query, threshold)
+                if match is not None:
+                    return match
+            return None
         fuzzy = self._search_fuzzy(track, threshold)
         if fuzzy is not None:
             return fuzzy
@@ -851,7 +860,7 @@ class JellyfinMediaServer(MediaServer):
                 {
                     "id": pid,
                     "title": str(p.get("Name") or ""),
-                    "owner": str(p.get("Owner") or ""),
+                    "owner": str(p.get("Owner") or resolved.name),
                     "track_count": track_count,
                 }
             )
@@ -950,7 +959,7 @@ class JellyfinMediaServer(MediaServer):
         for name in names:
             user = self._resolve_user(name, users)
             if user is None:
-                who = f"'{name}'" if name else "the default account (set JELLYFIN_USER)"
+                who = name if name else "the default account (set JELLYFIN_USER)"
                 results.append(
                     SyncResult(
                         playlist.name,
@@ -958,8 +967,9 @@ class JellyfinMediaServer(MediaServer):
                         len(matched),
                         len(missing),
                         False,
-                        f"Jellyfin user {who} not found",
+                        f"No Jellyfin account for {who}",
                         missing=list(missing),
+                        skipped=True,
                     )
                 )
                 continue

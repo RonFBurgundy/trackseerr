@@ -48,7 +48,7 @@ _CLEAN_TAG_RE = re.compile(
     re.IGNORECASE,
 )
 _CLEAN_TRAIL_RE = re.compile(
-    r"\s*-\s*(remastered|remaster|live|deluxe|radio edit|mono|stereo).*$",
+    r"\s*-\s*(?:\d{4}\s+)?(remastered|remaster|live|deluxe|radio edit|mono|stereo).*$",
     re.IGNORECASE,
 )
 _CLEAN_BRACKET_RE = re.compile(r"[\(\[].*?[\)\]]")

@@ -593,3 +593,114 @@ def test_library_pin_maps_by_path_tail_even_with_skip_search(adapter: str, tmp_p
     finally:
         db.close()
 
+
+def test_resolve_playlist_library_hits_retries_clean_title_and_first_artist(tmp_path: Path) -> None:
+    """Featured-artist and remaster-suffix tracks in the native library are not marked ``library_missing``."""
+    from trackseerr.native_match import resolve_playlist_library_hits
+
+    db = Database(str(tmp_path / "native.db"))
+    try:
+        _seed_library_track(
+            db,
+            track_id="trk-1",
+            title="Song One",
+            artist="Artist A",
+            album="Album 1",
+            file_path="/music/Artist A/Album 1/01 Song One.flac",
+        )
+        _seed_library_track(
+            db,
+            track_id="trk-2",
+            title="Song Two",
+            artist="Artist B",
+            album="Album 2",
+            file_path="/music/Artist B/Album 2/02 Song Two.flac",
+        )
+        tracks = [
+            Track("Song One (feat. Guest)", "Artist A feat. Guest", "Album 1"),
+            Track("Song Two - 2011 Remaster", "Artist B & Friend", "Album 2"),
+        ]
+        hits, missing = resolve_playlist_library_hits(db, tracks)
+        assert missing == set()
+        assert set(hits.keys()) == {0, 1}
+        assert hits[0].track_id == "trk-1"
+        assert hits[1].track_id == "trk-2"
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("adapter", ["subsonic", "jellyfin", "plex"])
+def test_skip_search_matches_featured_and_remaster_songs(adapter: str, tmp_path: Path) -> None:
+    """Featured-artist and remaster-suffix songs in the library match with ``skip_search=True`` in <= 2 searches."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from trackseerr.clients.plex import PlexClient
+    from trackseerr.media_servers.plex import PlexMediaServer
+
+    tracks = [
+        Track("Song One (feat. Guest)", "Artist A feat. Guest", "Album 1"),
+        Track("Song Two - 2011 Remaster", "Artist B", "Album 2"),
+    ]
+    pl = Playlist(id="pl-feat-remaster", name="Feat & Remaster", tracks=tracks)
+    opts = PlaylistSyncOptions(data_dir=str(tmp_path), library_missing={0, 1})
+
+    if adapter == "plex":
+        lib_items = {
+            "Song One": SimpleNamespace(
+                ratingKey=101,
+                title="Song One",
+                grandparentTitle="Artist A",
+                parentTitle="Album 1",
+                originalTitle="",
+                type="track",
+                duration=200000,
+                media=[],
+            ),
+            "Song Two": SimpleNamespace(
+                ratingKey=102,
+                title="Song Two",
+                grandparentTitle="Artist B",
+                parentTitle="Album 2",
+                originalTitle="",
+                type="track",
+                duration=210000,
+                media=[],
+            ),
+        }
+        admin_server = MagicMock()
+        admin_server.myPlexAccount.return_value = SimpleNamespace(username="admin", id=1, email="", thumb="", users=lambda: [])
+        admin_server.search.side_effect = lambda q, **kwargs: [lib_items[q]] if q in lib_items else []
+        with patch("trackseerr.clients.plex.PlexServer"):
+            client = PlexClient("http://localhost:32400", "token")
+        client.server = admin_server
+        server: MediaServer = PlexMediaServer(client)
+        results = server.sync_playlist(pl, [], opts)
+        assert results[0].matched_tracks == 2
+        assert results[0].missing_tracks == 0
+        assert admin_server.search.call_count <= 4
+    elif adapter == "subsonic":
+        server, fake = _make_server(
+            adapter,
+            [
+                ("Song One", "Artist A", "Album 1", "", ()),
+                ("Song Two", "Artist B", "Album 2", "", ()),
+            ],
+        )
+        results = server.sync_playlist(pl, ["admin"], opts)
+        assert results[0].matched_tracks == 2
+        assert results[0].missing_tracks == 0
+        assert len([ep for ep, _ in fake.state.calls if ep == "search3"]) <= 4
+    else:
+        server, fake = _make_server(
+            adapter,
+            [
+                ("Song One", "Artist A", "Album 1", "", ()),
+                ("Song Two", "Artist B", "Album 2", "", ()),
+            ],
+        )
+        results = server.sync_playlist(pl, ["admin"], opts)
+        assert results[0].matched_tracks == 2
+        assert results[0].missing_tracks == 0
+        assert len([p for _, p, q in fake.state.calls if p == "/Items" and q.get("IncludeItemTypes") == "Audio"]) <= 4
+
+

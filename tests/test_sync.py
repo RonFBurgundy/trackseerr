@@ -1565,3 +1565,50 @@ def test_dispatch_server_push_maps_linked_usernames_for_plex_and_jellyfin() -> N
         db.close()
 
 
+
+
+def test_plex_sync_skips_missing_account_and_fails_on_connection_error() -> None:
+    """Missing Plex account yields skipped=True; real connection errors stay failed."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+    import requests
+    from plexapi.exceptions import NotFound
+    from trackseerr.clients.plex import PlexClient
+    from trackseerr.models import Playlist, Track
+
+    admin_server = MagicMock()
+    admin_server.myPlexAccount.return_value = SimpleNamespace(username="admin", id=1, email="", thumb="", users=lambda: [])
+    plex_item = SimpleNamespace(
+        ratingKey=1,
+        title="Song A",
+        grandparentTitle="Artist A",
+        parentTitle="Album 1",
+        originalTitle="",
+        type="track",
+        duration=200000,
+        media=[],
+    )
+    admin_server.search.return_value = [plex_item]
+    with patch("trackseerr.clients.plex.PlexServer"):
+        client = PlexClient("http://localhost:32400", "token")
+    client.server = admin_server
+
+    pl = Playlist(id="pl-plex-skip", name="Plex Skip", tracks=[Track("Song A", "Artist A", "Album 1")])
+
+    def _fake_get_user_server(username: str, admin_username: str | None = None):
+        if username == "noaccount":
+            raise NotFound(f"Unable to find user {username}")
+        raise requests.exceptions.ConnectionError("plex.tv unreachable")
+
+    client.get_user_server = _fake_get_user_server  # type: ignore[method-assign]
+    results = client.sync_playlist_to_users(pl, ["noaccount", "connerr"])
+    assert len(results) == 2
+    assert results[0].skipped is True
+    assert results[0].success is False
+    assert "No Plex account for noaccount" in results[0].error
+    assert results[1].skipped is False
+    assert results[1].success is False
+    assert "ConnectionError" in results[1].error
+
+
+
