@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { DownloadCloud } from 'lucide-react';
+import { Copy, DownloadCloud, Loader2 } from 'lucide-react';
 import type { Schema } from '@/types/apiSchema';
+import type { User } from '@/types/models';
 import type { ServerPlaylistSummary, ServerPlaylistTrack } from '@/types/mediaServer';
 import { ObsidianModal, TapeDeckButton, CassetteLoader } from '@/components/ui';
 
@@ -8,32 +9,60 @@ export interface ServerPlaylistDetailModalProps {
   playlist: ServerPlaylistSummary | null;
   serverName: string;
   selectedUser?: string;
+  users: User[];
   items: ServerPlaylistTrack[];
   isItemsLoading: boolean;
   isMutating: boolean;
   onClose: () => void;
   onAdopt: (playlist: ServerPlaylistSummary) => Promise<Schema<'PlaylistRecord'> | null>;
+  onSetTargets: (playlistId: string, userIds: string[]) => Promise<boolean>;
 }
 
 const ADOPTED_BADGE =
   'px-2 py-0.5 rounded-[2px] border text-[10px] font-mono uppercase tracking-wide bg-[#22c55e]/10 border-[#22c55e]/40 text-[#22c55e]';
 
-interface BodyProps extends Omit<ServerPlaylistDetailModalProps, 'playlist' | 'onClose' | 'serverName' | 'selectedUser'> {
+interface BodyProps extends Omit<ServerPlaylistDetailModalProps, 'playlist' | 'onClose' | 'serverName'> {
   playlist: ServerPlaylistSummary;
 }
 
 const DetailBody: React.FC<BodyProps> = ({
   playlist,
+  selectedUser,
+  users,
   items,
   isItemsLoading,
   isMutating,
   onAdopt,
+  onSetTargets,
 }) => {
   const [adoptMessage, setAdoptMessage] = useState<string | null>(null);
+  const [targetUserIds, setTargetUserIds] = useState<string[]>([]);
+  const [targetsSavedMessage, setTargetsSavedMessage] = useState<string | null>(null);
+
+  const sourceOwner = (playlist.owner || selectedUser || '').toLowerCase();
+  const copyCandidates = sourceOwner
+    ? users.filter((u) => u.username.toLowerCase() !== sourceOwner)
+    : users;
+
+  const toggleTarget = (userId: string) => {
+    setTargetsSavedMessage(null);
+    setTargetUserIds((prev) => (prev.includes(userId) ? prev.filter((id) => id !== userId) : [...prev, userId]));
+  };
 
   const handleAdopt = async () => {
     const created = await onAdopt(playlist);
-    setAdoptMessage(created ? 'Adopted into TrackSeerr.' : null);
+    if (created) {
+      setAdoptMessage('Adopted into TrackSeerr.');
+      setTargetUserIds(created.targets ?? []);
+    } else {
+      setAdoptMessage(null);
+    }
+  };
+
+  const handleSaveTargets = async () => {
+    if (!playlist.adopted_playlist_id) return;
+    const saved = await onSetTargets(playlist.adopted_playlist_id, targetUserIds);
+    setTargetsSavedMessage(saved ? 'Target users updated.' : null);
   };
 
   return (
@@ -98,6 +127,51 @@ const DetailBody: React.FC<BodyProps> = ({
       {adoptMessage && playlist.adopted_playlist_id && (
         <p className="text-xs text-[#22c55e] font-mono">{adoptMessage}</p>
       )}
+
+      {/* Copy to users (after adopt) */}
+      {playlist.adopted_playlist_id && (
+        <div className="space-y-2 pt-3 border-t border-[#1f1f1f]">
+          <span className="text-[10px] uppercase tracking-wider text-neutral-400 font-mono">Copy to users</span>
+          {copyCandidates.length === 0 ? (
+            <p className="text-[11px] text-neutral-500 font-mono">No other users available.</p>
+          ) : (
+            <div className="flex flex-wrap gap-1.5">
+              {copyCandidates.map((u) => {
+                const on = targetUserIds.includes(u.id);
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => toggleTarget(u.id)}
+                    className={`px-2.5 py-2 min-h-[36px] sm:min-h-0 sm:py-1 rounded-[3px] text-xs font-mono transition-all ${
+                      on
+                        ? 'bg-[#e5a00d]/20 border border-[#e5a00d] text-[#e5a00d]'
+                        : 'bg-[#121212] border border-[#222222] text-neutral-500 hover:text-neutral-300'
+                    }`}
+                  >
+                    {u.username}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          <TapeDeckButton
+            size="sm"
+            variant="amber"
+            disabled={isMutating || targetUserIds.length === 0}
+            onClick={() => void handleSaveTargets()}
+            icon={
+              isMutating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Copy className="h-3.5 w-3.5" />
+            }
+          >
+            Copy to users
+          </TapeDeckButton>
+          {targetsSavedMessage && (
+            <p className="text-xs text-[#22c55e] font-mono">{targetsSavedMessage}</p>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -115,6 +189,6 @@ export const ServerPlaylistDetailModal: React.FC<ServerPlaylistDetailModalProps>
     title={playlist?.title ?? 'Playlist'}
     subtitle={playlist ? `${serverName}${selectedUser ? ` \u00b7 ${selectedUser}` : ''}` : undefined}
   >
-    {playlist && <DetailBody key={playlist.id} playlist={playlist} {...rest} />}
+    {playlist && <DetailBody key={playlist.id} playlist={playlist} selectedUser={selectedUser} {...rest} />}
   </ObsidianModal>
 );

@@ -101,6 +101,7 @@ class MigrationsMixin:
                 (111, self._migration_v111),
                 (112, self._migration_v112),
                 (113, self._migration_v113),
+                (114, self._migration_v114),
             ]
 
             applied = 0
@@ -537,6 +538,20 @@ class MigrationsMixin:
                 user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
                 server_playlist_id TEXT NOT NULL,
                 PRIMARY KEY (playlist_id, server_id, user_id)
+            )
+            """
+        )
+
+    def _migration_v114(self, cur: sqlite3.Cursor) -> None:
+        """v114: drop adoption-added source server excludes now that sync skips only the source owner."""
+        cur.execute(
+            """
+            DELETE FROM playlist_server_excludes
+            WHERE EXISTS (
+                SELECT 1
+                FROM server_playlist_sources s
+                WHERE s.playlist_id = playlist_server_excludes.playlist_id
+                  AND s.server_id = playlist_server_excludes.server_id
             )
             """
         )

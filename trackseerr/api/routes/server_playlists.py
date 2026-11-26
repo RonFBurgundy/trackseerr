@@ -133,10 +133,8 @@ def adopt_server_playlist(
         forced_mode = initial_monitor_mode_forced(current_user)
         if forced_mode is not None:
             db.set_playlist_monitor_mode(playlist_id, forced_mode)
-    db.set_server_playlist_source(playlist_id, server_id, pid, (user or "").strip())
-    excludes = db.get_playlist_server_excludes(playlist_id)
-    excludes.add(server_id)
-    db.set_playlist_server_excludes(playlist_id, sorted(excludes))
+    server_user = (user or str(source_pl.get("owner") or "")).strip()
+    db.set_server_playlist_source(playlist_id, server_id, pid, server_user)
 
     created = db.get_playlist(playlist_id)
     if created is None:
