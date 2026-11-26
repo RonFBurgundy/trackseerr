@@ -211,6 +211,13 @@ def test_search_tracks_shape_and_limit():
     assert server.search_tracks("  ") == []
 
 
+def test_search_requests_path_field():
+    server, fake, _ = make()
+    server.match_track(Track("Song A", "Artist 1", "Album X"))
+    item_calls = [q for m, p, q in fake.state.calls if m == "GET" and p == "/Items" and q.get("IncludeItemTypes") == "Audio"]
+    assert item_calls and all("Path" in q.get("Fields", "") for q in item_calls)
+
+
 # ----------------------------------------------------------------------------- ordering
 
 

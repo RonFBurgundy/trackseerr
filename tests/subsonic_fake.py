@@ -41,6 +41,8 @@ class FakeSong:
     artist: str
     album: str
     duration: int = 200
+    path: str = ""
+    artists: tuple[str, ...] = ()
 
 
 @dataclass
@@ -158,7 +160,7 @@ class FakeSubsonic:
         return {}
 
     def _song_json(self, s: FakeSong) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "id": s.id,
             "title": s.title,
             "artist": s.artist,
@@ -167,6 +169,11 @@ class FakeSubsonic:
             "isDir": False,
             "type": "music",
         }
+        if s.path:
+            out["path"] = s.path
+        if s.artists:
+            out["artists"] = [{"name": a} for a in s.artists]
+        return out
 
     def _ep_search3(self, user: FakeUser, params: list[tuple[str, str]]) -> dict[str, Any]:
         p = dict(params)
@@ -175,7 +182,8 @@ class FakeSubsonic:
         offset = int(p.get("songOffset", "0"))
         # Like Navidrome's full-text search: every query word must prefix a word of title / artist / album.
         def _tokens(song: FakeSong) -> list[str]:
-            return re.findall(r"\w+", f"{song.title} {song.artist} {song.album}".lower())
+            extra = " ".join(song.artists)
+            return re.findall(r"\w+", f"{song.title} {song.artist} {extra} {song.album}".lower())
 
         hits = [s for s in self.state.songs if all(any(t.startswith(w) for t in _tokens(s)) for w in words)]
         page = hits[offset : offset + count]
