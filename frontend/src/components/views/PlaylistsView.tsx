@@ -379,10 +379,16 @@ const SyncServersSection: React.FC<SyncServersSectionProps> = ({
             <div className="space-y-0.5">
               {serverStates.map((st) => {
                 const name = serverNames.get(st.server_id) ?? st.server_id;
-                const isError = st.status === 'error' || Boolean(st.error);
-                const text = isError
-                  ? `${name}: failed — ${st.error || st.status}`
-                  : `${name}: ${st.matched ?? 0} matched, ${st.missing ?? 0} missing`;
+                const isSkipped = st.status === 'skipped';
+                const isError =
+                  !isSkipped && (st.status === 'error' || st.status === 'failed' || Boolean(st.error));
+                const text = isSkipped
+                  ? st.error
+                    ? `${name}: skipped — ${st.error}`
+                    : `${name}: skipped`
+                  : isError
+                    ? `${name}: failed — ${st.error || st.status}`
+                    : `${name}: ${st.matched ?? 0} matched, ${st.missing ?? 0} missing`;
                 return (
                   <p
                     key={st.server_id}

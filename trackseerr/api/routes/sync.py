@@ -264,6 +264,27 @@ def _filter_adopted_source_owner(
     return kept, skipped_results
 
 
+def _map_linked_server_usernames(
+    db: Database,
+    rec: ServerRecord,
+    target_usernames: list[str],
+) -> list[str]:
+    """Map each Trackseerr target username to its linked ``server_username`` on ``rec``, if any."""
+    users_by_name = {
+        str(u.get("username") or "").strip().lower(): u
+        for u in db.list_users()
+        if u.get("username")
+    }
+    mapped: list[str] = []
+    for name in target_usernames:
+        cleaned = str(name or "").strip()
+        user = users_by_name.get(cleaned.lower()) if cleaned else None
+        link = db.get_server_user_link(user["id"], rec.id) if user is not None else None
+        linked_name = str(link.get("server_username") or "").strip() if link is not None else ""
+        mapped.append(linked_name or name)
+    return mapped
+
+
 def _dispatch_server_push(
     db: Database,
     config: Config,
@@ -284,7 +305,12 @@ def _dispatch_server_push(
             db, config, rec, adapter, model_playlist, filtered_targets, options
         )
     else:
-        pushed = list(adapter.sync_playlist(model_playlist, filtered_targets, options))
+        targets = (
+            _map_linked_server_usernames(db, rec, filtered_targets)
+            if rec is not None
+            else filtered_targets
+        )
+        pushed = list(adapter.sync_playlist(model_playlist, targets, options))
     return [*skipped_results, *pushed]
 
 
@@ -569,7 +595,13 @@ class SyncState:
                 results, len(model_playlist.tracks)
             )
             if server_status == "skipped":
-                db.record_sync_result(playlist_id=pl_id, status="skipped", missing_tracks=[])
+                if library_missing is not None:
+                    missing = [t for idx, t in enumerate(model_playlist.tracks) if idx in library_missing]
+                else:
+                    _, missing = match_playlist_tracks_native(db, model_playlist.tracks)
+                missing = restore_missing(missing, original_by_effective, ignored_ids)
+                db.record_sync_result(playlist_id=pl_id, status="skipped", missing_tracks=missing)
+                apply_playlist_missing_safely(db, config, pl_id)
                 return "skipped", 0, 0, error_msg
             success = server_status == "success"
             missing = restore_missing(missing, original_by_effective, ignored_ids)
@@ -758,7 +790,6 @@ class SyncState:
             stats["total_missing"] - missing_before,
         )
 
-    @tracked("playlist_sync", "Playlist Sync")
     def _set_progress(
         self, current: int, total: int, playlist_name: str, server_name: Optional[str]
     ) -> None:
@@ -773,6 +804,7 @@ class SyncState:
             current, total, playlist_name, _ = self.progress
             self._set_progress(current, total, playlist_name, server_name)
 
+    @tracked("playlist_sync", "Playlist Sync")
     def execute_sync(
         self,
         db: Database,
