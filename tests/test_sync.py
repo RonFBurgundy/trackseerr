@@ -1104,6 +1104,121 @@ def test_adopted_navidrome_playlist_shares_to_other_user_but_skips_owner(monkeyp
         db.close()
 
 
+def test_adopted_playlist_empty_server_user_backfills_owner_on_push(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_admin", "admin", "a@x")
+        db.upsert_user("u_ken", "ken", "k@x")
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={"sub-2": FakePlaylist("sub-2", "Ken Mix", "ken", ["s1"])},
+                users={
+                    "admin": FakeUser("admin", admin=True, password="pw"),
+                    "ken": FakeUser("ken", admin=False, password="pw2"),
+                },
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        pl_id = f"subsonic_{nav_id[:8]}_sub-2"
+        db.upsert_playlist(pl_id, "Ken Mix", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-2", "")
+        db.set_playlist_targets(pl_id, ["u_admin", "u_ken"])
+
+        SyncState().execute_sync(db, cfg, None, None, None)
+
+        source = db.get_server_playlist_source(pl_id)
+        assert source is not None
+        assert source["server_user"] == "ken"
+
+        created_names = [
+            dict(params).get("name")
+            for ep, params in fake.state.calls
+            if ep == "createPlaylist"
+        ]
+        assert created_names == ["Ken Mix"]
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_adopted_playlist_empty_server_user_mediaserver_error_keeps_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers import MediaServerError
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_admin", "admin", "a@x")
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={"sub-1": FakePlaylist("sub-1", "Server Own", "admin", ["s1"])},
+                users={"admin": FakeUser("admin", admin=True, password="pw")},
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+        monkeypatch.setattr(sub_adapter, "list_source_playlists", lambda user=None: (_ for _ in ()).throw(MediaServerError("boom")))
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        pl_id = f"subsonic_{nav_id[:8]}_sub-1"
+        db.upsert_playlist(pl_id, "Server Own", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-1", "")
+        db.set_playlist_targets(pl_id, ["u_admin"])
+
+        SyncState().execute_sync(db, cfg, None, None, None)
+        assert [ep for ep, _ in fake.state.calls if ep in ("createPlaylist", "updatePlaylist")] == []
+        by_server = {s["server_id"]: s for s in db.list_playlist_server_state(pl_id)}
+        assert by_server[nav_id]["status"] == "skipped"
+        assert by_server[nav_id]["error"] == "This is the original playlist"
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
 def test_adopted_playlist_empty_server_user_skips_server_account(monkeypatch: pytest.MonkeyPatch) -> None:
     from trackseerr.media_servers.subsonic import SubsonicMediaServer
     from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
@@ -1124,6 +1239,121 @@ def test_adopted_playlist_empty_server_user_skips_server_account(monkeypatch: py
             "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
         )
         monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        pl_id = f"subsonic_{nav_id[:8]}_sub-1"
+        db.upsert_playlist(pl_id, "Server Own", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-1", "")
+        db.set_playlist_targets(pl_id, ["u_admin"])
+
+        SyncState().execute_sync(db, cfg, None, None, None)
+        assert [ep for ep, _ in fake.state.calls if ep in ("createPlaylist", "updatePlaylist")] == []
+        by_server = {s["server_id"]: s for s in db.list_playlist_server_state(pl_id)}
+        assert by_server[nav_id]["status"] == "skipped"
+        assert by_server[nav_id]["error"] == "This is the original playlist"
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_adopted_playlist_empty_server_user_backfills_owner_on_push(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_admin", "admin", "a@x")
+        db.upsert_user("u_ken", "ken", "k@x")
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={"sub-2": FakePlaylist("sub-2", "Ken Mix", "ken", ["s1"])},
+                users={
+                    "admin": FakeUser("admin", admin=True, password="pw"),
+                    "ken": FakeUser("ken", admin=False, password="pw2"),
+                },
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        pl_id = f"subsonic_{nav_id[:8]}_sub-2"
+        db.upsert_playlist(pl_id, "Ken Mix", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-2", "")
+        db.set_playlist_targets(pl_id, ["u_admin", "u_ken"])
+
+        SyncState().execute_sync(db, cfg, None, None, None)
+
+        source = db.get_server_playlist_source(pl_id)
+        assert source is not None
+        assert source["server_user"] == "ken"
+
+        created_names = [
+            dict(params).get("name")
+            for ep, params in fake.state.calls
+            if ep == "createPlaylist"
+        ]
+        assert created_names == ["Ken Mix"]
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_adopted_playlist_empty_server_user_mediaserver_error_keeps_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers import MediaServerError
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_admin", "admin", "a@x")
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={"sub-1": FakePlaylist("sub-1", "Server Own", "admin", ["s1"])},
+                users={"admin": FakeUser("admin", admin=True, password="pw")},
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+        monkeypatch.setattr(sub_adapter, "list_source_playlists", lambda user=None: (_ for _ in ()).throw(MediaServerError("boom")))
 
         ids = _install_servers(
             monkeypatch,
