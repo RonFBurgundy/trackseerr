@@ -137,7 +137,7 @@ class UserStoreMixin:
             raise PermissionError("Invalid asserted user id")
         existing = self.get_user(uid)
         if existing is not None:
-            if existing.get("auth_type") == "jellyfin":
+            if existing.get("auth_type") in ("jellyfin", "subsonic"):
                 raise PermissionError("Imported media-server accounts cannot sign in")
             return existing
         name = str(username or "").strip() or uid

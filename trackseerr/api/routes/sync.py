@@ -136,14 +136,33 @@ def _playlist_servers(
     return [(None, fallback_server)] if fallback_server else []
 
 
-def _push_results_outcome(results: Sequence[SyncResult], total_tracks: int) -> tuple[bool, int, list[Track]]:
-    """Derive ``(success, matched_count, missing)`` from per-target push results."""
+def _server_push_outcome(results: Sequence[SyncResult], total_tracks: int) -> tuple[str, int, list[Track], str]:
+    """Derive ``(status, matched_count, missing, error_msg)`` from per-target push results.
+
+    ``status`` is ``"skipped"`` when every target lacked an account on the server, ``"success"`` when every target
+    with an account succeeded, and ``"failed"`` otherwise.
+    """
     if not results:
-        return False, 0, []
-    chosen = next((r for r in results if r.success), results[0])
+        return "failed", 0, [], ""
+    non_skipped = [r for r in results if not getattr(r, "skipped", False)]
+    if not non_skipped:
+        return "skipped", 0, [], ""
+    if all(r.success for r in non_skipped):
+        chosen = non_skipped[0]
+        missing = list(getattr(chosen, "missing", None) or [])
+        matched_count = max(0, total_tracks - len(missing))
+        return "success", matched_count, missing, ""
+    chosen = next((r for r in non_skipped if r.success), non_skipped[0])
     missing = list(getattr(chosen, "missing", None) or [])
     matched_count = max(0, total_tracks - len(missing))
-    return any(r.success for r in results), matched_count, missing
+    error_msg = next((r.error for r in non_skipped if not r.success and r.error), "")
+    return "failed", matched_count, missing, error_msg
+
+
+def _push_results_outcome(results: Sequence[SyncResult], total_tracks: int) -> tuple[bool, int, list[Track]]:
+    """Derive ``(success, matched_count, missing)`` from per-target push results."""
+    status, matched_count, missing, _ = _server_push_outcome(results, total_tracks)
+    return status == "success", matched_count, missing
 
 
 def _push_to_extra_server(
@@ -168,12 +187,11 @@ def _push_to_extra_server(
                 target_usernames,
                 options,
             )
-        success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
-        error_msg = "" if success else next((r.error for r in results if not r.success and r.error), "")
+        server_status, matched_count, missing, error_msg = _server_push_outcome(results, len(model_playlist.tracks))
         db.record_playlist_server_state(
             model_playlist.id,
             rec.id,
-            "success" if success else "failed",
+            server_status,
             matched=matched_count,
             missing=len(missing),
             error=error_msg,
@@ -407,7 +425,7 @@ class SyncState:
         fingerprint: str,
         server_name: str = "Plex",
         rec: Optional[ServerRecord] = None,
-    ) -> tuple[bool, int, int]:
+    ) -> tuple[str, int, int, str]:
         """Pushes a playlist to the primary media server for its target users and records the outcome."""
         pl_id = pl["id"]
         try:
@@ -422,7 +440,13 @@ class SyncState:
                     target_usernames,
                     options,
                 )
-            success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
+            server_status, matched_count, missing, error_msg = _server_push_outcome(
+                results, len(model_playlist.tracks)
+            )
+            if server_status == "skipped":
+                db.record_sync_result(playlist_id=pl_id, status="skipped", missing_tracks=[])
+                return "skipped", 0, 0, ""
+            success = server_status == "success"
             missing = restore_missing(missing, original_by_effective, ignored_ids)
             db.record_sync_result(
                 playlist_id=pl_id,
@@ -435,12 +459,13 @@ class SyncState:
                 stats["success_count"] += 1
             stats["total_matched"] += matched_count
             stats["total_missing"] += len(missing)
-            return success, matched_count, len(missing)
+            return server_status, matched_count, len(missing), error_msg
         except Exception as e:
-            logger.error("Error syncing playlist '%s' to %s: %s", pl["name"], server_name, describe_error(e))
+            detail = describe_error(e)
+            logger.error("Error syncing playlist '%s' to %s: %s", pl["name"], server_name, detail)
             logger.debug("Playlist sync traceback", exc_info=True)
             db.record_sync_result(playlist_id=pl_id, status="failed")
-            return False, 0, 0
+            return "failed", 0, 0, detail
 
     def _push_to_servers(
         self,
@@ -461,7 +486,7 @@ class SyncState:
         first_skip = skip_rating_keys if (first_rec is None or first_rec.is_login) else None
         server_name = first_rec.name if first_rec is not None else "Plex"
         self._update_progress_server(server_name)
-        success, matched_count, missing_count = self._push_playlist(
+        server_status, matched_count, missing_count, error_msg = self._push_playlist(
             db,
             config,
             first_server,
@@ -480,9 +505,10 @@ class SyncState:
             db.record_playlist_server_state(
                 pl["id"],
                 first_rec.id,
-                "success" if success else "failed",
+                server_status,
                 matched=matched_count,
                 missing=missing_count,
+                error=error_msg,
             )
         for rec, adapter in servers[1:]:
             if rec is not None:

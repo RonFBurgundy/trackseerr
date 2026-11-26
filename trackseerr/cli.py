@@ -268,25 +268,29 @@ def _apply_saved_media_server_settings(config: Config) -> None:
         db.close()
 
 
-def _discover_plex_users(db: Database, plex_client: PlexClient) -> None:
+def _discover_plex_users(db: Database, plex_client: PlexClient, server_id: Optional[str] = None) -> None:
     """Auto-discover Plex Home users and populate the database."""
     try:
         home_users = plex_client.get_home_users()
+        has_server_row = bool(server_id and db.get_media_server_row(server_id) is not None)
         for u in home_users:
             uname = u.get("username") or u.get("name") or "Unknown"
             admin_flag = bool(u.get("is_admin", u.get("admin", False)))
             if db.is_tombstoned(str(u["id"])):
                 continue  # deleted by an admin; only an explicit restore lets them back in
-            if db.import_media_server_user(
+            row = db.import_media_server_user(
                 str(u["id"]), str(uname), u.get("email"), auth_type="plex", grant_admin=admin_flag
-            ) is None:
+            )
+            if row is None:
                 logger.warning("Skipped Plex user '%s': that name already belongs to a different Trackseerr account", uname)
+            elif has_server_row and server_id is not None:
+                db.link_server_user(row["id"], server_id, str(u["id"]), str(uname), source="imported")
         logger.info("Successfully discovered %d Plex Home users", len(home_users))
     except Exception as e:  # network + plexapi + sqlite; startup must continue, root cause is logged
         logger.warning("Could not auto-discover Plex Home users on startup: %s", safe_exc(e))
 
 
-def _discover_media_server_users(db: Database, server: MediaServer) -> None:
+def _discover_media_server_users(db: Database, server: MediaServer, server_id: Optional[str] = None) -> None:
     """Populate the user table from a non-Plex media server that has real accounts (Jellyfin), so playlists can be
     targeted at them. Never raises: startup (or the Settings reconnect thread) continues when the server is unreachable
     or one account cannot be stored; the cause is logged."""
@@ -300,7 +304,7 @@ def _discover_media_server_users(db: Database, server: MediaServer) -> None:
         logger.debug("User discovery traceback", exc_info=True)
         return
     try:
-        imported, skipped = import_server_users(db, server.kind, users)
+        imported, skipped = import_server_users(db, server.kind, users, server_id=server_id)
     except Exception as exc:  # the import loop guards each account; this is the last resort for the loop itself
         logger.warning("Importing %s users failed: %s", server.kind, safe_exc(exc))
         logger.debug("User import traceback", exc_info=True)
@@ -330,13 +334,13 @@ def _discover_all_server_users(db: Database, config: Config, plex_client: Any = 
     for _rec, adapter in registry.media_servers(registry.ROLE_USERS):
         if isinstance(adapter, PlexMediaServer):
             try:
-                _discover_plex_users(db, adapter.plex_extras())
+                _discover_plex_users(db, adapter.plex_extras(), server_id=_rec.id)
             except Exception as e:
                 logger.error("Plex user discovery failed; continuing degraded: %s", safe_exc(e))
                 logger.debug("Plex discovery traceback", exc_info=True)
         elif adapter.capabilities.users:
             try:
-                _discover_media_server_users(db, adapter)
+                _discover_media_server_users(db, adapter, server_id=_rec.id)
             except Exception as e:
                 logger.error("%s user discovery failed; continuing degraded: %s", adapter.kind, safe_exc(e))
                 logger.debug("User discovery traceback", exc_info=True)
