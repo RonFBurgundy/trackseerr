@@ -521,13 +521,12 @@ def shorten_long_name(
         if str(resolved_path) != raw_path_str:
             db.delete_library_health_findings_under(str(resolved_path))
 
-    if server:
-        request_library_refresh(
-            server,
-            reason="rename",
-            paths=[str(resolved_path.parent), str(new_path)],
-            db=db,
-        )
+    request_library_refresh(
+        server,
+        reason="rename",
+        paths=[str(resolved_path.parent), str(new_path)],
+        db=db,
+    )
 
     logger.info("library health: shortened %s -> %s", raw_path_str, new_path)
 

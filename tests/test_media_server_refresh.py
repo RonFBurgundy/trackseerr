@@ -662,3 +662,18 @@ def test_roots_cache_is_per_server(monkeypatch):
     srv1.refresh_paths.assert_called_once_with(["/srv1/music/Artist/Album"])
     srv2.refresh_paths.assert_called_once_with(["/srv2/music/Artist/Album"])
 
+
+def test_import_refreshes_when_no_primary_client(monkeypatch):
+    from trackseerr.media_servers import registry
+
+    rec = _make_record("nav-1", "navidrome")
+    srv = _make_fake_server("navidrome", folder_refresh=False, roots=["/music"])
+    registry.install([rec])
+    monkeypatch.setattr(registry, "build_adapter", lambda r: srv)
+
+    refresh_scheduler.request_library_refresh(None, reason="import")
+    assert refresh_scheduler.flush_now() is True
+
+    srv.refresh_library.assert_called_once()
+
+
