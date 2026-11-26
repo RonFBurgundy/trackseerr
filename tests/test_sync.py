@@ -1410,3 +1410,158 @@ def test_library_pin_clears_missing_and_matches_across_servers(monkeypatch: pyte
         db.close()
 
 
+def test_execute_sync_is_tracked_and_progress_is_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calling _set_progress creates no job; execute_sync creates and finishes exactly one playlist_sync job."""
+    from trackseerr.job_tracker import job_tracker
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="")
+    registry._reset_for_tests()
+    try:
+        db.upsert_playlist("pl_1", "Mix 1", service="spotify")
+        db.set_playlist_tracks_json("pl_1", json.dumps([{"title": "T1", "artist": "A1", "album": "Al1"}]))
+        db.upsert_playlist("pl_2", "Mix 2", service="spotify")
+        db.set_playlist_tracks_json("pl_2", json.dumps([{"title": "T2", "artist": "A2", "album": "Al2"}]))
+
+        before_recent = len(job_tracker.snapshot()["recent"])
+        state = SyncState()
+
+        # _set_progress alone must not create any job
+        state._set_progress(1, 2, "Mix 1", None)
+        assert not any(j["task_id"] == "playlist_sync" for j in job_tracker.snapshot()["running"])
+        assert len(job_tracker.snapshot()["recent"]) == before_recent
+        state.progress = None
+
+        # execute_sync creates exactly one playlist_sync job for the entire cycle
+        seen_running: list[int] = []
+        orig_set_progress = state._set_progress
+
+        def _spy_progress(current: int, total: int, name: str, server: Optional[str]) -> None:
+            orig_set_progress(current, total, name, server)
+            running = [j for j in job_tracker.snapshot()["running"] if j["task_id"] == "playlist_sync"]
+            seen_running.append(len(running))
+
+        monkeypatch.setattr(state, "_set_progress", _spy_progress)
+        out = state.execute_sync(db, cfg, None, None, None, force=True)
+        assert out["status"] == "success"
+        assert seen_running == [1, 1]
+        assert not any(j["task_id"] == "playlist_sync" for j in job_tracker.snapshot()["running"])
+        after_recent = job_tracker.snapshot()["recent"]
+        assert len(after_recent) == before_recent + 1
+        assert after_recent[0]["task_id"] == "playlist_sync"
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_primary_skipped_preserves_missing_tracks_and_applies_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the primary server skips every target, missing tracks are still recorded from native match."""
+    from tests.subsonic_fake import FakeSubsonic, SubsonicState
+    from tests.subsonic_fake import FakeUser as SubUser
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "kenhanson", "ken@example.com")
+        # Library has Song 1 but NOT Song 2
+        db.upsert_library_artist({"id": "art-1", "name": "Artist 1"})
+        db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Album 1"})
+        db.upsert_library_track(
+            {"id": "trk-1", "album_id": "alb-1", "artist_id": "art-1", "title": "Song 1"}
+        )
+        db.upsert_library_file(
+            {
+                "id": "file-1",
+                "track_id": "trk-1",
+                "file_path": "/lib/Artist 1/Album 1/01 Song 1.flac",
+                "relative_path": "01 Song 1.flac",
+                "codec": "flac",
+                "quality_name": "FLAC",
+                "size_bytes": 123456,
+            }
+        )
+
+        sub_fake = FakeSubsonic(
+            SubsonicState(songs=[], users={"admin": SubUser("admin", admin=True, password="pw")})
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=sub_fake.transport(), sleep=lambda _: None
+        )
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [({"kind": "subsonic", "name": "Nav", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True}, sub_adapter)],
+        )
+
+        db.upsert_playlist("pl_skip", "Skipped Primary Mix", service="spotify")
+        db.set_playlist_tracks_json(
+            "pl_skip",
+            json.dumps([
+                {"title": "Song 1", "artist": "Artist 1", "album": "Album 1"},
+                {"title": "Missing Song", "artist": "Missing Artist", "album": "Missing Album"},
+            ]),
+        )
+        db.set_playlist_targets("pl_skip", ["u1"])
+
+        applied: list[str] = []
+        monkeypatch.setattr(
+            "trackseerr.api.routes.sync.apply_playlist_missing_safely",
+            lambda _db, _cfg, pl_id: applied.append(pl_id),
+        )
+
+        out = SyncState().execute_sync(db, cfg, None, None, None, force=True)
+        assert out["status"] == "success"
+        pl_row = db.get_playlist("pl_skip")
+        assert pl_row["sync_status"] == "skipped"
+        missing = db.get_missing_tracks("pl_skip")
+        assert [t["title"] for t in missing] == ["Missing Song"]
+        assert applied == ["pl_skip"]
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_dispatch_server_push_maps_linked_usernames_for_plex_and_jellyfin() -> None:
+    """_dispatch_server_push maps Trackseerr usernames to linked server_username for Plex and Jellyfin."""
+    from trackseerr.api.routes.sync import _dispatch_server_push
+    from trackseerr.media_servers.registry import ServerRecord
+
+    db = Database(":memory:")
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "alice", "alice@example.com")
+        db.upsert_user("u2", "bob", "bob@example.com")
+
+        plex_row = db.insert_media_server_row(
+            {"kind": "plex", "name": "Home Plex", "url": "http://plex:32400", "sort_order": 0}
+        )
+        jf_row = db.insert_media_server_row(
+            {"kind": "jellyfin", "name": "Home JF", "url": "http://jf:8096", "sort_order": 1}
+        )
+        db.link_server_user("u1", plex_row["id"], "plex-id-1", "PlexAlice", source="manual")
+        db.link_server_user("u1", jf_row["id"], "jf-id-1", "JellyAlice", source="manual")
+
+        pl = Playlist(id="pl_link", name="Linked Mix", tracks=[Track("Song 1", "Artist 1", "Album 1")])
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        for row, expected_alice in [(plex_row, "PlexAlice"), (jf_row, "JellyAlice")]:
+            rec = ServerRecord(
+                id=row["id"],
+                kind=row["kind"],
+                name=row["name"],
+                source="settings",
+                url=row["url"],
+            )
+            adapter = _FakePlaylistAdapter(matched=list(pl.tracks), missing=[])
+            _dispatch_server_push(db, cfg, rec, adapter, pl, ["alice", "bob"], options)
+            assert len(adapter.calls) == 1
+            assert adapter.calls[0][1] == [expected_alice, "bob"]
+    finally:
+        db.close()
+
+
