@@ -12041,9 +12041,12 @@ export interface components {
         };
         /** MediaServerStatus */
         MediaServerStatus: {
+            all_capabilities: components["schemas"]["MediaServerCapabilities"];
             capabilities: components["schemas"]["MediaServerCapabilities"];
             /** Connected */
             connected: boolean;
+            /** Kinds */
+            kinds?: string[];
             /** Type */
             type: string;
         };

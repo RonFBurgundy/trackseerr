@@ -195,7 +195,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
                 htmlFor={searchInputId}
                 className="block text-xs uppercase font-mono tracking-wider text-neutral-300"
               >
-                Search Plex Library
+                Search your media server
               </label>
               <div className="flex items-center gap-1.5">
                 <input

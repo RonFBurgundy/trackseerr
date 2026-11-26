@@ -21,7 +21,9 @@ export interface ScrobbleAdminPanelProps {
   onSaveServerConfig: (body: ScrobbleServerConfigBody) => Promise<boolean>;
   onRotateWebhook: () => Promise<void>;
   onSaveUser: (userId: string, body: AdminScrobbleConfigBody) => Promise<boolean>;
-  /** False when no media server is connected: the Plex history poll and webhook controls are hidden. */
+  /** False when no server supporting play history is connected. */
+  showPlayHistory?: boolean;
+  /** False when no Plex server is connected: the Plex webhook controls are hidden. */
   showPlexOptions?: boolean;
 }
 
@@ -33,6 +35,7 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
   onSaveServerConfig,
   onRotateWebhook,
   onSaveUser,
+  showPlayHistory = true,
   showPlexOptions = true,
 }) => {
   const [apiKey, setApiKey] = useState<string>('');
@@ -139,9 +142,9 @@ export const ScrobbleAdminPanel: React.FC<ScrobbleAdminPanelProps> = ({
               Set by LASTFM_API_KEY / LASTFM_API_SECRET environment variables; remove them from the container template to manage the key here.
             </p>
           )}
-          {showPlexOptions && (
+          {showPlayHistory && (
             <div>
-              <label htmlFor="scrobble-plex-poll-minutes" className={labelClass}>Plex History Poll (minutes, 0 = off)</label>
+              <label htmlFor="scrobble-plex-poll-minutes" className={labelClass}>Play history poll (minutes, 0 = off)</label>
               <input
                 id="scrobble-plex-poll-minutes"
                 name="plex-poll-minutes"

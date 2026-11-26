@@ -371,6 +371,8 @@ def test_media_server_endpoint_none(no_server):
         "type": "none",
         "connected": False,
         "capabilities": {"playlists": False, "users": False, "mixes": False, "library_refresh": False, "file_paths": False},
+        "kinds": [],
+        "all_capabilities": {"playlists": False, "users": False, "mixes": False, "library_refresh": False, "file_paths": False},
     }
 
 
@@ -382,6 +384,8 @@ def test_media_server_endpoint_plex_connected(tmp_path):
         "type": "plex",
         "connected": True,
         "capabilities": {"playlists": True, "users": True, "mixes": True, "library_refresh": True, "file_paths": True},
+        "kinds": ["plex"],
+        "all_capabilities": {"playlists": True, "users": True, "mixes": True, "library_refresh": True, "file_paths": True},
     }
 
 
@@ -436,6 +440,60 @@ def test_media_server_endpoint_never_leaks_credentials(tmp_path):
     with patch("trackseerr.api.routes.system.status.get_plex_client", return_value=MagicMock()):
         raw = env.tc.get("/api/system/media-server").text
     assert "SECRETTOKEN" not in raw and "plex.secret" not in raw
+
+
+def test_status_reports_kinds_and_union_capabilities():
+    from trackseerr.media_servers.registry import ServerRecord
+
+    subsonic = ServerRecord(
+        id="sub-1",
+        kind="subsonic",
+        name="Navidrome",
+        source="db",
+        url="http://navidrome:4533",
+        is_login=True,
+        enabled=True,
+    )
+    plex = ServerRecord(
+        id="plex-1",
+        kind="plex",
+        name="Plex",
+        source="db",
+        url="http://plex:32400",
+        api_key="tok",
+        is_login=False,
+        enabled=True,
+    )
+    disabled_jellyfin = ServerRecord(
+        id="jf-1",
+        kind="jellyfin",
+        name="Jellyfin",
+        source="db",
+        url="http://jellyfin:8096",
+        api_key="jf-tok",
+        enabled=False,
+    )
+    with registry._records_lock:
+        prev_installed = registry._installed
+        prev_records = registry._records
+    try:
+        registry.install([subsonic, plex, disabled_jellyfin])
+        status = media_server.media_server_status(Config(plex_url="", plex_token=""), lambda: MagicMock())
+        assert status["type"] == "subsonic"
+        assert status["capabilities"]["users"] is False
+        assert status["capabilities"]["mixes"] is False
+        assert status["kinds"] == ["plex", "subsonic"]
+        assert status["all_capabilities"] == {
+            "playlists": True,
+            "users": True,
+            "mixes": True,
+            "library_refresh": True,
+            "file_paths": True,
+        }
+    finally:
+        with registry._records_lock:
+            registry._records = prev_records
+            registry._installed = prev_installed
 
 
 # ----------------------------------------------------------------------------- Plex-only routes: one consistent 409

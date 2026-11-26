@@ -51,9 +51,9 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
   const updateHook = updateCheck ?? fallbackUpdateCheck;
   const { status, statusError, lidarrHealth, healthError, isLoading } = useSystemOverview(libraryMode === 'lidarr');
   const mediaServer = useMediaServer();
-  const mediaConnected = mediaServer.isPlex ? Boolean(status?.plex.online) : Boolean(mediaServer.status?.connected);
+  const mediaConnected = Boolean(mediaServer.status?.connected);
   const plexWarning: string | null =
-    mediaServer.isPlex && status?.plex.online && status.plex.message.startsWith('Connected. ')
+    mediaServer.hasPlex && status?.plex.online && status.plex.message.startsWith('Connected. ')
       ? status.plex.message.slice('Connected. '.length).trim()
       : null;
   const plexSignedIn = plexWarning?.includes('signed-in Plex account') ?? false;
@@ -108,17 +108,28 @@ export const SystemStatusPanel: React.FC<SystemStatusPanelProps> = ({ isCore, li
                 SQLite {status.database.sqlite_version} &middot; {formatBytes(status.database.size_bytes)}
               </span>
             </StatusRow>
-            <StatusRow label={mediaServer.isPlex ? 'Plex Server Connection:' : 'Media Server:'}>
-              <span className={plexWarning ? 'text-amber-400' : mediaConnected ? 'text-green-400' : 'text-neutral-400'}>
+            <StatusRow label="Media Server:">
+              <span className={mediaConnected ? 'text-green-400' : 'text-neutral-400'}>
                 {!mediaServer.hasMediaServer
                   ? 'Not configured'
-                  : plexWarning
-                    ? 'Connected (check token)'
-                    : mediaConnected
-                      ? 'Connected'
-                      : 'Configured'}
+                  : mediaConnected
+                    ? 'Connected'
+                    : 'Configured'}
               </span>
             </StatusRow>
+            {mediaServer.hasPlex && (
+              <StatusRow label="Plex (sign-in server):">
+                <span className={plexWarning ? 'text-amber-400' : status.plex.online ? 'text-green-400' : 'text-neutral-400'}>
+                  {!status.plex.configured
+                    ? 'Not configured'
+                    : plexWarning
+                      ? 'Connected (check token)'
+                      : status.plex.online
+                        ? 'Connected'
+                        : 'Offline'}
+                </span>
+              </StatusRow>
+            )}
             {plexWarning && (
               <div className={`my-2 border rounded-[3px] px-3 py-2 text-[11px] font-mono break-words space-y-1 ${HEALTH_STYLE.warning}`}>
                 <p>{plexWarning}</p>

@@ -372,7 +372,7 @@ export const MediaServerList: React.FC<MediaServerListProps> = ({ onToast, onSer
                   />
                 </div>
                 <p className="text-[11px] font-mono text-neutral-500">
-                  Playlists are written to this account only; Subsonic servers keep playlists per user.
+                  Each user can save their own login on the Account page so their playlists go to their own account. Navidrome sends plays to Last.fm and ListenBrainz itself.
                 </p>
               </>
             )}
@@ -433,20 +433,24 @@ export const MediaServerList: React.FC<MediaServerListProps> = ({ onToast, onSer
               checked={usePlaylists}
               onChange={draft.setUsePlaylists}
             />
-            <TactileSwitch
-              id="ms-use-users"
-              name="use_users"
-              label="Import users"
-              checked={useUsers}
-              onChange={draft.setUseUsers}
-            />
-            <TactileSwitch
-              id="ms-use-scrobbles"
-              name="use_scrobbles"
-              label="Read play history"
-              checked={useScrobbles}
-              onChange={draft.setUseScrobbles}
-            />
+            {kind !== 'subsonic' && (
+              <>
+                <TactileSwitch
+                  id="ms-use-users"
+                  name="use_users"
+                  label="Import users"
+                  checked={useUsers}
+                  onChange={draft.setUseUsers}
+                />
+                <TactileSwitch
+                  id="ms-use-scrobbles"
+                  name="use_scrobbles"
+                  label="Read play history"
+                  checked={useScrobbles}
+                  onChange={draft.setUseScrobbles}
+                />
+              </>
+            )}
           </div>
 
           <ActionBar align="end" className="pt-2">
