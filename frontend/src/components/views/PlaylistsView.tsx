@@ -21,7 +21,7 @@ import type { DiscoveryItem, Playlist, User } from '@/types/models';
 import { parseTrackCount } from '@/lib/trackCount';
 import type { ImportPlaylistPayload } from '@/services/playlistService';
 import { setPlaylistServers } from '@/services/playlistService';
-import type { MediaServerItem, MediaServerType } from '@/types/mediaServer';
+import type { MediaServerItem, MediaServerLinksGroup, MediaServerType } from '@/types/mediaServer';
 import {
   TabStrip,
   ActionBar,
@@ -53,6 +53,7 @@ import {
   M3uImportTab,
 } from '@/components/playlists';
 import { useMissingTracks } from '@/hooks/useMissingTracks';
+import { useServerUserLinks } from '@/hooks/useServerUserLinks';
 import { useToast } from '@/hooks/useToast';
 import { useLibraryManager } from '@/hooks/useLibraryManager';
 import { consumePendingImport, buildBookmarkletCode } from '@/services/bookmarkletImport';
@@ -152,6 +153,7 @@ const TargetPills: React.FC<TargetPillsProps> = ({
 interface SyncTargetsSectionProps {
   playlist: Playlist;
   users: User[];
+  serverLinks: MediaServerLinksGroup[];
   isAdmin: boolean;
   currentUserId?: string;
   serverLabel: string;
@@ -163,6 +165,7 @@ interface SyncTargetsSectionProps {
 const SyncTargetsSection: React.FC<SyncTargetsSectionProps> = ({
   playlist,
   users,
+  serverLinks,
   isAdmin,
   currentUserId,
   serverLabel,
@@ -172,6 +175,70 @@ const SyncTargetsSection: React.FC<SyncTargetsSectionProps> = ({
 }) => {
   const assignedCount = users.filter((u) => playlist.targets.includes(String(u.id))).length;
   const containerId = `pl-targets-${playlist.id}`;
+  const showByServer = isAdmin && serverLinks.length > 1;
+
+  const renderPills = () => {
+    if (!showByServer) {
+      return (
+        <TargetPills
+          users={users}
+          playlist={playlist}
+          isAdmin={isAdmin}
+          currentUserId={currentUserId}
+          onToggle={onToggleTarget}
+        />
+      );
+    }
+    const usersById = new Map(users.map((u) => [String(u.id), u]));
+    const linkedIds = new Set<string>();
+    for (const group of serverLinks) {
+      for (const lu of group.users) {
+        linkedIds.add(lu.user_id);
+      }
+    }
+    const otherUsers = users.filter((u) => !linkedIds.has(String(u.id)));
+    return (
+      <div className="space-y-2.5">
+        {serverLinks.map((group) => {
+          const groupUsers = group.users
+            .map((lu) => usersById.get(lu.user_id))
+            .filter((u): u is User => u !== undefined);
+          return (
+            <div key={group.server_id} className="space-y-1">
+              <span className="block text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+                {group.server_name}
+              </span>
+              {groupUsers.length > 0 ? (
+                <TargetPills
+                  users={groupUsers}
+                  playlist={playlist}
+                  isAdmin={isAdmin}
+                  currentUserId={currentUserId}
+                  onToggle={onToggleTarget}
+                />
+              ) : (
+                <p className="text-[11px] font-mono text-neutral-500">No linked users</p>
+              )}
+            </div>
+          );
+        })}
+        {otherUsers.length > 0 && (
+          <div className="space-y-1">
+            <span className="block text-[10px] uppercase tracking-wider text-neutral-400 font-mono">
+              Other users
+            </span>
+            <TargetPills
+              users={otherUsers}
+              playlist={playlist}
+              isAdmin={isAdmin}
+              currentUserId={currentUserId}
+              onToggle={onToggleTarget}
+            />
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-2 pt-3 border-t border-[#1f1f1f]">
@@ -203,17 +270,7 @@ const SyncTargetsSection: React.FC<SyncTargetsSectionProps> = ({
               Not pushed to {serverLabel} — no users assigned
             </p>
           )}
-          {isOpen && (
-            <div id={containerId}>
-              <TargetPills
-                users={users}
-                playlist={playlist}
-                isAdmin={isAdmin}
-                currentUserId={currentUserId}
-                onToggle={onToggleTarget}
-              />
-            </div>
-          )}
+          {isOpen && <div id={containerId}>{renderPills()}</div>}
         </>
       ) : (
         <>
@@ -225,13 +282,7 @@ const SyncTargetsSection: React.FC<SyncTargetsSectionProps> = ({
               Not pushed to {serverLabel} — no users assigned
             </p>
           )}
-          <TargetPills
-            users={users}
-            playlist={playlist}
-            isAdmin={isAdmin}
-            currentUserId={currentUserId}
-            onToggle={onToggleTarget}
-          />
+          {renderPills()}
         </>
       )}
     </div>
@@ -391,6 +442,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
   const libraryManager = useLibraryManager(Boolean(isAdmin));
   const lidarrMode = libraryManager.state?.mode === 'lidarr';
   const missingHook = useMissingTracks({ isAdmin });
+  const serverLinksHook = useServerUserLinks(Boolean(isAdmin));
   const [selectedMissingPlaylistId, setSelectedMissingPlaylistId] = useState<string | null>(null);
   const [selectedMissingPlaylistName, setSelectedMissingPlaylistName] = useState<string>('');
   const [tracksModalPlaylist, setTracksModalPlaylist] = useState<{ id: string; name: string } | null>(null);
@@ -696,6 +748,7 @@ const SyncPlaylistsPanel: React.FC<PlaylistsViewProps> = ({
                 <SyncTargetsSection
                   playlist={pl}
                   users={targetUsers}
+                  serverLinks={serverLinksHook.groups}
                   isAdmin={isAdmin}
                   currentUserId={currentUserId}
                   serverLabel={serverLabel}

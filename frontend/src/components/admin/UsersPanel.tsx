@@ -10,6 +10,7 @@ import {
 } from '@/components/ui';
 import type { AdminUser, AuthType } from '@/types/account';
 import type { UseAdminUsersReturn } from '@/hooks/useAdminUsers';
+import { useServerUserLinks } from '@/hooks/useServerUserLinks';
 import { CreateUserModal } from './CreateUserModal';
 import { UserEditModal } from './UserEditModal';
 import { AccountDefaultsPanel } from './AccountDefaultsPanel';
@@ -47,6 +48,7 @@ function formatDate(iso: string | null): string {
 
 export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId }) => {
   const { users, defaults, isLoading, error } = adminHook;
+  const serverLinksHook = useServerUserLinks(true);
   const [section, setSection] = useState<'users' | 'defaults'>('users');
   const [search, setSearch] = useState<string>('');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
@@ -225,6 +227,7 @@ export const UsersPanel: React.FC<UsersPanelProps> = ({ adminHook, currentUserId
         user={editing}
         currentUserId={currentUserId}
         adminHook={adminHook}
+        serverLinksHook={serverLinksHook}
         onClose={() => setEditingId(null)}
       />
     </div>
