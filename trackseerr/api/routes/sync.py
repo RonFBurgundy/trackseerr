@@ -33,7 +33,8 @@ from trackseerr.media_servers.user_logins import sync_subsonic_for_users
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.youtube_music import get_shared_youtube_music_client
 from trackseerr.config import MEDIA_SERVER_SUBSONIC, Config
-from trackseerr.job_tracker import tracked
+from trackseerr.job_tracker import job_tracker, tracked
+from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 from trackseerr.list_monitoring import apply_playlist_missing_safely
 from trackseerr.listening_playlists import fetch_listening_tracks
 from trackseerr.playlist_policy import is_listening_playlist, is_smart_collection
@@ -202,6 +203,7 @@ class SyncState:
 
     def __init__(self) -> None:
         self.is_syncing: bool = False
+        self.progress: Optional[tuple[int, int, str, Optional[str]]] = None
         self._no_target_logged: set[str] = set()
         self.last_run_at: Optional[str] = None
         self.last_run_stats: dict[str, Any] = {
@@ -458,6 +460,7 @@ class SyncState:
         first_rec, first_server = servers[0]
         first_skip = skip_rating_keys if (first_rec is None or first_rec.is_login) else None
         server_name = first_rec.name if first_rec is not None else "Plex"
+        self._update_progress_server(server_name)
         success, matched_count, missing_count = self._push_playlist(
             db,
             config,
@@ -483,6 +486,7 @@ class SyncState:
             )
         for rec, adapter in servers[1:]:
             if rec is not None:
+                self._update_progress_server(rec.name)
                 extra_skip = skip_rating_keys if rec.is_login else None
                 _push_to_extra_server(
                     db, config, rec, adapter, model_playlist, target_usernames, skip_item_ids=extra_skip
@@ -593,6 +597,20 @@ class SyncState:
         )
 
     @tracked("playlist_sync", "Playlist Sync")
+    def _set_progress(
+        self, current: int, total: int, playlist_name: str, server_name: Optional[str]
+    ) -> None:
+        self.progress = (current, total, playlist_name, server_name)
+        msg = f"Syncing '{playlist_name}' to {server_name}" if server_name else f"Matching '{playlist_name}'"
+        for job in job_tracker.snapshot()["running"]:
+            if job["task_id"] == "playlist_sync":
+                job_tracker.update_message(job["id"], msg)
+
+    def _update_progress_server(self, server_name: str) -> None:
+        if self.progress is not None:
+            current, total, playlist_name, _ = self.progress
+            self._set_progress(current, total, playlist_name, server_name)
+
     def execute_sync(
         self,
         db: Database,
@@ -633,7 +651,8 @@ class SyncState:
             stats["total_playlists"] = len(playlists)
             latest_library_change = db.latest_library_file_change()
 
-            for pl in playlists:
+            for idx, pl in enumerate(playlists, start=1):
+                self._set_progress(idx, len(playlists), pl["name"], None)
                 self._sync_one(
                     db, config, plex_client, server, spotify_client, deezer_client,
                     pl, stats, force, latest_library_change,
@@ -664,6 +683,7 @@ class SyncState:
             logger.debug("Sync cycle traceback", exc_info=True)
             return {"status": "error", "error": safe_exc(e)}
         finally:
+            self.progress = None
             self.is_syncing = False
 
 
@@ -688,15 +708,20 @@ def trigger_sync(
             "message": "Synchronization is already running in background",
         }
 
-    background_tasks.add_task(
-        sync_state.execute_sync,
-        db=db,
-        config=config,
-        plex_client=plex_client,
-        spotify_client=spotify_client,
-        deezer_client=deezer_client,
-        force=True,
-    )
+    def _run_sync() -> None:
+        with record_task_run(db, "playlist_sync", TRIGGER_MANUAL) as run:
+            run.apply_result(
+                sync_state.execute_sync(
+                    db=db,
+                    config=config,
+                    plex_client=plex_client,
+                    spotify_client=spotify_client,
+                    deezer_client=deezer_client,
+                    force=True,
+                )
+            )
+
+    background_tasks.add_task(_run_sync)
 
     return {
         "status": "started",

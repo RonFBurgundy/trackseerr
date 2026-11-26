@@ -332,13 +332,14 @@ def _build_api_router(app: FastAPI) -> APIRouter:
 
 
 def _spa_index(dist_dir: Path, headers: Optional[dict[str, str]] = None) -> Response:
+    resolved_headers = {"Cache-Control": "no-cache"} if headers is None else headers
     dist_index = dist_dir / "index.html"
     if dist_index.is_file():
-        return FileResponse(str(dist_index), media_type="text/html", headers=headers)
+        return FileResponse(str(dist_index), media_type="text/html", headers=resolved_headers)
     return HTMLResponse(
         content="<!doctype html><title>TrackSeerr</title><p>The TrackSeerr web UI is not built. Run <code>npm run build</code> in <code>frontend/</code>.</p>",
         status_code=200,
-        headers=headers,
+        headers=resolved_headers,
     )
 
 

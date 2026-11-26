@@ -214,3 +214,14 @@ class TestSPAFastAPIIntegration:
                     resp = client.get("/assets/index-mock.js")
                     assert resp.status_code == 200
                     assert len(resp.content) > 0
+
+    def test_spa_index_sets_cache_control_no_cache(
+        self, memory_db: Database, mock_config: Config, tmp_path: Path
+    ) -> None:
+        mock_dist = _create_mock_dist(tmp_path)
+        with _patch_app_dist(mock_dist):
+            app = create_app(db=memory_db, config=mock_config)
+            with TestClient(app) as client:
+                resp = client.get("/")
+                assert resp.status_code == 200
+                assert resp.headers.get("cache-control") == "no-cache"

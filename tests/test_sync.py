@@ -807,3 +807,68 @@ def test_second_plex_adopted_playlist_refreshes(monkeypatch: pytest.MonkeyPatch)
         db.close()
 
 
+def test_sync_now_records_task_run(tmp_path, monkeypatch):
+    """POST /api/sync wraps execute_sync in record_task_run('playlist_sync', TRIGGER_MANUAL)."""
+    from fastapi.testclient import TestClient
+    from trackseerr.api.app import create_app
+    from trackseerr.api.dependencies import get_config, get_db, require_admin
+
+    db = Database(str(tmp_path / "sync_run.db"))
+    cfg = Config(plex_url="http://plex:32400", plex_token="tok")
+    app = create_app(db=db, config=cfg)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: cfg
+    app.dependency_overrides[require_admin] = lambda: {"username": "admin", "role": "admin"}
+
+    try:
+        with TestClient(app) as client:
+            resp = client.post("/api/sync")
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "started"
+
+        runs = db.list_task_runs("playlist_sync", since="1970-01-01T00:00:00Z", limit=5)
+        assert len(runs) >= 1
+        assert runs[0]["task_id"] == "playlist_sync"
+        assert runs[0]["trigger"] == "manual"
+        assert runs[0]["status"] in ("running", "success")
+    finally:
+        db.close()
+
+
+def test_progress_reports_playlist_and_server(tmp_path, monkeypatch):
+    """SyncState.progress reports (index, total, playlist_name, server_name) during sync and clears on exit."""
+    db = Database(str(tmp_path / "sync_prog.db"))
+    cfg = Config(plex_url="http://plex:32400", plex_token="tok")
+    registry._reset_for_tests()
+    try:
+        adapter = _FakePlaylistAdapter(matched=[Track(title="S1", artist="A1", album="Al1")], missing=[])
+        rec = db.insert_media_server_row(
+            {"kind": "plex", "name": "Home Plex", "url": "http://plex:32400", "sort_order": 0}
+        )
+        registry.reload(cfg, db)
+        monkeypatch.setattr("trackseerr.media_servers.registry.build_adapter", lambda r: adapter if r.id == rec["id"] else None)
+
+        pl_id = "sp_1"
+        db.upsert_user("u1", "alice", "alice@example.com")
+        db.upsert_playlist(pl_id, "Road Trip", service="spotify")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "S1", "artist": "A1", "album": "Al1"}]))
+        db.set_playlist_targets(pl_id, ["u1"])
+
+        state = SyncState()
+        seen: list[Any] = []
+        orig_push = state._push_playlist
+
+        def _spy_push(*args, **kwargs):
+            seen.append(state.progress)
+            return orig_push(*args, **kwargs)
+
+        monkeypatch.setattr(state, "_push_playlist", _spy_push)
+        out = state.execute_sync(db, cfg, None, None, None, force=True)
+        assert out["status"] == "success"
+        assert seen == [(1, 1, "Road Trip", "Home Plex")]
+        assert state.progress is None
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
