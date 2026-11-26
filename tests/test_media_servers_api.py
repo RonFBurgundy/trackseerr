@@ -306,7 +306,6 @@ def test_env_row_test_uses_env_credentials(env, monkeypatch):
     sub_cfg = Config(
         plex_url="",
         plex_token="",
-        media_server="subsonic",
         subsonic_url=SUBSONIC_URL,
         subsonic_user="env-user",
         subsonic_password="env-password",

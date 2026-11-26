@@ -35,9 +35,8 @@ def secret_key(tmp_path):
 def test_config(tmp_path):
     """Provides a test Config."""
     return Config(
-        plex_url="http://127.0.0.1:32400",
-        plex_token="test-plex-token",
-        media_server="none",
+        plex_url="",
+        plex_token="",
         data_dir=str(tmp_path),
     )
 

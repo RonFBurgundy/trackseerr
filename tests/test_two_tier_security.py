@@ -564,8 +564,8 @@ def test_cli_fails_fast_without_strong_secret(role, secret, caplog):
 
 
 def test_cli_secret_not_required_for_all_in_one():
-    with patch.dict(os.environ, {"ROLE": "all-in-one", "MEDIA_SERVER": "plex"}, clear=True):
-        # fails later on the explicit-Plex credential check, not on the secret
+    with patch.dict(os.environ, {"ROLE": "all-in-one", "PLEX_URL": "http://plex:32400"}, clear=True):
+        # fails later on the partial-Plex credential check, not on the secret
         assert main() == 1
 
 

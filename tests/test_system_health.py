@@ -34,7 +34,6 @@ def test_config(tmp_path):
     return Config(
         plex_url="",
         plex_token="",
-        media_server="none",
         data_dir=str(tmp_path),
     )
 
@@ -357,7 +356,6 @@ def test_disk_low_space_errors(test_db, test_config):
 
 
 def test_media_server_none_skipped(test_db, test_config):
-    test_config.media_server = "none"
     with patch("trackseerr.system_health.get_media_server") as mock_get_ms:
         res = run_health_checks(test_db, test_config)
         mock_get_ms.assert_not_called()

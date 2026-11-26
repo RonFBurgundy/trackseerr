@@ -22,7 +22,7 @@ from .media_servers import MediaServer, MediaServerError, import_server_users, r
 from .media_servers import settings as media_server_settings
 from .clients.spotify import SpotifyClient
 from .clients.spotify_scraper import SpotifyWebScraper
-from .config import MEDIA_SERVER_NONE, MEDIA_SERVER_PLEX, Config, ConfigError
+from .config import MEDIA_SERVER_PLEX, Config, ConfigError
 from .log_rotation import TimedLogFileHandler, apply_saved_log_settings, numeric_level
 from .redaction import RedactLogFilter, redact_sensitive_query, redact_text, safe_exc
 from .security import safe_data_path
@@ -249,7 +249,7 @@ def _apply_saved_media_server_settings(config: Config) -> None:
     where the media server was chosen on the Settings page. When the environment names no media server and that
     database already exists, load the saved choice (read once, then closed) so these runs sync to the same server.
     A missing or unreadable database leaves the environment-only behaviour in place."""
-    if config.media_server_env_controlled:
+    if registry.env_records(config):
         return
     try:
         db_path = safe_data_path("sync_db.sqlite", base_dir=_db_base_dir(config))
@@ -700,13 +700,18 @@ def _validate_role_and_restore(config: Config, role: str) -> int | None:
             return 1
 
     if role != "gateway":
+        if (os.getenv("MEDIA_SERVER") or "").strip():
+            logger.warning(
+                "MEDIA_SERVER is no longer used: every PLEX_*, SUBSONIC_* and JELLYFIN_* block you set is added "
+                "as a server; add or remove servers in Settings."
+            )
         try:
             config.validate_media_server()
         except ConfigError as e:
             logger.error("%s", e)
             print(f"ERROR: {e}", file=sys.stderr)
             return 1
-        if config.media_server_type == MEDIA_SERVER_NONE:
+        if not registry.env_records(config):
             logger.info(NO_MEDIA_SERVER_BOOT_MESSAGE)
 
     if role != "gateway":

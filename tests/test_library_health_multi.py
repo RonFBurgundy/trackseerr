@@ -234,7 +234,7 @@ def test_not_installed_keeps_legacy_behaviour(db: Database, music: Path) -> None
 
 
 def test_api_mappings_and_per_server_put_delete(db: Database, music: Path, tmp_path: Path) -> None:
-    config = Config(plex_url="", plex_token="", data_dir=str(tmp_path), media_server="plex")
+    config = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
     secret = get_or_create_secret_key(data_dir=config.data_dir)
     user = db.upsert_user("a-1", "admin", "a@example.com", is_admin=True)
     token = create_session_token(user_id=user["id"], username="admin", is_admin=True, secret_key=secret)

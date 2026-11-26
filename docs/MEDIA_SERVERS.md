@@ -34,7 +34,7 @@ Add each server under **Settings > Media Management > Media Server**. Every serv
 
 Every playlist goes to every server that has **Push playlists** on. To keep a playlist off a server, open the playlist and turn that server off under **Servers**. The same place shows how many songs each server matched.
 
-One Plex server is the one people sign in with. Pick it with **Use for sign-in** on its card. A server set with environment variables is in the list too. You can rename it, turn it off, or change its switches there, but its address and token stay in your environment.
+One Plex server is the one people sign in with. Pick it with **Use for sign-in** on its card. A server set with environment variables is in the list too. You can rename it, turn it off, or change its switches there, but its address and token stay in your environment. Each complete `PLEX_*`, `JELLYFIN_*`, or `SUBSONIC_*` environment block adds a server, so you can set several at once.
 
 If your Subsonic server, such as Navidrome, already sends plays to Last.fm or ListenBrainz, leave **Read play history** off for it, or every play is counted twice.
 
@@ -61,7 +61,6 @@ Set it in **Settings > Media Management > Media Server**, or with environment va
 
 ```yaml
 environment:
-  - MEDIA_SERVER=jellyfin
   - JELLYFIN_URL=http://jellyfin:8096
   - JELLYFIN_API_KEY=your_api_key
 ```
@@ -88,7 +87,6 @@ Set it in **Settings > Media Management > Media Server**, or with environment va
 
 ```yaml
 environment:
-  - MEDIA_SERVER=subsonic
   - SUBSONIC_URL=http://navidrome:4533
   - SUBSONIC_USER=trackseerr
   - SUBSONIC_PASSWORD=your_password

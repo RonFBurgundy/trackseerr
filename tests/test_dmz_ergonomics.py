@@ -308,12 +308,12 @@ def test_cli_core_warns_but_starts_checks(tmp_path, caplog):
     env = {
         "ROLE": "core",
         "INTERNAL_CORE_SECRET": SECRET,
-        "MEDIA_SERVER": "plex",
+        "PLEX_URL": "http://plex:32400",
         "DATA_DIR": str(tmp_path),
         "CONFIG_DIR": str(tmp_path),
     }
     with patch.dict(os.environ, env, clear=True), caplog.at_level(logging.WARNING):
-        assert main() == 1  # explicit MEDIA_SERVER=plex without PLEX_URL/TOKEN refuses, after the new warning
+        assert main() == 1  # partial PLEX_URL without PLEX_TOKEN refuses, after the new warning
     assert any("CORE_LAN_BIND" in r.getMessage() for r in caplog.records)
 
 

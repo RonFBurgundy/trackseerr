@@ -17,14 +17,13 @@ from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_plex_client, require_core_tier
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.cli import _Clients, _apply_saved_media_server_settings, _discover_media_server_users
-from trackseerr.config import Config, MediaServerView, set_media_server_overlay
+from trackseerr.config import Config
 from trackseerr.local_login import LoginError, verify_local_login
 from trackseerr.media_servers import (
     ServerUser,
     SubsonicMediaServer,
-    build_jellyfin,
-    build_subsonic,
     import_server_users,
+    registry,
 )
 from trackseerr.media_servers import settings as ms_settings
 from trackseerr.media_servers.base import MediaServerError
@@ -35,13 +34,6 @@ from tests.subsonic_fake import FakeSubsonic, default_state
 
 PW = "correct horse battery staple"
 SUB_URL = "http://navidrome:4533"
-
-
-@pytest.fixture(autouse=True)
-def _clean_overlay():
-    set_media_server_overlay(None)
-    yield
-    set_media_server_overlay(None)
 
 
 @pytest.fixture
@@ -215,76 +207,26 @@ def test_discovery_survives_an_unexpected_database_error(db, monkeypatch):
 # ----------------------------------------------------------------------------- S4: atomic settings, no mid-run close
 
 
-A = {"type": "subsonic", "url": "http://a.example:4533", "username": "ua", "password": "pa"}
-B = {"type": "subsonic", "url": "http://b.example:4533", "username": "ub", "password": "pb"}
-
-
-def test_overlay_swap_never_exposes_a_mixture():
-    cfg = Config(plex_url="", plex_token="")
-    cfg.apply_media_server_overlay(A)
-    valid = {("http://a.example:4533", "ua", "pa"), ("http://b.example:4533", "ub", "pb")}
-    stop = threading.Event()
-    seen: list[tuple[str, str, str]] = []
-
-    def writer():
-        flip = False
-        while not stop.is_set():
-            cfg.apply_media_server_overlay(B if flip else A)
-            flip = not flip
-
-    thread = threading.Thread(target=writer)
-    thread.start()
-    try:
-        for _ in range(20000):
-            view = cfg.media_server_view()
-            assert isinstance(view, MediaServerView)
-            seen.append((view.subsonic_url, view.subsonic_user, view.subsonic_password))
-    finally:
-        stop.set()
-        thread.join()
-    assert set(seen) <= valid
-
-
-def test_built_adapters_never_pair_a_url_with_the_other_credentials():
-    cfg = Config(plex_url="", plex_token="")
-    cfg.apply_media_server_overlay(A)
-    valid = {("http://a.example:4533", "ua", "pa"), ("http://b.example:4533", "ub", "pb")}
-    stop = threading.Event()
-
-    def writer():
-        flip = False
-        while not stop.is_set():
-            cfg.apply_media_server_overlay(B if flip else A)
-            flip = not flip
-
-    thread = threading.Thread(target=writer)
-    thread.start()
-    try:
-        for _ in range(80):
-            adapter = build_subsonic(cfg)
-            assert adapter is not None
-            assert (adapter._base, adapter._user, adapter._password) in valid
-    finally:
-        stop.set()
-        thread.join()
-
-
 def test_replacing_the_adapter_does_not_close_the_one_a_sync_holds(monkeypatch):
     fake = FakeSubsonic(default_state([("Song A", "Artist 1", "Album X"), ("Song B", "Artist 1", "Album X")]))
     fake.state.users["ua"] = fake.state.users["admin"].__class__("ua", True, "pa")
     real = SubsonicMediaServer
     monkeypatch.setattr(
-        "trackseerr.media_servers.SubsonicMediaServer",
+        "trackseerr.media_servers.registry.SubsonicMediaServer",
         lambda *a, **kw: real(*a, transport=fake.transport(), sleep=lambda _s: None, **kw),
     )
-    cfg = Config(plex_url="", plex_token="")
-    cfg.apply_media_server_overlay(A)
-    held = build_subsonic(cfg)
+    rec_a = registry.ServerRecord(
+        id="s1", kind="subsonic", name="S1", source="settings", url="http://a.example:4533", username="ua", password="pa"
+    )
+    rec_b = registry.ServerRecord(
+        id="s1", kind="subsonic", name="S1", source="settings", url="http://b.example:4533", username="ub", password="pb"
+    )
+    held = registry.build_adapter(rec_a)
+    assert held is not None
 
     def settings_change_mid_sync(endpoint, n):
         if endpoint == "search3" and n == 1:  # the sync is running: the admin saves new settings now
-            cfg.apply_media_server_overlay(B)
-            assert build_subsonic(cfg) is not held
+            assert registry.build_adapter(rec_b) is not held
         return None
 
     fake.state.respond_with = settings_change_mid_sync
@@ -359,7 +301,7 @@ def test_run_once_ignores_saved_settings_when_the_environment_names_a_server(tmp
     cfg = Config(plex_url="http://plex", plex_token="t", data_dir=str(tmp_path))
     with patch("trackseerr.cli.os.path.isdir", return_value=False):
         _apply_saved_media_server_settings(cfg)
-    assert cfg.media_server_type == "plex" and not cfg.subsonic_configured
+    assert [r.id for r in registry.records(cfg)] == ["env-plex"]
     registry._reset_for_tests()
 
 
@@ -367,7 +309,7 @@ def test_run_once_without_a_database_creates_none_and_keeps_env_behaviour(tmp_pa
     cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
     with patch("trackseerr.cli.os.path.isdir", return_value=False):
         _apply_saved_media_server_settings(cfg)
-    assert not (tmp_path / "sync_db.sqlite").exists() and cfg.media_server_type == "none"
+    assert not (tmp_path / "sync_db.sqlite").exists() and registry.records(cfg) == ()
 
 
 # ----------------------------------------------------------------------------- S6: SSRF
@@ -421,16 +363,19 @@ def test_lan_addresses_stay_allowed(url):
 
 
 def test_saved_settings_url_resolving_to_metadata_is_not_connected_but_env_is_trusted(caplog):
-    cfg = Config(plex_url="", plex_token="")
-    cfg.apply_media_server_overlay({"type": "subsonic", "url": "http://nav.example:4533", "username": "u", "password": "p"})
-    jelly = Config(plex_url="", plex_token="")
-    jelly.apply_media_server_overlay({"type": "jellyfin", "url": "http://jf.example:8096", "api_key": "k"})
+    sub_saved = registry.ServerRecord(
+        id="s-sub", kind="subsonic", name="Sub", source="settings", url="http://nav.example:4533", username="u", password="p"
+    )
+    jf_saved = registry.ServerRecord(
+        id="s-jf", kind="jellyfin", name="JF", source="settings", url="http://jf.example:8096", api_key="k"
+    )
+    sub_env = registry.ServerRecord(
+        id="env-subsonic", kind="subsonic", name="Sub", source="env", url="http://nav.example:4533", username="u", password="p"
+    )
     with patch("trackseerr.security._resolve_host", return_value=["169.254.169.254"]):
         with caplog.at_level(logging.ERROR):
-            assert build_subsonic(cfg) is None and build_jellyfin(jelly) is None
-        env_cfg = Config(plex_url="", plex_token="", media_server="subsonic", subsonic_url="http://nav.example:4533",
-                         subsonic_user="u", subsonic_password="p")
-        assert build_subsonic(env_cfg) is not None  # operator-controlled environment values are not re-judged
+            assert registry.build_adapter(sub_saved) is None and registry.build_adapter(jf_saved) is None
+        assert registry.build_adapter(sub_env) is not None  # operator-controlled environment values are not re-judged
     assert any("not an allowed service address" in r.getMessage() for r in caplog.records)
 
 
@@ -472,7 +417,6 @@ def test_save_and_test_routes_reject_a_hostname_that_resolves_to_metadata(env):
 def test_user_refresh_skips_colliding_names_and_survives_a_bad_row(env):
     from trackseerr.api.dependencies import get_media_client
 
-    env.cfg.media_server = "jellyfin"
     env.cfg.jellyfin_url = "http://jellyfin:8096"
     env.cfg.jellyfin_api_key = "k"
     local_admin(env.db, "kid")  # a local account already owns the name Jellyfin also has
