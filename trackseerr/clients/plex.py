@@ -709,10 +709,17 @@ class PlexClient:
         if isrc_match is not None:
             return isrc_match
 
-        if not skip_search:
-            searched = self._search_plex_track(track, threshold)
-            if searched is not None:
-                return searched
+        if skip_search:
+            candidates = []
+            try:
+                candidates = self.server.search(track.title, mediatype="track", limit=10)
+            except BadRequest as e:
+                logger.debug("BadRequest searching for %s: %s", track.title, safe_exc(e))
+            return self._eval_candidates(candidates, track, threshold)
+
+        searched = self._search_plex_track(track, threshold)
+        if searched is not None:
+            return searched
 
         if db is not None and enricher is not None and budget is not None:
             from ..playlist_identity import resolve_with_musicbrainz

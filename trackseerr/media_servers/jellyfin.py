@@ -501,13 +501,17 @@ class JellyfinMediaServer(MediaServer):
         isrc_match = self._match_by_isrc(track, db)
         if isrc_match is not None:
             return isrc_match
-        if not skip_search:
-            fuzzy = self._search_fuzzy(track, threshold)
-            if fuzzy is not None:
-                return fuzzy
-            censored = self._match_censored(track, threshold)
-            if censored is not None:
-                return censored
+        if skip_search:
+            title = norm_title(track.title.replace("$", "s")) or (
+                "" if is_censored(track.title) else clean_library_name(track.title)
+            )
+            return self._search_and_pick(track, title, threshold) if title else None
+        fuzzy = self._search_fuzzy(track, threshold)
+        if fuzzy is not None:
+            return fuzzy
+        censored = self._match_censored(track, threshold)
+        if censored is not None:
+            return censored
         return self._match_by_musicbrainz(track, db, enricher, budget)
 
     def match_track(
