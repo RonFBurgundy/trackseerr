@@ -14854,6 +14854,11 @@ export interface components {
         ServerLinkedUser: {
             /** Server Username */
             server_username: string;
+            /**
+             * Synthetic
+             * @default false
+             */
+            synthetic: boolean;
             /** User Id */
             user_id: string;
         };

@@ -233,12 +233,14 @@ class NavidromeAdmin:
         return payload
 
     def set_owner(self, playlist_id: str, owner_id: str) -> bool:
-        """Transfer ownership of ``playlist_id`` to ``owner_id`` (PUT then GET to verify)."""
+        """Transfer ownership of ``playlist_id`` to ``owner_id`` (GET, PUT full object, then GET to verify)."""
+        current = self.get_playlist(playlist_id)
+        body = {**current, "ownerId": str(owner_id)}
         encoded = quote(str(playlist_id), safe="")
         self._request(
             "PUT",
             f"/api/playlist/{encoded}",
-            json_body={"ownerId": str(owner_id)},
+            json_body=body,
             mutating=True,
         )
         updated = self.get_playlist(playlist_id)

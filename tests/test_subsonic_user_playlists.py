@@ -451,3 +451,96 @@ def test_no_account_targets_record_skipped_server_state(tmp_path: Path) -> None:
     finally:
         adapter.close()
         db.close()
+
+
+def test_navidrome_manual_link_with_username_reresolves_user_id_once(tmp_path: Path) -> None:
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    fake.add_user("nd-alice", "alice", admin=False)
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-alice", "alice", "alice@x")
+        db.upsert_user("u-ghost", "ghost", "ghost@x")
+        # Simulate a legacy manual link where server_user_id was stored as the username.
+        db.link_server_user("u-alice", rec.id, "alice", "alice", source="manual")
+        db.link_server_user("u-ghost", rec.id, "ghost", "ghost", source="manual")
+
+        pl = Playlist(
+            id="pl-reresolve",
+            name="Reresolve Mix",
+            tracks=[Track("Song A", "Artist 1", "Album X")],
+        )
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        results = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice", "ghost"], options)
+        assert [r.success for r in results] == [True, False]
+        assert results[1].skipped is False
+        # Alice's link was healed to her Navidrome id and ownership transferred.
+        healed = db.get_server_user_link("u-alice", rec.id)
+        assert healed is not None and healed["server_user_id"] == "nd-alice"
+        assert [(p.owner, p.name) for p in fake.state.playlists.values()] == [("alice", "Reresolve Mix")]
+        # Ghost was never passed to PUT /api/playlist/...
+        assert not [c for c in fake.native_calls if c[0] == "PUT" and "ghost" in str(fake.put_bodies)]
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_navidrome_admin_with_imported_link_updates_in_place_never_duplicates(tmp_path: Path) -> None:
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-admin", "admin", "admin@x")
+        db.link_server_user("u-admin", rec.id, "nd-admin", "Admin", source="imported")
+
+        pl1 = Playlist(id="pl-own", name="Admin Mix", tracks=[Track("Song A", "Artist 1", "Album X")])
+        pl2 = Playlist(
+            id="pl-own",
+            name="Admin Mix",
+            tracks=[Track("Song A", "Artist 1", "Album X"), Track("Song B", "Artist 1", "Album X")],
+        )
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        res1 = sync_subsonic_for_users(db, cfg, rec, adapter, pl1, ["admin"], options)
+        res2 = sync_subsonic_for_users(db, cfg, rec, adapter, pl2, ["admin"], options)
+        assert [r.success for r in res1] == [True]
+        assert [r.success for r in res2] == [True]
+        # Updated in place via own-account path; never duplicated and never used owner transfer.
+        assert [(p.owner, p.name, tuple(p.entries)) for p in fake.state.playlists.values()] == [
+            ("admin", "Admin Mix", ("s1", "s2"))
+        ]
+        assert not [c for c in fake.native_calls if c[0] == "PUT" and c[1].startswith("/api/playlist/")]
+    finally:
+        adapter.close()
+        db.close()

@@ -109,6 +109,39 @@ def _cleanup_rejected_copy(
             logger.debug("Could not remove untransferred Navidrome playlist copy: %s", exc.safe_detail)
 
 
+def _resolve_navidrome_owner_id(
+    db: Any,
+    rec: ServerRecord,
+    nav_admin: Any,
+    user: dict[str, Any],
+    link: dict[str, Any],
+) -> Optional[str]:
+    """Return a resolved Navidrome user id for ``link``, re-resolving once via ``list_users()`` if needed."""
+    server_user_id = str(link.get("server_user_id") or "").strip()
+    server_username = str(link.get("server_username") or "").strip()
+    if server_user_id and server_user_id != server_username:
+        return server_user_id
+    list_fn = getattr(nav_admin, "list_users", None)
+    if not callable(list_fn):
+        return None
+    users = list_fn()
+    if server_user_id and any(u.id == server_user_id for u in users):
+        return server_user_id
+    target_name = (server_username or server_user_id).lower()
+    for nav_user in users:
+        if nav_user.name.strip().lower() == target_name:
+            if db is not None and server_username:
+                db.link_server_user(
+                    user["id"],
+                    rec.id,
+                    nav_user.id,
+                    server_username,
+                    source=str(link.get("source") or "manual"),
+                )
+            return str(nav_user.id)
+    return None
+
+
 def _sync_navidrome_owner_transfer(
     db: Any,
     rec: ServerRecord,
@@ -124,6 +157,9 @@ def _sync_navidrome_owner_transfer(
     """Push a per-user playlist copy with the admin account and transfer ownership; None if transfer was ignored."""
     total = len(playlist.tracks)
     try:
+        owner_id = _resolve_navidrome_owner_id(db, rec, nav_admin, user, link)
+        if not owner_id:
+            return None
         matched, missing = _match_for_admin(adapter, playlist, options, match_cache)
         if not matched:
             return [
@@ -142,7 +178,7 @@ def _sync_navidrome_owner_transfer(
             playlist, [m.id for m in matched], options, existing_id=mapped_id
         )
         db.set_server_playlist_id(playlist.id, rec.id, user["id"], server_playlist_id)
-        if nav_admin.set_owner(server_playlist_id, link["server_user_id"]):
+        if nav_admin.set_owner(server_playlist_id, owner_id):
             return [SyncResult(playlist.name, total, len(matched), len(missing), True, missing=list(missing))]
         _warn_owner_transfer_ignored(rec.id, rec.name)
         _cleanup_rejected_copy(db, adapter, playlist.id, rec.id, user["id"], server_playlist_id, created_new)
@@ -228,6 +264,13 @@ def sync_subsonic_for_users(
             continue
 
         link = db.get_server_user_link(user["id"], rec.id) if (db is not None and user is not None) else None
+        link_username = str(link.get("server_username") or "").strip().lower() if link is not None else ""
+        if own_username and link_username == own_username:
+            if own_results is None:
+                own_results = _sync_own_account(adapter, playlist, options)
+            results.extend(own_results)
+            continue
+
         transfer_failed = False
         if nav_admin is not None and link is not None and user is not None:
             transferred = _sync_navidrome_owner_transfer(
