@@ -960,6 +960,7 @@ class JellyfinMediaServer(MediaServer):
             user = self._resolve_user(name, users)
             if user is None:
                 who = name if name else "the default account (set JELLYFIN_USER)"
+                reason = f"No Jellyfin account for {who}"
                 results.append(
                     SyncResult(
                         playlist.name,
@@ -967,9 +968,10 @@ class JellyfinMediaServer(MediaServer):
                         len(matched),
                         len(missing),
                         False,
-                        f"No Jellyfin account for {who}",
+                        reason,
                         missing=list(missing),
                         skipped=True,
+                        skip_reason=reason,
                     )
                 )
                 continue

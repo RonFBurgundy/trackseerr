@@ -220,6 +220,7 @@ def _missing_target_result(
         error,
         missing=list(playlist.tracks),
         skipped=not transfer_failed,
+        skip_reason="" if transfer_failed else error,
     )
 
 

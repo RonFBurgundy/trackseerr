@@ -25,7 +25,12 @@ from trackseerr.api.dependencies import (
     require_permission,
 )
 from trackseerr.api.routes.issues import _Stripped, _is_admin, _reject_control_chars, file_issue
-from trackseerr.api.routes.sync import _playlist_servers, _push_to_extra_server, _server_push_outcome
+from trackseerr.api.routes.sync import (
+    _dispatch_server_push,
+    _playlist_servers,
+    _push_to_extra_server,
+    _server_push_outcome,
+)
 from trackseerr.api.schemas.playlists import (
     FeaturedChart,
     ListeningSourcesResponse,
@@ -47,12 +52,11 @@ from trackseerr.clients.import_lists import listenbrainz as lb_provider
 from trackseerr.clients.import_lists.base import ImportListError
 from trackseerr.media_servers import PlaylistSyncOptions, as_media_server, describe_error
 from trackseerr.media_servers.registry import ServerRecord
-from trackseerr.media_servers.user_logins import sync_subsonic_for_users
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.spotify_scraper import SpotifyWebScraper
 from trackseerr.clients.youtube_music import get_shared_youtube_music_client
 from ytmusicapi.exceptions import YTMusicError
-from trackseerr.config import MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
+from trackseerr.config import MEDIA_SERVER_NONE, Config
 from trackseerr.native_match import match_playlist_tracks_native
 from trackseerr.library_monitoring import validate_list_monitor_mode
 from trackseerr.list_monitoring import apply_playlist_missing_safely
@@ -1052,19 +1056,15 @@ def _push_stored_to_first_server(
     server_name = first_rec.name if first_rec is not None else "Plex"
     try:
         options = PlaylistSyncOptions.from_config(config, db=db)
-        if first_rec is not None and first_rec.kind == MEDIA_SERVER_SUBSONIC:
-            results = sync_subsonic_for_users(
-                db, config, first_rec, first_server, model_playlist, target_usernames, options
-            )
-        else:
-            results = first_server.sync_playlist(
-                model_playlist, target_usernames, options
-            )
+        results = _dispatch_server_push(
+            db, config, first_rec, first_server, model_playlist, target_usernames, options
+        )
         server_status, matched_count, missing, error_msg = _server_push_outcome(
             results, len(model_playlist.tracks)
         )
         if server_status == "skipped":
-            db.record_sync_result(playlist_id, status="skipped", missing_tracks=[])
+            _, native_missing = match_playlist_tracks_native(db, model_playlist.tracks)
+            db.record_sync_result(playlist_id, status="skipped", missing_tracks=native_missing)
             if first_rec is not None:
                 db.record_playlist_server_state(
                     playlist_id,
@@ -1072,8 +1072,9 @@ def _push_stored_to_first_server(
                     "skipped",
                     matched=0,
                     missing=0,
-                    error="",
+                    error=error_msg,
                 )
+            _apply_missing_in_background(db, config, playlist_id)
             return 0, 0
         success = server_status == "success"
         missing_count = len(missing)

@@ -1414,6 +1414,7 @@ def test_execute_sync_is_tracked_and_progress_is_not(monkeypatch: pytest.MonkeyP
     """Calling _set_progress creates no job; execute_sync creates and finishes exactly one playlist_sync job."""
     from trackseerr.job_tracker import job_tracker
 
+    job_tracker.clear()
     db = Database(":memory:")
     cfg = Config(plex_url="", plex_token="")
     registry._reset_for_tests()
@@ -1423,13 +1424,13 @@ def test_execute_sync_is_tracked_and_progress_is_not(monkeypatch: pytest.MonkeyP
         db.upsert_playlist("pl_2", "Mix 2", service="spotify")
         db.set_playlist_tracks_json("pl_2", json.dumps([{"title": "T2", "artist": "A2", "album": "Al2"}]))
 
-        before_recent = len(job_tracker.snapshot()["recent"])
+        before_ids = {j["id"] for j in job_tracker.snapshot()["recent"]}
         state = SyncState()
 
         # _set_progress alone must not create any job
         state._set_progress(1, 2, "Mix 1", None)
         assert not any(j["task_id"] == "playlist_sync" for j in job_tracker.snapshot()["running"])
-        assert len(job_tracker.snapshot()["recent"]) == before_recent
+        assert [j for j in job_tracker.snapshot()["recent"] if j["id"] not in before_ids] == []
         state.progress = None
 
         # execute_sync creates exactly one playlist_sync job for the entire cycle
@@ -1446,12 +1447,30 @@ def test_execute_sync_is_tracked_and_progress_is_not(monkeypatch: pytest.MonkeyP
         assert out["status"] == "success"
         assert seen_running == [1, 1]
         assert not any(j["task_id"] == "playlist_sync" for j in job_tracker.snapshot()["running"])
-        after_recent = job_tracker.snapshot()["recent"]
-        assert len(after_recent) == before_recent + 1
-        assert after_recent[0]["task_id"] == "playlist_sync"
+        created = [j for j in job_tracker.snapshot()["recent"] if j["id"] not in before_ids]
+        assert len(created) == 1
+        assert created[0]["task_id"] == "playlist_sync"
     finally:
         registry._reset_for_tests()
         db.close()
+
+
+def test_server_push_outcome_falls_back_to_error_for_skipped_result() -> None:
+    """_server_push_outcome preserves error as skip_reason when skip_reason is unset on a skipped SyncResult."""
+    from trackseerr.api.routes.sync import _server_push_outcome
+    from trackseerr.models import SyncResult
+
+    res = SyncResult(
+        playlist_name="Mix",
+        total_tracks=2,
+        matched_tracks=0,
+        missing_tracks=2,
+        success=False,
+        error="No Plex account for alice",
+        skipped=True,
+    )
+    status, matched, missing, reason = _server_push_outcome([res], 2)
+    assert (status, matched, missing, reason) == ("skipped", 0, [], "No Plex account for alice")
 
 
 def test_primary_skipped_preserves_missing_tracks_and_applies_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:

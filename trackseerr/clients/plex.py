@@ -1147,6 +1147,7 @@ class PlexClient:
                     user_server = self.get_user_server(username, admin_username=admin_username)
                 except NotFound:
                     logger.info("Skipping Plex target '%s' for playlist '%s': no Plex account", username, playlist.name)
+                    reason = f"No Plex account for {username}"
                     results.append(
                         SyncResult(
                             playlist_name=playlist.name,
@@ -1154,9 +1155,10 @@ class PlexClient:
                             matched_tracks=len(matched),
                             missing_tracks=len(missing),
                             success=False,
-                            error=f"No Plex account for {username}",
+                            error=reason,
                             missing=list(missing),
                             skipped=True,
+                            skip_reason=reason,
                         )
                     )
                     continue

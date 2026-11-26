@@ -86,6 +86,7 @@ def test_list_links_filters_and_includes_plex_fallback(env):
             "api_key": "plex-tok",
             "enabled": True,
             "use_playlists": True,
+            "sort_order": 0,
         },
     )
     assert env.tc.put("/api/settings/media-servers/login", json={"server_id": plex["id"]}, headers=env.admin).status_code == 200
@@ -101,6 +102,7 @@ def test_list_links_filters_and_includes_plex_fallback(env):
             "password": "secret",
             "enabled": True,
             "use_playlists": True,
+            "sort_order": 1,
         },
     )
     # Disabled server and non-playlist server must not appear.

@@ -438,7 +438,9 @@ def test_no_account_targets_record_skipped_server_state(tmp_path: Path) -> None:
         matched_count, missing_count = _push_stored_to_first_server(db, cfg, rec, adapter, playlist, ["kenhanson853"])
         assert (matched_count, missing_count) == (0, 0)
         assert db.get_playlist(playlist.id)["sync_status"] == "skipped"
-        assert db.list_playlist_server_state(playlist.id)[0]["status"] == "skipped"
+        first_state = db.list_playlist_server_state(playlist.id)[0]
+        assert first_state["status"] == "skipped"
+        assert first_state["error"] == "No Navidrome login saved for kenhanson853"
 
         # One valid account + one skipped target -> overall server status is success
         db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))

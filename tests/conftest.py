@@ -119,6 +119,16 @@ def _reset_media_server_process_state():
 
 
 @pytest.fixture(autouse=True)
+def _reset_job_tracker_state():
+    """JobTracker is process-wide; never let one test's jobs reach the next."""
+    from trackseerr.job_tracker import job_tracker
+
+    job_tracker.clear()
+    yield
+    job_tracker.clear()
+
+
+@pytest.fixture(autouse=True)
 def _restore_root_logging():
     """Tiered ``create_app`` / ``cli.main`` call ``setup_logging``, which attaches handlers bound to the
     per-test captured ``sys.stdout``. Left on the root logger they hold a closed stream and break whichever

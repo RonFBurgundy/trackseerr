@@ -4,7 +4,7 @@ This is what keeps "missing tracks" / monitoring / wanted working when no media 
 matcher is the one the iTunes import uses (normalized artist + album + title against indexed library files).
 """
 
-from typing import Any, Sequence
+from typing import Sequence
 
 from trackseerr.itunes_import import TrackMatcher
 from trackseerr.media_match import split_artist_credits
@@ -76,13 +76,7 @@ def match_playlist_tracks_native(db: Database, tracks: list[Track]) -> tuple[lis
         if hasattr(db, "get_library_pin") and db.get_library_pin(track.title, track.artist) is not None:
             matched.append(track)
             continue
-        entry: dict[str, Any] = {
-            "name": track.title,
-            "artist": track.artist,
-            "album_artist": "",
-            "album": track.album,
-        }
-        if matcher.match(entry) is not None:
+        if _match_with_fallbacks(matcher, track) is not None:
             matched.append(track)
         else:
             missing.append(track)

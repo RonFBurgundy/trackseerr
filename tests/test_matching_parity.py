@@ -704,3 +704,23 @@ def test_skip_search_matches_featured_and_remaster_songs(adapter: str, tmp_path:
         assert len([p for _, p, q in fake.state.calls if p == "/Items" and q.get("IncludeItemTypes") == "Audio"]) <= 4
 
 
+def test_match_playlist_tracks_native_uses_fallbacks() -> None:
+    """match_playlist_tracks_native falls back to cleaned title and first credited artist."""
+    from trackseerr.native_match import match_playlist_tracks_native
+    from trackseerr.storage import Database
+
+    db = Database(":memory:")
+    try:
+        _seed_library_track(db, track_id="trk-1", title="Song One", artist="Artist A", album="Album 1")
+
+        tracks = [
+            Track(title="Song One (Remastered 2011)", artist="Artist A feat. Guest", album="Album 1"),
+            Track(title="Missing Song", artist="Unknown", album="Album 2"),
+        ]
+        matched, missing = match_playlist_tracks_native(db, tracks)
+        assert [t.title for t in matched] == ["Song One (Remastered 2011)"]
+        assert [t.title for t in missing] == ["Missing Song"]
+    finally:
+        db.close()
+
+
