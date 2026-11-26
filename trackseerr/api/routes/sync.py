@@ -140,7 +140,7 @@ def _push_results_outcome(results: Sequence[SyncResult], total_tracks: int) -> t
     if not results:
         return False, 0, []
     chosen = next((r for r in results if r.success), results[0])
-    missing = list(chosen.missing)
+    missing = list(getattr(chosen, "missing", None) or [])
     matched_count = max(0, total_tracks - len(missing))
     return any(r.success for r in results), matched_count, missing
 

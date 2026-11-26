@@ -795,7 +795,7 @@ def test_sync_with_plex_and_targets_still_pushes(tmp_path):
     with (
         patch("trackseerr.api.routes.sync.refresh_mix_snapshots", return_value=0),
         patch("trackseerr.api.routes.sync.match_playlist_tracks_native") as native,
-        patch.object(PlexMediaServer, "sync_playlist", return_value=[SimpleNamespace(success=True)]) as push,
+        patch.object(PlexMediaServer, "sync_playlist", return_value=[SimpleNamespace(success=True, missing=[])]) as push,
         patch.object(PlexMediaServer, "match_playlist_tracks", return_value=([], [])),
     ):
         out = SyncState().execute_sync(db=env.db, config=env.cfg, plex_client=env.plex, spotify_client=None, deezer_client=None)
