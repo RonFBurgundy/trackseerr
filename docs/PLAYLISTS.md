@@ -74,7 +74,7 @@ Each playlist card shows the users it is synced to. Click a user to add or remov
 - Regular users can only add playlists for themselves.
 - Admins can send a playlist to any user.
 - On Plex and Jellyfin, each user gets their own copy on the media server.
-- On Subsonic servers such as Navidrome, a user's copy goes to their own account once they save their login under **Settings > Account**. See [Media servers](MEDIA_SERVERS.md).
+- With several servers, users are listed in a section per server, and each person gets the playlist on every server they have an account on. See [Media servers: Several servers](MEDIA_SERVERS.md#several-servers).
 
 ## Missing tracks
 
@@ -146,7 +146,7 @@ Notes:
 
 ## Playlists already on your servers
 
-The **Playlists** page has a tab for each media server that lists the playlists already on it. Open one to see its songs, and **Adopt** it to bring it into TrackSeerr, which then tracks its missing songs. The original stays untouched: TrackSeerr turns that server off for its copy so it never writes over it. Turn the server back on under **Servers** if you want TrackSeerr to take it over.
+The **Playlists** page has a tab for each media server that lists the playlists already on it. Open one to see its songs, and **Adopt** it to bring it into TrackSeerr, which then tracks its missing songs. The original stays untouched: TrackSeerr turns that server off for its copy so it never writes over it. After adopting, pick who else should get it. They get their own copy, on the same server or another one; the original owner's playlist is never written over.
 
 On the sign-in Plex you can also rename, reorder and copy playlists, and admins can see every Plex Home user's playlists.
 

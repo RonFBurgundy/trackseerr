@@ -9,8 +9,8 @@ You can use several media servers at once, for example Plex for your users and N
 | Feature | Plex | Jellyfin | Subsonic (Navidrome, Gonic, Airsonic) | None |
 |---|---|---|---|---|
 | Push playlists | Yes | Yes | Yes | No |
-| Separate playlists per user | Yes | Yes | Yes, when each user saves their own login | No |
-| Import server users as playlist targets | Yes | Yes | No | No |
+| Separate playlists per user | Yes | Yes | Yes (Navidrome with an admin account, or saved logins) | No |
+| Import server users as playlist targets | Yes | Yes | Navidrome with an admin account | No |
 | Sign in to TrackSeerr with the server account | Yes | No | No | No |
 | Rescan after import | Yes | Yes | Yes | No |
 | Library health check | Yes | Yes | Yes | No |
@@ -28,22 +28,54 @@ Users without a media server account sign in with a local TrackSeerr account. Se
 
 ## Several servers
 
+You can run several media servers side by side, for example Plex for your users and Navidrome for yourself. They all
+read the same music files that TrackSeerr manages.
+
+### Add a server
+
 Add each server under **Settings > Media Management > Media Server**. Every server gets its own switches:
 
 - **Refresh library after imports**: the server rescans after TrackSeerr imports music.
 - **Push playlists**: playlists are sent to this server.
-- **Import users**: the server's accounts show up as playlist targets.
+- **Import users**: the server's accounts are brought into TrackSeerr so you can send them playlists.
 - **Read play history**: listens on this server are sent to Last.fm and ListenBrainz. Plex and Jellyfin only. Jellyfin keeps only the last time each song was played, so a song played twice between two checks counts once. A play reported by two servers is counted once.
 
-Every playlist, and every mix, goes to every server that has **Push playlists** on. To keep a playlist off a server, open the playlist and turn that server off under **Servers**. The same place shows how many songs each server matched.
+One Plex server is the one people sign in with. Pick it with **Use for sign-in** on its card. A server set with
+environment variables is in the list too. You can rename it, turn it off, or change its switches there, but its
+address and token stay in your environment. Each complete `PLEX_*`, `JELLYFIN_*`, or `SUBSONIC_*` environment block
+adds a server.
 
-When you fix a song with **Match** on the Missing tracks list, pick the server first: each server keeps its own fixes.
+### Users on each server
 
-Library health checks every server that has **Refresh library after imports** on, each with its own path mapping.
+TrackSeerr has one list of people. Each person can have an account on any of your servers, and TrackSeerr links them:
 
-One Plex server is the one people sign in with. Pick it with **Use for sign-in** on its card. A server set with environment variables is in the list too. You can rename it, turn it off, or change its switches there, but its address and token stay in your environment. Each complete `PLEX_*`, `JELLYFIN_*`, or `SUBSONIC_*` environment block adds a server, so you can set several at once.
+- Users imported from a server are matched to an existing person by name or email, so someone with a Plex and a
+  Navidrome account shows up once.
+- If someone's names don't match, link them by hand: **Settings > Users**, open the user, and link their account on
+  the other server.
+- People don't need to sign in to TrackSeerr to get playlists. You pick them as targets and TrackSeerr writes the
+  playlist to their account on each server they have one on.
 
-If your Subsonic server, such as Navidrome, already sends plays to Last.fm or ListenBrainz, leave **Read play history** off for it, or every play is counted twice.
+### Which playlists go where
+
+- Under **Sync Targets** on a playlist, users are listed in a section per server. Tick a person to send them the
+  playlist; they get it on every server where they have an account.
+- Under **Servers** on a playlist, turn a server off to keep the playlist off it. The same place shows how many songs
+  each server matched, and why a server was skipped.
+- A person with no account on a server is **skipped** there, not counted as a failure.
+- Mixes follow the same rules.
+
+### Fixing a song once
+
+When you fix a song with **Match** on the Missing tracks list, you pick the song in your TrackSeerr library. Every
+server finds that same file, so one fix works everywhere. Only if a server sees different files from the others, open
+**Match on one server only** and fix it there.
+
+### Speed
+
+TrackSeerr checks its own library first. A song that isn't in your library gets one quick search on each server
+instead of a full search, because no server can have a file TrackSeerr doesn't. Playlist sync shows its progress in the
+TrackSeerr logo menu, for example *Syncing 'Fun.' to Navidrome*.
 
 ## Plex
 
@@ -99,11 +131,20 @@ environment:
   - SUBSONIC_PASSWORD=your_password
 ```
 
-- The account you enter here gets playlists that have no target user, and the server's own playlists you bring in.
-- The Subsonic API only lets an account write its own playlists. So each user who wants playlists on their own account saves their login once under **Settings > Account > Media server logins**. Users without a saved login are skipped, and the playlist shows why.
+- **Use an admin account here.** Navidrome only lets admins start a library scan (TrackSeerr's refresh after
+  imports) and list its users.
+- With an admin account on Navidrome, TrackSeerr imports every Navidrome user, writes each person's playlist with the
+  admin account and then hands it over to that person, so it shows up in their own Navidrome account. They don't have
+  to give TrackSeerr their password or sign in.
+- If your Navidrome version doesn't allow that hand-over, or the server isn't Navidrome, each person can save their own
+  login once under **Settings > Account > Media server logins** instead. A saved login always wins: if you save one for
+  yourself, your playlists go to that account even when your name matches the admin account.
+- Other Subsonic servers (Gonic, Airsonic) can't list their users, so only saved logins work there.
 - Leave **Read play history** off: Navidrome can send plays to Last.fm and ListenBrainz itself.
-- If the server supports OpenSubsonic API keys, you can set `SUBSONIC_API_KEY` instead of a user and password.
-- Per-user Subsonic logins are stored encrypted; the key is kept in the config folder and is not part of backups, so after restoring on a new machine users save their logins again.
+- If the server supports OpenSubsonic API keys, you can set `SUBSONIC_API_KEY` instead of a user and password. The
+  hand-over needs a password login, not an API key.
+- Saved logins are stored encrypted. The key is kept in the config folder and is not part of backups, so after
+  restoring on a new machine people save their logins again.
 
 ## No media server
 

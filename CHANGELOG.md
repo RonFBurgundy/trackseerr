@@ -13,6 +13,10 @@ heading becomes the version and date.
 
 ### Added
 
+- **Navidrome users without passwords**: with a Navidrome admin account in Settings, TrackSeerr imports every Navidrome user and hands each person their playlists on their own account. They don't need to sign in to TrackSeerr or share their password.
+- **Sync Targets by server**: users are listed in a section per media server, and an admin can link a person's accounts when their names differ (Settings → Users).
+- **Share adopted playlists**: after adopting a server playlist, pick who else gets it, on the same server or another one. The original owner's playlist is never written over.
+- **One Match fix for every server**: Match now pins the song to the file in your library, and every server uses it. Matching on one server only is still there for servers that see different files.
 - **Your own Navidrome login** (Settings → Account → Media server logins): each user can save their login for a Navidrome or other Subsonic server, so their playlists go to their own account there. Logins are stored encrypted.
 - **Jellyfin play history**: Jellyfin servers with **Read play history** on now send what people play to Last.fm and ListenBrainz. A play reported by two servers is counted once.
 - **Adopt playlists from any server**: the Playlists page has a tab for each Navidrome, Jellyfin or second Plex server that lists its playlists. Adopt one to track its missing songs; the original on the server is never overwritten.
@@ -110,6 +114,8 @@ heading becomes the version and date.
 
 ### Changed
 
+- Playlist sync is much faster with several servers: songs that aren't in your library get one quick search per server instead of a full search.
+- A person with no account on a server is now skipped there instead of marked as failed, and a saved Navidrome login always wins over a matching name.
 - Library health checks every server that refreshes after imports, each with its own path mapping, and shows which servers are missing a file. A server that's offline during a check keeps its earlier findings.
 - Tailored mixes (Daily Blend, Discover Weekly, Artist Radio) go to every server that takes playlists, and the Mixes tab shows whichever media server you use.
 - Navidrome and Jellyfin now find songs as well as Plex does: by ISRC and MusicBrainz first, then across "$"/"s" and "The" spellings, every credited artist, censored titles and common song titles, without picking a remix or live version by mistake.
@@ -174,6 +180,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Sync now on the Playlists page shows in the TrackSeerr logo menu, with which playlist is syncing to which server.
+- After an update, the app no longer keeps showing the old version until you force a refresh.
 - Songs a playlist sync found through their ISRC or MusicBrainz are no longer listed as missing right after the same sync, and each sync searches your media server half as often.
 - Songs you fixed with Match are no longer listed as missing again right after a playlist sync.
 - Library refreshes after imports, renames and scans now happen even when your main server is offline or isn't Plex.
