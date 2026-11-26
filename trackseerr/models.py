@@ -201,6 +201,7 @@ class SyncResult:
     error: str = ""
     missing: list[Track] = field(default_factory=list)
     skipped: bool = False
+    skip_reason: str = ""
 
 
 class DownloadDriverType(str, Enum):

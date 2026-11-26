@@ -44,6 +44,9 @@ class FakeNavidrome(FakeSubsonic):
         self.ignore_owner_change = ignore_owner_change
         self.native_calls: list[tuple[str, str]] = []
         self.reject_next_token: bool = False
+        self.put_bodies: list[dict[str, Any]] = []
+        self.playlist_comments: dict[str, str] = {}
+        self.playlist_public: dict[str, bool] = {}
 
     def add_user(self, uid: str, username: str, *, admin: bool = False, password: str = "pw", email: str = "") -> None:
         self.state.users[username] = FakeUser(username, admin=admin, password=password)
@@ -136,13 +139,15 @@ class FakeNavidrome(FakeSubsonic):
                     json={
                         "id": pl.id,
                         "name": pl.name,
+                        "comment": self.playlist_comments.get(pl.id, ""),
                         "ownerId": self.user_ids.get(pl.owner, pl.owner),
                         "ownerName": pl.owner,
-                        "public": False,
+                        "public": self.playlist_public.get(pl.id, False),
                     },
                 )
             if request.method == "PUT":
                 body = json.loads(request.content.decode() or "{}")
+                self.put_bodies.append(body)
                 if not self.ignore_owner_change and "ownerId" in body:
                     target_owner_id = str(body["ownerId"])
                     by_id = {uid: uname for uname, uid in self.user_ids.items()}
@@ -153,8 +158,9 @@ class FakeNavidrome(FakeSubsonic):
                     json={
                         "id": pl.id,
                         "name": pl.name,
+                        "comment": self.playlist_comments.get(pl.id, ""),
                         "ownerId": self.user_ids.get(pl.owner, pl.owner),
-                        "public": False,
+                        "public": self.playlist_public.get(pl.id, False),
                     },
                 )
         return httpx.Response(404, json={"error": "Unknown route"})
@@ -387,3 +393,22 @@ def test_users_refresh_route_links_navidrome_users(monkeypatch: pytest.MonkeyPat
     finally:
         registry._reset_for_tests()
         db.close()
+
+
+def test_set_owner_sends_full_playlist_object() -> None:
+    fake = FakeNavidrome()
+    fake.add_user("nd-alice", "alice")
+    fake.state.playlists["pl-10"] = FakePlaylist("pl-10", "Road Mix", "admin", [])
+    fake.playlist_comments["pl-10"] = "Keep this comment"
+    fake.playlist_public["pl-10"] = True
+    admin = NavidromeAdmin("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        assert admin.set_owner("pl-10", "nd-alice") is True
+        assert len(fake.put_bodies) == 1
+        put_body = fake.put_bodies[0]
+        assert put_body["name"] == "Road Mix"
+        assert put_body["comment"] == "Keep this comment"
+        assert put_body["public"] is True
+        assert put_body["ownerId"] == "nd-alice"
+    finally:
+        admin.close()

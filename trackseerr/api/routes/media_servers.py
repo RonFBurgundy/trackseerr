@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
-from typing import Any, NoReturn
+from typing import Any, NoReturn, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -21,8 +21,9 @@ from trackseerr.api.schemas.media_servers import (
     ServerUserLinkPayload,
     ServerUserLinkResponse,
 )
-from trackseerr.config import MEDIA_SERVER_PLEX, Config
+from trackseerr.config import MEDIA_SERVER_PLEX, MEDIA_SERVER_SUBSONIC, Config
 from trackseerr.media_servers import registry, server_settings
+from trackseerr.media_servers.base import MediaServerError
 from trackseerr.storage import Database
 
 logger = logging.getLogger(__name__)
@@ -141,8 +142,12 @@ def list_media_server_links(
         if not rec.enabled or registry.ROLE_PLAYLISTS not in rec.roles:
             continue
         links = db.list_server_user_links(server_id=rec.id)
-        users_list: list[dict[str, str]] = [
-            {"user_id": str(row["user_id"]), "server_username": str(row["server_username"])}
+        users_list: list[dict[str, Any]] = [
+            {
+                "user_id": str(row["user_id"]),
+                "server_username": str(row["server_username"]),
+                "synthetic": False,
+            }
             for row in links
         ]
         if rec.kind == MEDIA_SERVER_PLEX and rec.is_login:
@@ -152,7 +157,13 @@ def list_media_server_links(
             for user in all_users:
                 uid = str(user.get("id") or "")
                 if user.get("auth_type") == "plex" and uid and uid not in linked_ids:
-                    users_list.append({"user_id": uid, "server_username": str(user.get("username") or "")})
+                    users_list.append(
+                        {
+                            "user_id": uid,
+                            "server_username": str(user.get("username") or ""),
+                            "synthetic": True,
+                        }
+                    )
         groups.append(
             {
                 "server_id": rec.id,
@@ -162,6 +173,32 @@ def list_media_server_links(
             }
         )
     return groups
+
+
+def _resolve_navidrome_user_id(rec: registry.ServerRecord, username: str) -> Optional[str]:
+    """Resolve ``username`` to a Navidrome user id via ``list_users()`` when ``rec`` has ``navidrome_admin()``."""
+    if rec.kind != MEDIA_SERVER_SUBSONIC:
+        return None
+    adapter = registry.build_adapter(rec)
+    if adapter is None:
+        return None
+    nav_fn = getattr(adapter, "navidrome_admin", None)
+    nav_admin = nav_fn() if callable(nav_fn) else None
+    if nav_admin is None:
+        return None
+    try:
+        users = nav_admin.list_users()
+    except MediaServerError as exc:
+        logger.warning("Failed to list Navidrome users on '%s': %s", rec.name, exc.safe_detail)
+        return None
+    target = username.strip().lower()
+    for nav_user in users:
+        if nav_user.name.strip().lower() == target:
+            return str(nav_user.id)
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=f"User '{username}' not found on Navidrome server '{rec.name}'",
+    )
 
 
 @links_router.put(
@@ -177,7 +214,8 @@ def put_media_server_link(
     config: Config = Depends(get_config),
 ) -> dict[str, Any]:
     """Create or update a manual ``server_user_links`` entry for ``(server_id, user_id)``."""
-    if not any(rec.id == server_id for rec in registry.records(config)):
+    rec = next((r for r in registry.records(config) if r.id == server_id), None)
+    if rec is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media server not found")
     if db.get_user(user_id) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
@@ -187,13 +225,15 @@ def put_media_server_link(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="server_username must not be blank",
         )
+    resolved_id = _resolve_navidrome_user_id(rec, cleaned_username)
     try:
         existing = db.get_server_user_link(user_id, server_id)
-        server_user_id = (
-            str(existing["server_user_id"])
-            if existing is not None and existing.get("server_username") == cleaned_username
-            else cleaned_username
-        )
+        if resolved_id is not None:
+            server_user_id = resolved_id
+        elif existing is not None and existing.get("server_username") == cleaned_username:
+            server_user_id = str(existing["server_user_id"])
+        else:
+            server_user_id = cleaned_username
         db.link_server_user(user_id, server_id, server_user_id, cleaned_username, source="manual")
     except sqlite3.Error as exc:
         logger.error("Failed to save server user link: %s", type(exc).__name__)

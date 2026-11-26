@@ -398,24 +398,26 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
                               — {entry?.server_username}
                             </span>
                           </div>
-                          <TapeDeckButton
-                            type="button"
-                            size="sm"
-                            disabled={unlinkingServerId === g.server_id}
-                            onClick={async () => {
-                              setUnlinkingServerId(g.server_id);
-                              try {
-                                await run(
-                                  () => serverLinksHook.unlinkUser(g.server_id, user.id),
-                                  `Unlinked from ${g.server_name}.`
-                                );
-                              } finally {
-                                setUnlinkingServerId(null);
-                              }
-                            }}
-                          >
-                            Unlink
-                          </TapeDeckButton>
+                          {!entry?.synthetic && (
+                            <TapeDeckButton
+                              type="button"
+                              size="sm"
+                              disabled={unlinkingServerId === g.server_id}
+                              onClick={async () => {
+                                setUnlinkingServerId(g.server_id);
+                                try {
+                                  await run(
+                                    () => serverLinksHook.unlinkUser(g.server_id, user.id),
+                                    `Unlinked from ${g.server_name}.`
+                                  );
+                                } finally {
+                                  setUnlinkingServerId(null);
+                                }
+                              }}
+                            >
+                              Unlink
+                            </TapeDeckButton>
+                          )}
                         </div>
                       );
                     })}

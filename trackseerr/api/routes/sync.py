@@ -147,7 +147,7 @@ def _server_push_outcome(results: Sequence[SyncResult], total_tracks: int) -> tu
         return "failed", 0, [], ""
     non_skipped = [r for r in results if not getattr(r, "skipped", False)]
     if not non_skipped:
-        skip_reason = next((r.error for r in results if r.error), "")
+        skip_reason = next((r.skip_reason for r in results if r.skip_reason), "")
         return "skipped", 0, [], skip_reason
     if all(r.success for r in non_skipped):
         chosen = non_skipped[0]
@@ -257,6 +257,7 @@ def _filter_adopted_source_owner(
                     success=False,
                     error="This is the original playlist",
                     skipped=True,
+                    skip_reason="This is the original playlist",
                 )
             )
         else:

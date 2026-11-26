@@ -71,6 +71,7 @@ class MediaServerLoginResponse(ApiModel):
 class ServerLinkedUser(ApiModel):
     user_id: str
     server_username: str
+    synthetic: bool = False
 
 
 class MediaServerLinksGroup(ApiModel):

@@ -143,13 +143,13 @@ def test_list_links_filters_and_includes_plex_fallback(env):
     assert plex_group["kind"] == "plex"
     # Linked Plex user uses link's server_username; unlinked auth_type=plex user (bob) falls back to username.
     assert plex_group["users"] == [
-        {"user_id": "u1", "server_username": "alice_plex"},
-        {"user_id": "u2", "server_username": "bob"},
+        {"user_id": "u1", "server_username": "alice_plex", "synthetic": False},
+        {"user_id": "u2", "server_username": "bob", "synthetic": True},
     ]
 
     assert nd_group["server_name"] == "Navidrome"
     assert nd_group["kind"] == "subsonic"
-    assert nd_group["users"] == [{"user_id": "u3", "server_username": "carol_nd"}]
+    assert nd_group["users"] == [{"user_id": "u3", "server_username": "carol_nd", "synthetic": False}]
 
 
 def test_put_and_delete_manual_link(env):
@@ -217,3 +217,47 @@ def test_put_and_delete_manual_link(env):
     assert env.db.get_server_user_link("u1", nd["id"]) is None
 
     assert env.tc.delete(f"/api/media-servers/links/{nd['id']}/u1", headers=env.admin).status_code == 404
+
+
+def test_put_manual_link_resolves_navidrome_user_id_and_rejects_unknown(env, monkeypatch: pytest.MonkeyPatch):
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    nd = _create_server(
+        env.tc,
+        env.admin,
+        {
+            "kind": "subsonic",
+            "name": "Navidrome",
+            "url": "http://navidrome:4533",
+            "username": "admin",
+            "password": "secret",
+            "enabled": True,
+            "use_playlists": True,
+        },
+    )
+    fake = FakeNavidrome(password="secret")
+    fake.add_user("nd-alice", "alice", admin=False)
+    adapter = SubsonicMediaServer("http://navidrome:4533", "admin", "secret", transport=fake.transport(), sleep=lambda _s: None)
+    monkeypatch.setattr(registry, "build_adapter", lambda _rec: adapter)
+    try:
+        ok_resp = env.tc.put(
+            f"/api/media-servers/links/{nd['id']}/u1",
+            json={"server_username": "Alice"},
+            headers=env.admin,
+        )
+        assert ok_resp.status_code == 200, ok_resp.text
+        stored = env.db.get_server_user_link("u1", nd["id"])
+        assert stored is not None
+        assert stored["server_user_id"] == "nd-alice"
+        assert stored["server_username"] == "Alice"
+        assert stored["source"] == "manual"
+
+        missing_resp = env.tc.put(
+            f"/api/media-servers/links/{nd['id']}/u1",
+            json={"server_username": "nobody"},
+            headers=env.admin,
+        )
+        assert missing_resp.status_code == 422
+    finally:
+        adapter.close()
