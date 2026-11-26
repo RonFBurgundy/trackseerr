@@ -275,7 +275,7 @@ class TestMatching:
         s = self.lib(("Totally Different", "Someone", "X"))
 
         class DB:
-            def get_match_override(self, title, artist):
+            def get_match_override(self, title, artist, server_id=None, use_legacy=True):
                 return {"plex_rating_key": "s1"}
 
         ref = s.match_track(Track("Unfindable", "Nobody", ""), db=DB())
@@ -285,7 +285,7 @@ class TestMatching:
         s = self.lib(("Hello", "Adele", "25"))
 
         class DB:
-            def get_match_override(self, title, artist):
+            def get_match_override(self, title, artist, server_id=None, use_legacy=True):
                 return {"plex_rating_key": "gone"}
 
         ref = s.match_track(Track("Hello", "Adele", "25"), db=DB())
@@ -465,7 +465,7 @@ def test_stale_override_lookup_failure_falls_back_to_search(caplog) -> None:
     server, fake, _ = make()
 
     class DB:
-        def get_match_override(self, title, artist):
+        def get_match_override(self, title, artist, server_id=None, use_legacy=True):
             return {"plex_rating_key": "gone"}
 
     fake.state.respond_with = lambda ep, n: raw_json(500, {}) if ep == "getSong" else None
@@ -473,6 +473,24 @@ def test_stale_override_lookup_failure_falls_back_to_search(caplog) -> None:
         ref = server.match_track(Track("Song A", "Artist 1", "Album X"), db=DB())
     assert ref is not None and ref.id == "s1"
     assert any("Pinned match" in r.getMessage() for r in caplog.records)
+
+
+def test_server_override_used() -> None:
+    server, _, _ = make()
+    server.server_id = "sub-2"
+    server.legacy_overrides = False
+    seen_calls: list[tuple[str, str, object, bool]] = []
+
+    class DB:
+        def get_match_override(self, title, artist, server_id=None, use_legacy=True):
+            seen_calls.append((title, artist, server_id, use_legacy))
+            if server_id == "sub-2":
+                return {"plex_rating_key": "s3", "server_id": "sub-2"}
+            return None
+
+    ref = server.match_track(Track("Unfindable", "Nobody", ""), db=DB())
+    assert ref is not None and ref.id == "s3"
+    assert seen_calls == [("Unfindable", "Nobody", "sub-2", False)]
 
 
 def test_list_source_playlists_includes_public() -> None:

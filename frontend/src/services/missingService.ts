@@ -20,8 +20,13 @@ export async function getMissingTracks(playlistId?: string): Promise<MissingTrac
 /**
  * Searches the media server library for matching tracks to enable manual correction.
  */
-export async function searchMissingTracks(query: string, limit = 15): Promise<MediaTrackHit[]> {
+export async function searchMissingTracks(
+  query: string,
+  limit = 15,
+  serverId?: string
+): Promise<MediaTrackHit[]> {
   const params = new URLSearchParams({ query, limit: String(limit) });
+  if (serverId) params.set('server_id', serverId);
   const res = await apiRequest<MediaTrackHit[]>(`/api/missing/search?${params.toString()}`);
   return res || [];
 }
@@ -47,8 +52,12 @@ export async function getMatchOverrides(): Promise<MatchOverride[]> {
 /**
  * Deletes a Match Memory override (undo matching).
  */
-export async function deleteMatchOverride(overrideId: number): Promise<MatchDeletedResponse> {
-  return apiRequest<MatchDeletedResponse>(`/api/missing/match/${overrideId}`, {
+export async function deleteMatchOverride(
+  overrideId: number,
+  serverId?: string | null
+): Promise<MatchDeletedResponse> {
+  const params = serverId ? `?server_id=${encodeURIComponent(serverId)}` : '';
+  return apiRequest<MatchDeletedResponse>(`/api/missing/match/${overrideId}${params}`, {
     method: 'DELETE',
   });
 }

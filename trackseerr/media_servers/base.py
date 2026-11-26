@@ -153,6 +153,8 @@ class MediaServer(ABC):
 
     kind: str = ""
     paths_relative: bool = False  # True when ServerFileRef.path is relative to the music folder (Subsonic)
+    server_id: Optional[str] = None
+    legacy_overrides: bool = True
 
     @property
     @abstractmethod

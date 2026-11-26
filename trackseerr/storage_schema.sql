@@ -452,6 +452,18 @@ CREATE TABLE match_overrides (
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 UNIQUE(source_title, source_artist)
             );
+CREATE TABLE IF NOT EXISTS server_match_overrides (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                source_title TEXT NOT NULL,
+                source_artist TEXT NOT NULL,
+                item_id TEXT NOT NULL,
+                item_title TEXT NOT NULL,
+                item_artist TEXT NOT NULL,
+                created_by TEXT REFERENCES users(id),
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                UNIQUE (server_id, source_title, source_artist)
+            );
 CREATE TABLE track_aliases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_title TEXT NOT NULL,
