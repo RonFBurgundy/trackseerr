@@ -345,12 +345,23 @@ def test_admin_can_set_album_and_artist_monitor_mode(app_and_client, test_db, te
 def test_direct_import_does_not_run_monitor_apply_on_the_request_thread(app_and_client, test_db, test_config, seeded_users):
     import threading
     from trackseerr.api.dependencies import get_plex_client
+    from trackseerr.models import SyncResult, Track
     from unittest.mock import MagicMock
 
     app, client = app_and_client
     admin = _auth_headers(seeded_users["admin"], test_db, test_config)
     plex = MagicMock()
-    plex.sync_playlist_to_users.return_value = [MagicMock(success=True)]
+    plex.sync_playlist_to_users.return_value = [
+        SyncResult(
+            playlist_name="Imp",
+            total_tracks=1,
+            matched_tracks=0,
+            missing_tracks=1,
+            success=True,
+            missing=[Track(title="T", artist="A", album="")],
+            skipped=False,
+        )
+    ]
     plex.match_playlist_tracks.return_value = ([], [{"title": "T", "artist": "A", "album": ""}])
     app.dependency_overrides[get_plex_client] = lambda: plex
     started, release = threading.Event(), threading.Event()
