@@ -29,3 +29,13 @@ export type MediaServerLoginResponse = Schema<'MediaServerLoginResponse'>;
 export type ServerPlaylistSummary = Schema<'ServerPlaylistSummary'>;
 
 export type ServerPlaylistTrack = Schema<'ServerPlaylistTrack'>;
+
+export type ServerLinkedUser = Schema<'ServerLinkedUser'>;
+
+export type MediaServerLinksGroup = Schema<'MediaServerLinksGroup'>;
+
+export type ServerUserLinkPayload = Schema<'ServerUserLinkPayload'>;
+
+export type ServerUserLinkResponse = Schema<'ServerUserLinkResponse'>;
+
+export type ServerUserLinkDeletedResponse = Schema<'ServerUserLinkDeletedResponse'>;

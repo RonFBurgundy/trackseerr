@@ -18,6 +18,7 @@ import {
 } from '@/types/account';
 import type { AdminUser, QuotaKind, QuotaOverrides, UpdateUserPayload } from '@/types/account';
 import type { UseAdminUsersReturn } from '@/hooks/useAdminUsers';
+import type { UseServerUserLinksReturn } from '@/hooks/useServerUserLinks';
 import { errorMessage } from '@/services/apiClient';
 import { PermissionSwitches } from './PermissionSwitches';
 
@@ -25,6 +26,7 @@ export interface UserEditModalProps {
   user: AdminUser | null;
   currentUserId: string | number | undefined;
   adminHook: UseAdminUsersReturn;
+  serverLinksHook?: UseServerUserLinksReturn;
   onClose: () => void;
 }
 
@@ -119,10 +121,74 @@ const ConfirmAction: React.FC<{
   );
 };
 
+const ServerLinkForm: React.FC<{
+  serverId: string;
+  serverName: string;
+  userId: string;
+  defaultUsername: string;
+  onLink: (serverId: string, userId: string, serverUsername: string) => Promise<void>;
+  onSuccess: (msg: string) => void;
+  onError: (msg: string | null) => void;
+}> = ({ serverId, serverName, userId, defaultUsername, onLink, onSuccess, onError }) => {
+  const fieldId = useId();
+  const [value, setValue] = useState<string>(defaultUsername);
+  const [busy, setBusy] = useState<boolean>(false);
+
+  useEffect(() => {
+    setValue(defaultUsername);
+  }, [defaultUsername, userId]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = value.trim();
+    if (!trimmed || busy) return;
+    setBusy(true);
+    onError(null);
+    try {
+      await onLink(serverId, userId, trimmed);
+      onSuccess(`Linked to ${serverName}.`);
+    } catch (err: unknown) {
+      onError(errorMessage(err, `Failed to link to ${serverName}`));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row sm:items-end gap-2">
+      <div className="flex-1">
+        <FormField label={`Link to ${serverName}`} htmlFor={fieldId}>
+          <input
+            id={fieldId}
+            name={`server-link-${serverId}`}
+            type="text"
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            placeholder={`${serverName} username`}
+            autoCapitalize="none"
+            spellCheck={false}
+            className={inputClass}
+          />
+        </FormField>
+      </div>
+      <TapeDeckButton
+        type="submit"
+        size="sm"
+        variant="amber"
+        disabled={!value.trim() || busy}
+        icon={busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : undefined}
+      >
+        Save
+      </TapeDeckButton>
+    </form>
+  );
+};
+
 export const UserEditModal: React.FC<UserEditModalProps> = ({
   user,
   currentUserId,
   adminHook,
+  serverLinksHook,
   onClose,
 }) => {
   const [permissions, setPermissions] = useState<number>(0);
@@ -141,6 +207,7 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
   const [deleteName, setDeleteName] = useState<string>('');
   const [deleteBusy, setDeleteBusy] = useState<boolean>(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [unlinkingServerId, setUnlinkingServerId] = useState<string | null>(null);
 
   const userId = user?.id;
   useEffect(() => {
@@ -302,6 +369,84 @@ export const UserEditModal: React.FC<UserEditModalProps> = ({
               </p>
             )}
           </fieldset>
+
+          {serverLinksHook && serverLinksHook.groups.length > 0 && (() => {
+            const linkedGroups = serverLinksHook.groups.filter((g) =>
+              g.users.some((u) => u.user_id === user.id)
+            );
+            const unlinkedGroups = serverLinksHook.groups.filter(
+              (g) => !g.users.some((u) => u.user_id === user.id)
+            );
+            return (
+              <MachinedCard className="p-3 sm:p-4 space-y-3">
+                <h4 className="text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)]">
+                  Media server links
+                </h4>
+                {linkedGroups.length > 0 ? (
+                  <div className="space-y-1">
+                    {linkedGroups.map((g) => {
+                      const entry = g.users.find((u) => u.user_id === user.id);
+                      return (
+                        <div
+                          key={g.server_id}
+                          className="flex items-center justify-between gap-2 py-1 border-b border-[var(--border-subtle)] last:border-0"
+                        >
+                          <div className="text-xs font-mono">
+                            <span className="text-[var(--text-primary)]">{g.server_name}</span>
+                            <span className="text-[var(--text-muted)]">
+                              {' '}
+                              — {entry?.server_username}
+                            </span>
+                          </div>
+                          <TapeDeckButton
+                            type="button"
+                            size="sm"
+                            disabled={unlinkingServerId === g.server_id}
+                            onClick={async () => {
+                              setUnlinkingServerId(g.server_id);
+                              try {
+                                await run(
+                                  () => serverLinksHook.unlinkUser(g.server_id, user.id),
+                                  `Unlinked from ${g.server_name}.`
+                                );
+                              } finally {
+                                setUnlinkingServerId(null);
+                              }
+                            }}
+                          >
+                            Unlink
+                          </TapeDeckButton>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] font-mono text-[var(--text-muted)]">
+                    No media server links.
+                  </p>
+                )}
+                {unlinkedGroups.length > 0 && (
+                  <div className="space-y-3 pt-2 border-t border-[var(--border-subtle)]">
+                    {unlinkedGroups.map((g) => (
+                      <ServerLinkForm
+                        key={g.server_id}
+                        serverId={g.server_id}
+                        serverName={g.server_name}
+                        userId={user.id}
+                        defaultUsername={user.username}
+                        onLink={serverLinksHook.linkUser}
+                        onSuccess={(msg) => setNotice(msg)}
+                        onError={(msg) => {
+                          setError(msg);
+                          if (msg) setNotice(null);
+                        }}
+                      />
+                    ))}
+                  </div>
+                )}
+              </MachinedCard>
+            );
+          })()}
 
           <MachinedCard className="p-3 sm:p-4 space-y-3">
             <h4 className="text-xs uppercase font-mono tracking-wider text-[var(--text-secondary)]">

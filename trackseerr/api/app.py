@@ -281,6 +281,7 @@ def _build_api_router(app: FastAPI) -> APIRouter:
     )
     api_router.include_router(indexers.router, prefix="/settings/indexers", tags=["indexers"])
     api_router.include_router(media_servers.router, prefix="/settings/media-servers", tags=["media_servers"])
+    api_router.include_router(media_servers.links_router, prefix="/media-servers", tags=["media_servers"])
     api_router.include_router(server_playlists.router, prefix="/media-servers", tags=["server_playlists"])
     api_router.include_router(
         quality_profiles.router, prefix="/settings/quality-profiles", tags=["quality_profiles"]
