@@ -702,20 +702,19 @@ def _scan_server(
     return rows, counts
 
 
-def _merge_server_rows(results: list[tuple[str, list[dict[str, Any]], dict[str, Any]]]) -> list[dict[str, Any]]:
+def _merge_server_rows(results: list[tuple[str, str, list[dict[str, Any]], dict[str, Any]]]) -> list[dict[str, Any]]:
     merged: dict[tuple[str, str], dict[str, Any]] = {}
-    for label, srv_rows, _ in results:
+    for server_id, label, srv_rows, _ in results:
         for r in srv_rows:
             key = (r["kind"], r["path"])
+            entry = {"id": server_id, "name": label, "cause": r["cause"]}
             existing = merged.get(key)
             if existing is None:
                 detail = dict(r.get("detail") or {})
-                detail["servers"] = [label]
+                detail["servers"] = [entry]
                 merged[key] = {**r, "detail": detail}
             else:
-                servers_list = existing["detail"]["servers"]
-                if label not in servers_list:
-                    servers_list.append(label)
+                existing["detail"]["servers"].append(entry)
     return list(merged.values())
 
 
@@ -759,17 +758,20 @@ def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) ->
     if target_err is not None:
         return _finish(db, run, target_err)
 
-    results: list[tuple[str, list[dict[str, Any]], dict[str, Any]]] = []
+    results: list[tuple[str, str, list[dict[str, Any]], dict[str, Any]]] = []
     errors: list[str] = []
     raw_errors: list[str] = []
+    failed_ids: set[str] = set()
     for idx, (rec, srv) in enumerate(targets):
         label = rec.name if rec is not None else (str(getattr(srv, "kind", "") or "") or "server")
+        server_id = rec.id if rec is not None else label
         try:
             srv_rows, counts = _scan_server(db, rec, srv, music_root, started, allow_legacy=(idx == 0))
-            results.append((label, srv_rows, counts))
+            results.append((server_id, label, srv_rows, counts))
         except _ScanError as exc:
             errors.append(f"{label}: {exc}")
             raw_errors.append(str(exc))
+            failed_ids.add(server_id)
 
     if errors:
         run["errors"] = errors
@@ -781,13 +783,15 @@ def _execute(db: Any, server: Optional[Any], music_root: Path, now: datetime) ->
     seen_at = started
     for i in range(0, len(rows), _SCAN_BATCH):
         db.upsert_library_health_findings(rows[i : i + _SCAN_BATCH], seen_at)
-    db.delete_library_health_findings_not_seen([KIND_UNINDEXED, KIND_STALE], seen_at)
-    run["server_kind"] = ", ".join(label for label, _, _ in results)
-    run["disk_files"] = max((c["disk_files"] for _, _, c in results), default=0)
-    run["server_files"] = sum(c["server_files"] for _, _, c in results)
+    db.delete_library_health_findings_not_seen(
+        [KIND_UNINDEXED, KIND_STALE], seen_at, keep_server_ids=failed_ids or None
+    )
+    run["server_kind"] = ", ".join(label for _, label, _, _ in results)
+    run["disk_files"] = max((c["disk_files"] for _, _, _, c in results), default=0)
+    run["server_files"] = sum(c["server_files"] for _, _, _, c in results)
     run["unindexed"] = sum(1 for r in rows if r["kind"] == KIND_UNINDEXED)
     run["stale"] = sum(1 for r in rows if r["kind"] == KIND_STALE)
-    run["mapping_auto"] = any(c["mapping_auto"] for _, _, c in results)
+    run["mapping_auto"] = any(c["mapping_auto"] for _, _, _, c in results)
     return _finish(db, run)
 
 
@@ -1021,11 +1025,17 @@ class LibraryHealthWorker:
             interval = effective_interval_seconds(db, config, "library_health") or 7 * 86400
             if not weekly_due(db, interval_seconds=interval):
                 return False
-            from trackseerr.media_servers import get_media_server
+            from trackseerr.media_servers import get_media_server, registry
 
-            server = get_media_server(config)
-            if server is None or not server.capabilities.file_paths:
-                return False
+            if registry.is_installed():
+                targets = [srv for _, srv in registry.media_servers(registry.ROLE_REFRESH, config) if srv.capabilities.file_paths]
+                if not targets:
+                    return False
+                server = targets[0]
+            else:
+                server = get_media_server(config)
+                if server is None or not server.capabilities.file_paths:
+                    return False
             music_root = Path(db.get_media_management_settings().get("root_folder_path") or "/music")
             run_check(db, server, music_root=music_root, trigger=TRIGGER_SCHEDULED)
             return True

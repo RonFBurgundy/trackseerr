@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from trackseerr import library_health
-from trackseerr.api.dependencies import get_active_media_server, get_db, require_admin, require_core_tier
+from trackseerr.api.dependencies import get_active_media_server, get_config, get_db, require_admin, require_core_tier
 from trackseerr.api.schemas.library_health import (
     LibraryHealthCount,
     LibraryHealthDismissed,
@@ -22,6 +22,8 @@ from trackseerr.api.schemas.library_health import (
     LibraryHealthStarted,
     LibraryHealthWeekly,
 )
+from trackseerr.config import Config
+from trackseerr.media_servers import capabilities_for, registry
 from trackseerr.media_servers.base import MediaServer
 from trackseerr.redaction import safe_exc
 from trackseerr.storage import Database
@@ -46,12 +48,27 @@ def _music_root(db: Database) -> Path:
     return Path(db.get_media_management_settings().get("root_folder_path") or "/music")
 
 
+def _overview_server(active_server: Optional[MediaServer]) -> Optional[MediaServer]:
+    if registry.is_installed():
+        for _, srv in registry.media_servers(registry.ROLE_REFRESH):
+            if srv.capabilities.file_paths:
+                return srv
+        return None
+    return active_server
+
+
+def _single_file_path_server_row(db: Database) -> Optional[dict[str, Any]]:
+    rows = [r for r in db.list_media_server_rows() if capabilities_for(r["kind"]).file_paths]
+    return rows[0] if len(rows) == 1 else None
+
+
 @router.get("", response_model=LibraryHealthResponse, response_model_exclude_unset=True, summary="Library health findings, grouped, with the last run")
 def get_library_health(
     db: Database = Depends(get_db),
     server: Optional[MediaServer] = Depends(get_active_media_server),
 ) -> dict[str, Any]:
     findings = db.list_library_health_findings()
+    overview_server = _overview_server(server)
     return {
         "findings": [library_health.finding_view(f) for f in findings],
         "groups": library_health.group_findings(findings),
@@ -59,7 +76,11 @@ def get_library_health(
         "running": library_health.is_running(),
         "mapping": library_health.mapping_view(db),
         "mappings": library_health.mappings_view(db),
-        "server": {"kind": server.kind, "file_paths": bool(server.capabilities.file_paths)} if server else None,
+        "server": (
+            {"kind": overview_server.kind, "file_paths": bool(overview_server.capabilities.file_paths)}
+            if overview_server
+            else None
+        ),
         "count": len(findings),
         "weekly": db.get_library_health_weekly(),
     }
@@ -124,19 +145,30 @@ def shorten_finding(
 
 
 @router.put("/mapping", response_model=LibraryHealthMappingResponse, response_model_exclude_unset=True, summary="Save the media-server path mapping")
-def put_library_health_mapping(body: MappingRequest, db: Database = Depends(get_db)) -> dict[str, Any]:
+def put_library_health_mapping(
+    body: MappingRequest,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    target_row: Optional[dict[str, Any]] = None
     if body.server_id:
-        row = db.get_media_server_row(body.server_id)
-        if row is None:
+        target_row = db.get_media_server_row(body.server_id)
+        if target_row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media server not found")
+    else:
+        target_row = _single_file_path_server_row(db)
+
+    if target_row is not None:
         db.set_media_server_row_path_mapping(
-            body.server_id,
-            {"server_prefix": body.server_prefix, "local_prefix": body.local_prefix, "auto": False, "server_kind": row["kind"]},
+            target_row["id"],
+            {"server_prefix": body.server_prefix, "local_prefix": body.local_prefix, "auto": False, "server_kind": target_row["kind"]},
         )
+        registry.reload(config, db)
         return {
             "mapping": {"server_prefix": body.server_prefix, "local_prefix": body.local_prefix, "auto": False},
             "mappings": library_health.mappings_view(db),
         }
+
     kind = ""
     existing = db.get_media_server_path_mapping()
     if existing:
@@ -148,13 +180,24 @@ def put_library_health_mapping(body: MappingRequest, db: Database = Depends(get_
 
 
 @router.delete("/mapping", response_model=LibraryHealthMappingResponse, response_model_exclude_unset=True, summary="Clear the media-server path mapping")
-def delete_library_health_mapping(server_id: Optional[str] = None, db: Database = Depends(get_db)) -> dict[str, Any]:
+def delete_library_health_mapping(
+    server_id: Optional[str] = None,
+    db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
+) -> dict[str, Any]:
+    target_row: Optional[dict[str, Any]] = None
     if server_id:
-        row = db.get_media_server_row(server_id)
-        if row is None:
+        target_row = db.get_media_server_row(server_id)
+        if target_row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media server not found")
-        db.set_media_server_row_path_mapping(server_id, None)
+    else:
+        target_row = _single_file_path_server_row(db)
+
+    if target_row is not None:
+        db.set_media_server_row_path_mapping(target_row["id"], None)
+        registry.reload(config, db)
         return {"mapping": None, "mappings": library_health.mappings_view(db)}
+
     db.set_media_server_path_mapping(None)
     return {"mapping": None}
 

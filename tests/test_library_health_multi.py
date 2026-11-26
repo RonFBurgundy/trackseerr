@@ -137,8 +137,13 @@ def test_two_servers_merge_findings_and_server_names(db: Database, music: Path) 
     assert run["server_kind"] == "Plex 1, Jellyfin 2"
     assert run["unindexed"] == 2
     got = findings(db)
-    assert got[str(f_both_miss)]["detail"]["servers"] == ["Plex 1", "Jellyfin 2"]
-    assert got[str(f_only_s2_miss)]["detail"]["servers"] == ["Jellyfin 2"]
+    assert got[str(f_both_miss)]["detail"]["servers"] == [
+        {"id": "s1", "name": "Plex 1", "cause": lh.CAUSE_UNKNOWN},
+        {"id": "s2", "name": "Jellyfin 2", "cause": lh.CAUSE_UNKNOWN},
+    ]
+    assert got[str(f_only_s2_miss)]["detail"]["servers"] == [
+        {"id": "s2", "name": "Jellyfin 2", "cause": lh.CAUSE_UNKNOWN},
+    ]
 
 
 def test_one_server_errors_other_continues(db: Database, music: Path) -> None:
@@ -159,7 +164,9 @@ def test_one_server_errors_other_continues(db: Database, music: Path) -> None:
     assert run["server_kind"] == "Jellyfin 2"
     got = findings(db)
     assert str(f_miss) in got
-    assert got[str(f_miss)]["detail"]["servers"] == ["Jellyfin 2"]
+    assert got[str(f_miss)]["detail"]["servers"] == [
+        {"id": "s2", "name": "Jellyfin 2", "cause": lh.CAUSE_UNKNOWN},
+    ]
 
 
 def test_per_server_mapping_and_auto_suggestion_saved_on_row(db: Database, music: Path) -> None:
@@ -215,7 +222,9 @@ def test_skips_servers_without_refresh_role_or_file_paths(db: Database, music: P
     assert run["error"] is None
     assert run["server_kind"] == "Active"
     got = findings(db)
-    assert got[str(f2)]["detail"]["servers"] == ["Active"]
+    assert got[str(f2)]["detail"]["servers"] == [
+        {"id": "s3", "name": "Active", "cause": lh.CAUSE_UNKNOWN},
+    ]
 
 
 def test_not_installed_keeps_legacy_behaviour(db: Database, music: Path) -> None:
@@ -230,7 +239,9 @@ def test_not_installed_keeps_legacy_behaviour(db: Database, music: Path) -> None
     assert run["error"] is None
     assert run["server_kind"] == "plex"
     got = findings(db)
-    assert got[str(f2)]["detail"]["servers"] == ["plex"]
+    assert got[str(f2)]["detail"]["servers"] == [
+        {"id": "plex", "name": "plex", "cause": lh.CAUSE_UNKNOWN},
+    ]
 
 
 def test_api_mappings_and_per_server_put_delete(db: Database, music: Path, tmp_path: Path) -> None:
@@ -284,3 +295,108 @@ def test_api_mappings_and_per_server_put_delete(db: Database, music: Path, tmp_p
         res_del = client.delete("/api/library-health/mapping?server_id=s2", headers=headers)
         assert res_del.status_code == 200
         assert res_del.json()["mappings"][1]["server_prefix"] == ""
+
+
+def test_each_server_cause_kept(db: Database, music: Path) -> None:
+    from datetime import timedelta, timezone
+
+    f_ok = touch(music / "Art/Alb/1.flac", age_days=20)
+    f_miss = touch(music / "Art/Alb/2.flac", age_days=10)
+    now = datetime.now(timezone.utc)
+
+    r1 = _make_record("s1", "Plex", "plex", path_mapping={"server_prefix": "/s1", "local_prefix": str(music), "auto": False})
+    r2 = _make_record("s2", "Jellyfin", "jellyfin", path_mapping={"server_prefix": "/s2", "local_prefix": str(music), "auto": False})
+    s1 = FakeServer([ref("/s1", music, f_ok)], kind="plex", last_scan=now - timedelta(days=30))
+    s2 = FakeServer([ref("/s2", music, f_ok)], kind="jellyfin", last_scan=now)
+
+    registry.install([r1, r2])
+    with patch.object(registry, "build_adapter", side_effect=lambda r: s1 if r.id == "s1" else s2):
+        run = lh.run_check(db, None, music_root=music)
+
+    assert run["error"] is None
+    got = findings(db)
+    miss = got[str(f_miss)]
+    assert miss["cause"] == lh.CAUSE_NOT_SCANNED
+    assert miss["detail"]["servers"] == [
+        {"id": "s1", "name": "Plex", "cause": lh.CAUSE_NOT_SCANNED},
+        {"id": "s2", "name": "Jellyfin", "cause": lh.CAUSE_UNKNOWN},
+    ]
+
+
+def test_same_named_servers_not_collapsed(db: Database, music: Path) -> None:
+    f_ok = touch(music / "Art/Alb/1.flac")
+    f_miss = touch(music / "Art/Alb/2.flac")
+
+    r1 = _make_record("s1", "Plex", "plex", path_mapping={"server_prefix": "/s1", "local_prefix": str(music), "auto": False})
+    r2 = _make_record("s2", "Plex", "plex", path_mapping={"server_prefix": "/s2", "local_prefix": str(music), "auto": False})
+    s1 = FakeServer([ref("/s1", music, f_ok)], kind="plex")
+    s2 = FakeServer([ref("/s2", music, f_ok)], kind="plex")
+
+    registry.install([r1, r2])
+    with patch.object(registry, "build_adapter", side_effect=lambda r: s1 if r.id == "s1" else s2):
+        lh.run_check(db, None, music_root=music)
+
+    got = findings(db)
+    assert got[str(f_miss)]["detail"]["servers"] == [
+        {"id": "s1", "name": "Plex", "cause": lh.CAUSE_UNKNOWN},
+        {"id": "s2", "name": "Plex", "cause": lh.CAUSE_UNKNOWN},
+    ]
+
+
+def test_failed_server_findings_survive(db: Database, music: Path) -> None:
+    f_shared = touch(music / "Art/Alb/1.flac")
+    f_only_s1_miss = touch(music / "Art/Alb/2.flac")
+    f_only_s2_miss = touch(music / "Art/Alb/3.flac")
+
+    r1 = _make_record("s1", "Plex 1", "plex", path_mapping={"server_prefix": "/s1", "local_prefix": str(music), "auto": False})
+    r2 = _make_record("s2", "Jellyfin 2", "jellyfin", path_mapping={"server_prefix": "/s2", "local_prefix": str(music), "auto": False})
+
+    s1_ok = FakeServer([ref("/s1", music, f_shared), ref("/s1", music, f_only_s2_miss)], kind="plex")
+    s2_ok = FakeServer([ref("/s2", music, f_shared), ref("/s2", music, f_only_s1_miss)], kind="jellyfin")
+    registry.install([r1, r2])
+    with patch.object(registry, "build_adapter", side_effect=lambda r: s1_ok if r.id == "s1" else s2_ok):
+        lh.run_check(db, None, music_root=music)
+
+    assert set(findings(db)) == {str(f_only_s1_miss), str(f_only_s2_miss)}
+
+    # Second run: s1 fails, s2 succeeds and has now indexed f_only_s2_miss
+    s1_fail = FakeServer([], error=MediaServerError("boom"), kind="plex")
+    s2_updated = FakeServer([ref("/s2", music, f_shared), ref("/s2", music, f_only_s1_miss), ref("/s2", music, f_only_s2_miss)], kind="jellyfin")
+    with patch.object(registry, "build_adapter", side_effect=lambda r: s1_fail if r.id == "s1" else s2_updated):
+        run = lh.run_check(db, None, music_root=music)
+
+    assert run["errors"] == ["Plex 1: Could not read the media server library: MediaServerError"]
+    got = findings(db)
+    assert str(f_only_s1_miss) in got
+    assert str(f_only_s2_miss) not in got
+
+
+def test_weekly_runs_when_primary_down(db: Database, music: Path, tmp_path: Path) -> None:
+    db.update_media_management_settings({"root_folder_path": str(music)})
+    config = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+
+    r1 = _make_record("s1", "Primary Down", "plex")
+    r2 = _make_record("s2", "Secondary Up", "jellyfin", path_mapping={"server_prefix": "/s2", "local_prefix": str(music), "auto": False})
+    s2 = FakeServer([], kind="jellyfin")
+
+    registry.install([r1, r2])
+    with (
+        patch("trackseerr.media_servers.get_media_server", return_value=None),
+        patch.object(registry, "build_adapter", side_effect=lambda r: None if r.id == "s1" else s2),
+    ):
+        assert lh.LibraryHealthWorker().run_if_due(db, config) is True
+        run = db.get_last_library_health_run()
+        assert run is not None
+        assert run["server_kind"] == "Secondary Up"
+
+        secret = get_or_create_secret_key(data_dir=config.data_dir)
+        user = db.upsert_user("a-1", "admin", "a@example.com", is_admin=True)
+        token = create_session_token(user_id=user["id"], username="admin", is_admin=True, secret_key=secret)
+        db.create_session(token, user["id"], {"auth": "test"})
+        app = create_app(db=db, config=config)
+        app.dependency_overrides[get_db] = lambda: db
+        app.dependency_overrides[get_config] = lambda: config
+        app.dependency_overrides[get_active_media_server] = lambda: None
+        client = TestClient(app)
+        overview = client.get("/api/library-health", headers={"Authorization": f"Bearer {token}"}).json()
+        assert overview["server"] == {"kind": "jellyfin", "file_paths": True}

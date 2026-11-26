@@ -17,7 +17,15 @@ const groupId = (g: LibraryHealthGroup): string => `${g.kind}|${g.cause}|${g.gro
 function findingServersSuffix(detail: Record<string, unknown> | null | undefined): string {
   const raw = detail?.servers;
   if (!Array.isArray(raw)) return '';
-  const names = raw.filter((s): s is string => typeof s === 'string' && s.length > 0);
+  const names = raw
+    .map((s) => {
+      if (typeof s === 'string') return s;
+      if (s && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string') {
+        return (s as { name: string }).name;
+      }
+      return '';
+    })
+    .filter((name) => name.length > 0);
   return names.length > 1 ? ` · ${names.join(', ')}` : '';
 }
 

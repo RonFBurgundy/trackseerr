@@ -165,6 +165,30 @@ def validate(values: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _taken_names(db: Any, *, exclude_id: Optional[str] = None) -> set[str]:
+    return {
+        str(r.get("name") or "").strip().lower()
+        for r in db.list_media_server_rows()
+        if exclude_id is None or r["id"] != exclude_id
+    }
+
+
+def _next_available_name(db: Any, kind: str) -> str:
+    taken = _taken_names(db)
+    base = kind.title()
+    if base.lower() not in taken:
+        return base
+    n = 2
+    while f"{base} {n}".lower() in taken:
+        n += 1
+    return f"{base} {n}"
+
+
+def _ensure_unique_name(db: Any, name: str, *, exclude_id: Optional[str] = None) -> None:
+    if name.strip().lower() in _taken_names(db, exclude_id=exclude_id):
+        raise ServerSettingsError("Another server already uses that name")
+
+
 def _save_locked(
     db: Any,
     server_id: str,
@@ -194,6 +218,7 @@ def _save_locked(
         cleaned_name = str(updates["name"]).strip()
         if not cleaned_name:
             raise ServerSettingsError("Media server name must not be blank")
+        _ensure_unique_name(db, cleaned_name, exclude_id=server_id)
         updates["name"] = cleaned_name
     if not updates:
         return stored
@@ -221,6 +246,7 @@ def save(db: Any, config: Config, values: dict[str, Any]) -> dict[str, Any]:
                 raise ServerSettingsError("Media server kind cannot be changed")
             resolved = resolve_secrets(values, stored)
             clean = validate({**resolved, "kind": stored["kind"]})
+            _ensure_unique_name(db, clean["name"], exclude_id=server_id)
             updated = db.update_media_server_row(server_id, clean)
             if updated is None:
                 raise ServerNotFoundError(f"Media server '{server_id}' not found")
@@ -228,6 +254,10 @@ def save(db: Any, config: Config, values: dict[str, Any]) -> dict[str, Any]:
     else:
         resolved = resolve_secrets(values, None)
         clean = validate(resolved)
+        if str(values.get("name") or "").strip():
+            _ensure_unique_name(db, clean["name"])
+        else:
+            clean["name"] = _next_available_name(db, clean["kind"])
         row = db.insert_media_server_row({**clean, "source": MEDIA_SERVER_SOURCE_SETTINGS})
 
     registry.reload(config, db)
