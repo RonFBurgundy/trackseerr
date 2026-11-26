@@ -338,12 +338,18 @@ def _apply_override_scope(adapter: MediaServer, record: ServerRecord) -> MediaSe
     """Attach server identity and legacy-override eligibility to a built adapter."""
     primary = primary_record()
     use_legacy = bool(record.is_login or (primary is not None and record.id == primary.id))
-    adapter.server_id = record.id
-    adapter.legacy_overrides = use_legacy
+    targets: list[object] = [adapter]
     if isinstance(adapter, PlexMediaServer):
-        client = adapter.plex_extras()
-        client.server_id = record.id
-        client.legacy_overrides = use_legacy
+        extras = getattr(adapter, "plex_extras", None)
+        client = extras() if callable(extras) else None
+        if client is not None:
+            targets.append(client)
+    for target in targets:
+        try:
+            setattr(target, "server_id", record.id)
+            setattr(target, "legacy_overrides", use_legacy)
+        except AttributeError:
+            logger.debug("Cannot attach override scope to %s", type(target).__name__)
     return adapter
 
 

@@ -293,7 +293,7 @@ def test_run_once_main_connects_with_the_saved_server(tmp_path):
     registry._reset_for_tests()
 
 
-def test_run_once_ignores_saved_settings_when_the_environment_names_a_server(tmp_path):
+def test_run_once_loads_saved_servers_alongside_environment_servers(tmp_path):
     from trackseerr.media_servers import registry
 
     registry._reset_for_tests()
@@ -301,7 +301,10 @@ def test_run_once_ignores_saved_settings_when_the_environment_names_a_server(tmp
     cfg = Config(plex_url="http://plex", plex_token="t", data_dir=str(tmp_path))
     with patch("trackseerr.cli.os.path.isdir", return_value=False):
         _apply_saved_media_server_settings(cfg)
-    assert [r.id for r in registry.records(cfg)] == ["env-plex"]
+    records = registry.records(cfg)
+    assert len(records) == 2
+    assert "env-plex" in [r.id for r in records]
+    assert {r.kind for r in records} == {"plex", "subsonic"}
     registry._reset_for_tests()
 
 

@@ -203,6 +203,14 @@ def test_status_endpoint_reports_subsonic(env):
         "type": "subsonic",
         "connected": True,
         "capabilities": {"playlists": True, "users": False, "mixes": False, "library_refresh": True, "file_paths": True},
+        "kinds": ["subsonic"],
+        "all_capabilities": {
+            "playlists": True,
+            "users": False,
+            "mixes": False,
+            "library_refresh": True,
+            "file_paths": True,
+        },
     }
 
 
