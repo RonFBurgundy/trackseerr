@@ -395,7 +395,7 @@ def test_users_refresh_route_links_navidrome_users(monkeypatch: pytest.MonkeyPat
         db.close()
 
 
-def test_set_owner_sends_full_playlist_object() -> None:
+def test_set_owner_sends_only_editable_playlist_fields() -> None:
     fake = FakeNavidrome()
     fake.add_user("nd-alice", "alice")
     fake.state.playlists["pl-10"] = FakePlaylist("pl-10", "Road Mix", "admin", [])
@@ -406,9 +406,34 @@ def test_set_owner_sends_full_playlist_object() -> None:
         assert admin.set_owner("pl-10", "nd-alice") is True
         assert len(fake.put_bodies) == 1
         put_body = fake.put_bodies[0]
+        assert set(put_body.keys()) == {"name", "comment", "public", "ownerId"}
         assert put_body["name"] == "Road Mix"
         assert put_body["comment"] == "Keep this comment"
         assert put_body["public"] is True
         assert put_body["ownerId"] == "nd-alice"
+    finally:
+        admin.close()
+
+
+def test_set_owner_includes_rules_only_when_non_empty() -> None:
+    fake = FakeNavidrome()
+    fake.add_user("nd-alice", "alice")
+    fake.state.playlists["pl-11"] = FakePlaylist("pl-11", "Smart Mix", "admin", [])
+    admin = NavidromeAdmin("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    smart_rules = {"all": [{"is": {"genre": "Rock"}}]}
+    original_get_playlist = admin.get_playlist
+
+    def _get_with_rules(playlist_id: str) -> dict[str, object]:
+        payload = original_get_playlist(playlist_id)
+        payload["rules"] = smart_rules
+        return payload
+
+    admin.get_playlist = _get_with_rules  # type: ignore[method-assign]
+    try:
+        assert admin.set_owner("pl-11", "nd-alice") is True
+        assert len(fake.put_bodies) == 1
+        put_body = fake.put_bodies[0]
+        assert set(put_body.keys()) == {"name", "comment", "public", "ownerId", "rules"}
+        assert put_body["rules"] == smart_rules
     finally:
         admin.close()
