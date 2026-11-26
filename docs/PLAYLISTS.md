@@ -146,7 +146,7 @@ Notes:
 
 ## Playlists already on your servers
 
-The **Playlists** page has a tab for each media server that lists the playlists already on it. Open one to see its songs, and **Adopt** it to bring it into TrackSeerr, which then tracks its missing songs. The original stays untouched: TrackSeerr turns that server off for its copy so it never writes over it. After adopting, pick who else should get it. They get their own copy, on the same server or another one; the original owner's playlist is never written over.
+The **Playlists** page has a tab for each media server that lists the playlists already on it. Open one to see its songs, and **Adopt** it to bring it into TrackSeerr, which then tracks its missing songs. After adopting, pick who else should get it. They get their own copy, on the same server or another one; the original owner's playlist is never written over.
 
 On the sign-in Plex you can also rename, reorder and copy playlists, and admins can see every Plex Home user's playlists.
 
