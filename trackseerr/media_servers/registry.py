@@ -12,7 +12,7 @@ import logging
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Optional, Sequence
 
 if TYPE_CHECKING:
@@ -22,15 +22,16 @@ from trackseerr.config import (
     MEDIA_SERVER_JELLYFIN,
     MEDIA_SERVER_PLEX,
     MEDIA_SERVER_SOURCE_ENV,
+    MEDIA_SERVER_SOURCE_SETTINGS,
     MEDIA_SERVER_SUBSONIC,
     Config,
 )
-from trackseerr.media_servers import _saved_url_is_unsafe
 from trackseerr.media_servers.base import MediaServer, MediaServerError
 from trackseerr.media_servers.jellyfin import JellyfinMediaServer
 from trackseerr.media_servers.plex import PlexMediaServer
 from trackseerr.media_servers.subsonic import SubsonicMediaServer
 from trackseerr.redaction import safe_exc
+from trackseerr.security import is_safe_service_url
 
 logger = logging.getLogger(__name__)
 
@@ -88,84 +89,49 @@ def _plex_env_record(config: Config, *, is_login: bool = False) -> ServerRecord:
     )
 
 
-def _subsonic_fallback_record(config: Config) -> ServerRecord:
-    """Build a single-server fallback ``ServerRecord`` for Subsonic from ``config.media_server_view()``."""
-    view = config.media_server_view()
-    return ServerRecord(
-        id=f"env-{MEDIA_SERVER_SUBSONIC}",
-        kind=MEDIA_SERVER_SUBSONIC,
-        name="Subsonic",
-        source=view.source,
-        url=view.subsonic_url,
-        username=view.subsonic_user,
-        password=view.subsonic_password,
-        api_key=view.subsonic_api_key,
-        verify_ssl=config.plex_verify_ssl,
-    )
-
-
-def _jellyfin_fallback_record(config: Config) -> ServerRecord:
-    """Build a single-server fallback ``ServerRecord`` for Jellyfin from ``config.media_server_view()``."""
-    view = config.media_server_view()
-    return ServerRecord(
-        id=f"env-{MEDIA_SERVER_JELLYFIN}",
-        kind=MEDIA_SERVER_JELLYFIN,
-        name="Jellyfin",
-        source=view.source,
-        url=view.jellyfin_url,
-        username=view.jellyfin_user,
-        api_key=view.jellyfin_api_key,
-        verify_ssl=config.plex_verify_ssl,
-    )
-
-
 def env_records(config: Config) -> list[ServerRecord]:
     """Build ``ServerRecord`` entries for every media server configured via environment variables."""
     result: list[ServerRecord] = []
     if config.plex_url and config.plex_token:
         result.append(_plex_env_record(config))
-    if config.media_server_source == MEDIA_SERVER_SOURCE_ENV:
-        if config.subsonic_url and (
-            config.subsonic_api_key or (config.subsonic_user and config.subsonic_password)
-        ):
-            result.append(
-                ServerRecord(
-                    id=f"env-{MEDIA_SERVER_SUBSONIC}",
-                    kind=MEDIA_SERVER_SUBSONIC,
-                    name="Subsonic",
-                    source=MEDIA_SERVER_SOURCE_ENV,
-                    url=config.subsonic_url,
-                    username=config.subsonic_user,
-                    password=config.subsonic_password,
-                    api_key=config.subsonic_api_key,
-                    verify_ssl=config.plex_verify_ssl,
-                )
+    if config.subsonic_url and (
+        config.subsonic_api_key or (config.subsonic_user and config.subsonic_password)
+    ):
+        result.append(
+            ServerRecord(
+                id=f"env-{MEDIA_SERVER_SUBSONIC}",
+                kind=MEDIA_SERVER_SUBSONIC,
+                name="Subsonic",
+                source=MEDIA_SERVER_SOURCE_ENV,
+                url=config.subsonic_url,
+                username=config.subsonic_user,
+                password=config.subsonic_password,
+                api_key=config.subsonic_api_key,
+                verify_ssl=config.plex_verify_ssl,
             )
-        if config.jellyfin_url and config.jellyfin_api_key:
-            result.append(
-                ServerRecord(
-                    id=f"env-{MEDIA_SERVER_JELLYFIN}",
-                    kind=MEDIA_SERVER_JELLYFIN,
-                    name="Jellyfin",
-                    source=MEDIA_SERVER_SOURCE_ENV,
-                    url=config.jellyfin_url,
-                    username=config.jellyfin_user,
-                    api_key=config.jellyfin_api_key,
-                    verify_ssl=config.plex_verify_ssl,
-                )
+        )
+    if config.jellyfin_url and config.jellyfin_api_key:
+        result.append(
+            ServerRecord(
+                id=f"env-{MEDIA_SERVER_JELLYFIN}",
+                kind=MEDIA_SERVER_JELLYFIN,
+                name="Jellyfin",
+                source=MEDIA_SERVER_SOURCE_ENV,
+                url=config.jellyfin_url,
+                username=config.jellyfin_user,
+                api_key=config.jellyfin_api_key,
+                verify_ssl=config.plex_verify_ssl,
             )
+        )
     return result
 
 
 def fallback_records(config: Config) -> list[ServerRecord]:
-    """Single-server fallback before ``install()`` is called (for processes and tests without DB load)."""
-    if config.plex_enabled:
-        return [_plex_env_record(config, is_login=True)]
-    if config.subsonic_configured:
-        return [_subsonic_fallback_record(config)]
-    if config.jellyfin_configured:
-        return [_jellyfin_fallback_record(config)]
-    return []
+    """Fallback records from ``config`` before ``install()`` is called (for processes and tests without DB load)."""
+    return [
+        replace(rec, is_login=True) if rec.kind == MEDIA_SERVER_PLEX else rec
+        for rec in env_records(config)
+    ]
 
 
 def sync_env_rows(config: Config, db: Any) -> None:
@@ -339,6 +305,15 @@ def _adapter_key(record: ServerRecord) -> tuple[Any, ...]:
         record.music_section,
         record.verify_ssl,
     )
+
+
+def _saved_url_is_unsafe(source: str, kind: str, url: str) -> bool:
+    """True (and logged) when a URL that came from the Settings page, not the operator's environment, fails the SSRF
+    check. The save/test routes check it too; this covers rows saved before the check existed or written directly."""
+    if source != MEDIA_SERVER_SOURCE_SETTINGS or is_safe_service_url(url):
+        return False
+    logger.error("Refusing to connect to the saved %s URL: it is not an allowed service address", kind)
+    return True
 
 
 def build_adapter(record: ServerRecord) -> Optional[MediaServer]:

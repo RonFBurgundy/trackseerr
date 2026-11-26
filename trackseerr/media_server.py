@@ -24,7 +24,7 @@ NO_MEDIA_SERVER_DETAIL = "No media server connected"
 NO_MEDIA_SERVER_CODE = "media_server_unavailable"
 NO_MEDIA_SERVER_STATUS = 409
 NO_MEDIA_SERVER_BOOT_MESSAGE = (
-    "No media server configured — library management runs; playlist push to a media server is disabled"
+    "No media server set in the environment; add one in Settings, or run without one."
 )
 
 

@@ -18,6 +18,7 @@ from trackseerr.api.routes.sync import SyncState
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.cli import main
 from trackseerr.config import Config, ConfigError
+from trackseerr.media_servers import registry
 from trackseerr.media_servers.plex import PlexMediaServer
 from trackseerr.models import Playlist, Track, UserPermission
 from trackseerr.storage import Database
@@ -40,55 +41,30 @@ def _fresh_probe_cache():
 
 def test_default_is_plex_when_credentials_present():
     cfg = Config(plex_url="http://plex:32400", plex_token="tok")
-    assert cfg.media_server_type == "plex" and cfg.plex_enabled
+    recs = registry.fallback_records(cfg)
+    assert len(recs) == 1 and recs[0].kind == "plex" and recs[0].is_login is True
 
 
 def test_default_is_none_without_credentials():
     cfg = Config(plex_url="", plex_token="")
-    assert cfg.media_server_type == "none" and not cfg.plex_enabled
-    cfg.validate_media_server()  # implicit none is never an error
+    assert registry.env_records(cfg) == []
+    cfg.validate_media_server()
 
 
 def test_partial_credentials_default_to_none():
-    assert Config(plex_url="http://plex", plex_token="").media_server_type == "none"
+    assert registry.env_records(Config(plex_url="http://plex", plex_token="")) == []
 
 
 @pytest.mark.parametrize("url,token", [("http://plex", ""), ("", "tok")])
-def test_partial_plex_config_with_media_server_unset_is_a_config_error(url, token):
+def test_partial_plex_config_is_a_config_error(url, token):
     with pytest.raises(ConfigError, match="partially configured"):
         Config(plex_url=url, plex_token=token).validate_media_server()
 
 
-@pytest.mark.parametrize("choice", ["none", "plex"])
-def test_partial_plex_config_with_explicit_media_server_keeps_prior_behaviour(choice):
-    cfg = Config(plex_url="http://plex", plex_token="", media_server=choice)
-    if choice == "none":
-        cfg.validate_media_server()
-    else:
-        with pytest.raises(ConfigError, match="PLEX_URL and PLEX_TOKEN"):
-            cfg.validate_media_server()
-
-
-def test_explicit_none_wins_over_credentials():
-    cfg = Config(plex_url="http://plex", plex_token="tok", media_server="none")
-    assert cfg.media_server_type == "none" and not cfg.plex_enabled
-
-
-def test_explicit_plex_without_credentials_is_a_config_error():
-    with pytest.raises(ConfigError, match="PLEX_URL and PLEX_TOKEN"):
-        Config(plex_url="", plex_token="", media_server="plex").validate_media_server()
-
-
-def test_unknown_media_server_is_a_config_error():
-    with pytest.raises(ConfigError, match="not supported"):
-        Config(plex_url="", plex_token="", media_server="emby").validate_media_server()
-
-
-def test_from_env_reads_media_server():
-    with patch.dict(os.environ, {"MEDIA_SERVER": " None "}, clear=True):
-        assert Config.from_env().media_server_type == "none"
+def test_from_env_reads_plex_credentials():
     with patch.dict(os.environ, {"PLEX_URL": "http://p", "PLEX_TOKEN": "t"}, clear=True):
-        assert Config.from_env().media_server_type == "plex"
+        recs = registry.env_records(Config.from_env())
+        assert [r.kind for r in recs] == ["plex"]
 
 
 # ----------------------------------------------------------------------------- boot in every role / mode
@@ -141,11 +117,11 @@ def test_web_roles_boot_without_plex(tmp_path, caplog, extra):
     assert infos.count(media_server.NO_MEDIA_SERVER_BOOT_MESSAGE) == 1
 
 
-def test_explicit_plex_without_credentials_fails_startup_loudly(tmp_path, caplog, capsys):
+def test_partial_plex_credentials_fails_startup_loudly(tmp_path, caplog, capsys):
     with caplog.at_level(logging.ERROR):
-        code, _ = _run_web(_base_env(tmp_path, MEDIA_SERVER="plex"))
+        code, _ = _run_web(_base_env(tmp_path, PLEX_URL="http://plex"))
     assert code == 1
-    assert "MEDIA_SERVER=plex requires PLEX_URL and PLEX_TOKEN" in capsys.readouterr().err
+    assert "Plex is partially configured" in capsys.readouterr().err
 
 
 def test_run_once_without_plex_skips_push_and_succeeds():
@@ -369,10 +345,10 @@ def _admin_headers(db, cfg):
     return {"Authorization": f"Bearer {token}"}
 
 
-def build_client(tmp_path, *, plex=None, media_server_choice="", url="", token=""):
+def build_client(tmp_path, *, plex=None, url="", token=""):
     """An app instance for a given media-server setup; ``plex`` is what get_plex_client yields."""
     db = Database(":memory:")
-    cfg = Config(plex_url=url, plex_token=token, media_server=media_server_choice, data_dir=str(tmp_path))
+    cfg = Config(plex_url=url, plex_token=token, data_dir=str(tmp_path))
     app = create_app(db=db, config=cfg)
     app.dependency_overrides[get_db] = lambda: db
     app.dependency_overrides[get_config] = lambda: cfg

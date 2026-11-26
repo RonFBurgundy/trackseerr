@@ -34,7 +34,7 @@ def db(tmp_path):
 
 @pytest.fixture
 def config(tmp_path) -> Config:
-    return Config(plex_url="", plex_token="", data_dir=str(tmp_path), media_server="none")
+    return Config(plex_url="", plex_token="", data_dir=str(tmp_path))
 
 
 @pytest.fixture

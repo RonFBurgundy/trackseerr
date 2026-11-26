@@ -1,5 +1,7 @@
-"""Subsonic media-server configuration: env validation, the Settings-page overlay, the admin API, status and wiring."""
+"""Subsonic media-server configuration: env validation, the admin API, status and wiring."""
 
+import logging
+import os
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -11,7 +13,7 @@ from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_media_client, get_plex_client
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config, ConfigError
-from trackseerr.media_servers import SubsonicMediaServer, build_subsonic, capabilities_for
+from trackseerr.media_servers import SubsonicMediaServer, capabilities_for, registry
 from trackseerr.role_guard import GATEWAY_FORBIDDEN_ENV, check_role_environment, core_like_reasons
 from trackseerr.storage import Database
 from tests.subsonic_fake import FakeSubsonic, default_state
@@ -20,7 +22,7 @@ URL = "http://navidrome:4533"
 
 
 def sub(**kw) -> Config:
-    base = dict(plex_url="", plex_token="", media_server="subsonic", subsonic_url=URL, subsonic_user="u", subsonic_password="p")
+    base = dict(plex_url="", plex_token="", subsonic_url=URL, subsonic_user="u", subsonic_password="p")
     base.update(kw)
     return Config(**base)
 
@@ -31,13 +33,13 @@ def sub(**kw) -> Config:
 def test_explicit_subsonic_with_credentials_is_valid():
     cfg = sub()
     cfg.validate_media_server()
-    assert cfg.media_server_type == "subsonic" and cfg.subsonic_configured and not cfg.plex_enabled
+    assert [r.kind for r in registry.env_records(cfg)] == ["subsonic"]
 
 
 def test_api_key_alone_is_enough():
     cfg = sub(subsonic_user="", subsonic_password="", subsonic_api_key="k")
     cfg.validate_media_server()
-    assert cfg.subsonic_configured
+    assert [r.kind for r in registry.env_records(cfg)] == ["subsonic"]
 
 
 @pytest.mark.parametrize(
@@ -54,14 +56,59 @@ def test_explicit_subsonic_without_complete_credentials_fails_loudly(kw, needle)
         sub(**kw).validate_media_server()
 
 
-def test_subsonic_variables_without_media_server_choice_fail_loudly():
-    with pytest.raises(ConfigError, match="MEDIA_SERVER=subsonic"):
-        Config(plex_url="", plex_token="", subsonic_url=URL).validate_media_server()
+def test_plex_and_subsonic_env_blocks_both_become_servers():
+    cfg = Config(
+        plex_url="http://plex:32400",
+        plex_token="tok",
+        subsonic_url=URL,
+        subsonic_user="u",
+        subsonic_password="p",
+    )
+    cfg.validate_media_server()
+    recs = registry.env_records(cfg)
+    assert [(r.id, r.kind) for r in recs] == [("env-plex", "plex"), ("env-subsonic", "subsonic")]
+
+
+@pytest.mark.parametrize(
+    "kw,needle",
+    [
+        ({"jellyfin_url": "http://jf:8096"}, "JELLYFIN_API_KEY"),
+        ({"jellyfin_api_key": "k"}, "JELLYFIN_URL"),
+        ({"jellyfin_user": "bob"}, "JELLYFIN_URL"),
+    ],
+)
+def test_partial_jellyfin_block_is_config_error(kw, needle):
+    with pytest.raises(ConfigError, match=needle):
+        Config(plex_url="", plex_token="", **kw).validate_media_server()
+
+
+def test_media_server_variable_is_ignored_with_warning(tmp_path, caplog):
+    from trackseerr.cli import main
+
+    env = {
+        "MEDIA_SERVER": "none",
+        "PLEX_URL": "http://plex:32400",
+        "PLEX_TOKEN": "tok",
+        "RUN_ONCE": "1",
+        "DATA_DIR": str(tmp_path),
+        "CONFIG_DIR": str(tmp_path),
+    }
+    with (
+        patch("trackseerr.clients.plex.PlexClient"),
+        patch("trackseerr.cli.SyncCoordinator"),
+        patch.dict(os.environ, env, clear=True),
+        caplog.at_level(logging.WARNING),
+    ):
+        assert main() == 0
+    assert any(
+        "MEDIA_SERVER is no longer used: every PLEX_*, SUBSONIC_* and JELLYFIN_* block you set is added "
+        "as a server; add or remove servers in Settings." in r.getMessage()
+        for r in caplog.records
+    )
 
 
 def test_from_env_reads_subsonic_variables(monkeypatch):
     for name, value in {
-        "MEDIA_SERVER": "subsonic",
         "SUBSONIC_URL": f" {URL} ",
         "SUBSONIC_USER": "bob",
         "SUBSONIC_PASSWORD": " pass with spaces ",
@@ -70,7 +117,7 @@ def test_from_env_reads_subsonic_variables(monkeypatch):
         monkeypatch.setenv(name, value)
     cfg = Config.from_env()
     assert (cfg.subsonic_url, cfg.subsonic_user, cfg.subsonic_password) == (URL, "bob", " pass with spaces ")
-    assert cfg.media_server_env_controlled and cfg.media_server_source == "env"
+    assert [r.kind for r in registry.env_records(cfg)] == ["subsonic"]
 
 
 def test_subsonic_secrets_are_forbidden_on_the_gateway():
@@ -98,15 +145,6 @@ def test_gateway_db_with_media_servers_secret_is_core_like():
 
 
 # ----------------------------------------------------------------------------- factory & dependency
-
-
-def test_build_subsonic_shares_one_adapter_per_configuration():
-    a, b = build_subsonic(sub()), build_subsonic(sub())
-    assert isinstance(a, SubsonicMediaServer) and a is b
-    c = build_subsonic(sub(subsonic_password="other"))
-    assert c is not a
-    assert build_subsonic(sub(subsonic_password="")) is None
-    assert build_subsonic(Config(plex_url="", plex_token="")) is None
 
 
 def test_capabilities_for_subsonic_hides_plex_only_features():
@@ -155,7 +193,6 @@ def env(tmp_path):
 
 
 def test_status_endpoint_reports_subsonic(env):
-    env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
     fake = FakeSubsonic(default_state([]))
     fake.state.users["u"] = fake.state.users["admin"].__class__("u", True, "p")
@@ -170,7 +207,6 @@ def test_status_endpoint_reports_subsonic(env):
 
 
 def test_status_endpoint_subsonic_unreachable(env):
-    env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
     with patch("trackseerr.media_servers.registry.build_adapter", return_value=None):
         body = env.tc.get("/api/system/media-server").json()
@@ -178,7 +214,6 @@ def test_status_endpoint_subsonic_unreachable(env):
 
 
 def test_generic_search_route_works_on_subsonic(env):
-    env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
     fake = FakeSubsonic(default_state([("Song A", "Artist 1", "Album X")]))
     fake.state.users["u"] = fake.state.users["admin"].__class__("u", True, "p")
@@ -190,8 +225,7 @@ def test_generic_search_route_works_on_subsonic(env):
 
 def test_plex_only_routes_do_not_get_a_subsonic_client(env):
     env.app.dependency_overrides.pop(get_plex_client, None)
-    env.cfg.media_server = "subsonic"
     env.cfg.subsonic_url, env.cfg.subsonic_user, env.cfg.subsonic_password = URL, "u", "p"
     from trackseerr.api.dependencies import get_plex_client as real_get_plex_client
 
-    assert real_get_plex_client(env.cfg) is None  # plex_enabled is False whenever Subsonic is the active server
+    assert real_get_plex_client(env.cfg) is None  # Subsonic is not a Plex server
