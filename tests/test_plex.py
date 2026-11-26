@@ -422,3 +422,24 @@ def test_match_track_candidate_fetch_error_skipped(mock_server):
     matched = client.match_track(t)
     assert matched is good_cand
 
+
+def test_missing_section_warning_per_server(caplog):
+    import logging
+
+    _WARNED_MISSING_SECTIONS.clear()
+    sec1 = MagicMock(title="Music", type="artist")
+    sec2 = MagicMock(title="Music", type="artist")
+    server1 = MagicMock(machineIdentifier="srv-1")
+    server1.library.sections.return_value = [sec1]
+    server2 = MagicMock(machineIdentifier="srv-2")
+    server2.library.sections.return_value = [sec2]
+
+    with caplog.at_level(logging.WARNING):
+        music_sections(server1, preferred="Vinyl")
+        music_sections(server2, preferred="Vinyl")
+        music_sections(server1, preferred="Vinyl")
+        music_sections(server2, preferred="Vinyl")
+
+    warnings = [r for r in caplog.records if "Vinyl" in r.message]
+    assert len(warnings) == 2
+

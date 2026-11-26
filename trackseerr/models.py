@@ -202,6 +202,7 @@ class SyncResult:
     missing: list[Track] = field(default_factory=list)
     skipped: bool = False
     skip_reason: str = ""
+    server_playlist_id: str = ""
 
 
 class DownloadDriverType(str, Enum):

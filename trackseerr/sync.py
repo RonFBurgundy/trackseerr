@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
-from .media_servers import PlaylistSyncOptions, as_media_server, registry
+from .media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error, registry
 from .media_servers.user_logins import sync_subsonic_for_users
 from .clients.spotify import SpotifyClient
 from .config import MEDIA_SERVER_SUBSONIC, Config
@@ -37,6 +37,22 @@ class SyncCoordinator:
         self.deezer = deezer_client
         self.db = db
 
+    def _push_to_server(
+        self, rec: registry.ServerRecord, adapter: object, pl: Playlist, options: PlaylistSyncOptions
+    ) -> list[SyncResult]:
+        try:
+            if rec.kind == MEDIA_SERVER_SUBSONIC:
+                return sync_subsonic_for_users(self.db, self.config, rec, adapter, pl, [], options)
+            return list(adapter.sync_playlist(pl, [], options))  # type: ignore[attr-defined]
+        except MediaServerError as exc:
+            logger.error("Error syncing playlist '%s' to %s: %s", pl.name, rec.name, exc.safe_detail)
+            return [SyncResult(pl.name, len(pl.tracks), 0, len(pl.tracks), False, exc.safe_detail, missing=list(pl.tracks))]
+        except Exception as e:
+            detail = describe_error(e)
+            logger.error("Error syncing playlist '%s' to %s: %s", pl.name, rec.name, detail)
+            logger.debug("Server playlist sync traceback", exc_info=True)
+            return [SyncResult(pl.name, len(pl.tracks), 0, len(pl.tracks), False, detail, missing=list(pl.tracks))]
+
     def _sync_one(self, pl: Playlist) -> SyncResult:
         if registry.is_installed():
             servers = registry.media_servers(registry.ROLE_PLAYLISTS, self.config)
@@ -45,12 +61,7 @@ class SyncCoordinator:
             options = PlaylistSyncOptions.from_config(self.config, db=self.db)
             first_result: Optional[SyncResult] = None
             for rec, adapter in servers:
-                if rec.kind == MEDIA_SERVER_SUBSONIC:
-                    res_list = sync_subsonic_for_users(
-                        self.db, self.config, rec, adapter, pl, [], options
-                    )
-                else:
-                    res_list = adapter.sync_playlist(pl, [], options)
+                res_list = self._push_to_server(rec, adapter, pl, options)
                 if first_result is None and res_list:
                     first_result = res_list[0]
             if first_result is not None:

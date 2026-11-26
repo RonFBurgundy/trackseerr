@@ -1630,4 +1630,30 @@ def test_plex_sync_skips_missing_account_and_fails_on_connection_error() -> None
     assert "ConnectionError" in results[1].error
 
 
+def test_coordinator_server_failure_does_not_stop_next_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    db, cfg = _seed_fanout_db()
+    try:
+        t1 = Track("Song 1", "Artist 1", "Album 1")
+        failing_adapter = _FakePlaylistAdapter(exc=MediaServerConnectionError("boom", safe_detail="boom"))
+        ok_adapter = _FakePlaylistAdapter(matched=[t1], missing=[])
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "jellyfin", "name": "Alpha Failing", "url": "http://jf1:8096"}, failing_adapter),
+                ({"kind": "jellyfin", "name": "Beta Ok", "url": "http://jf2:8096"}, ok_adapter),
+            ],
+        )
+
+        pl = Playlist(id="pl-1", name="Road Trip", tracks=[t1])
+        res = SyncCoordinator(cfg, None, db=db)._sync_one(pl)
+        assert res.success is False
+        assert "boom" in res.error
+        assert len(failing_adapter.calls) == 1
+        assert len(ok_adapter.calls) == 1
+    finally:
+        db.close()
+
+
 
