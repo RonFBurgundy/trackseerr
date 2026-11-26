@@ -297,6 +297,18 @@ class TestMatching:
         assert hit["title"] == "Hello" and hit["artist"] == "Adele" and hit["rating_key"] == hit["id"] == "s1"
         assert s.search_tracks("   ") == []
 
+    def test_search_tracks_returns_up_to_limit_past_20(self) -> None:
+        rows = [(f"Track {i:03d}", "Band", "Album") for i in range(35)]
+        s = self.lib(*rows)
+        hits = s.search_tracks("track", limit=35)
+        assert len(hits) == 35
+
+    def test_title_only_search_pages_up_to_100(self) -> None:
+        rows = [("Common", f"Other {i}", "A") for i in range(90)] + [("Common", "Ke$ha", "Animal")]
+        s = self.lib(*rows)
+        ref = s.match_track(Track("Common", "Kesha", "Animal"))
+        assert ref is not None and ref.artist == "Ke$ha"
+
 
 class TestPlanPlaylistUpdate:
     def apply(self, current, desired):
