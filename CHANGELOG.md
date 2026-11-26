@@ -174,6 +174,7 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Songs a playlist sync found through their ISRC or MusicBrainz are no longer listed as missing right after the same sync, and each sync searches your media server half as often.
 - Songs you fixed with Match are no longer listed as missing again right after a playlist sync.
 - Library refreshes after imports, renames and scans now happen even when your main server is offline or isn't Plex.
 - Play history is read from every Plex server with **Read play history** on, not just the one people sign in with, and a second Plex server no longer uses the sign-in owner's Plex account.
