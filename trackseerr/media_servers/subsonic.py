@@ -25,7 +25,7 @@ import sqlite3
 import time
 import weakref
 from datetime import datetime, timezone
-from dataclasses import dataclass
+from dataclasses import FrozenInstanceError, dataclass
 from itertools import islice
 from typing import Any, Callable, Iterator, Optional, Sequence
 
@@ -48,6 +48,7 @@ from trackseerr.media_servers.base import (
     ServerTrackRef,
     ServerUser,
 )
+from trackseerr.media_servers.navidrome import NavidromeAdmin
 from trackseerr.media_servers.song_scoring import (
     DURATION_TOLERANCE_SECONDS as DURATION_TOLERANCE_SECONDS,
     artist_query_credits,
@@ -92,6 +93,52 @@ if not any(isinstance(f, _RedactHttpxUrls) for f in _httpx_logger.filters):
 SUBSONIC_API_VERSION = "1.16.1"
 CLIENT_NAME = "Trackseerr"
 SUBSONIC_CAPABILITIES = ServerCapabilities(playlists=True, users=False, library_refresh=True, mixes=False, search=True, file_paths=True)
+
+
+class _SubsonicCapabilities(ServerCapabilities):
+    """Dynamic ``ServerCapabilities`` that only probes Navidrome when ``users`` is read."""
+
+    def __init__(self, check_users: Callable[[], bool]) -> None:
+        self.__dict__.update(
+            playlists=True,
+            library_refresh=True,
+            mixes=False,
+            search=True,
+            file_paths=True,
+            folder_refresh=False,
+            _check_users=check_users,
+        )
+
+    @property  # type: ignore[override]
+    def users(self) -> bool:
+        return bool(self.__dict__["_check_users"]())
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        raise FrozenInstanceError(f"cannot assign to field {name!r}")
+
+    def __delattr__(self, name: str) -> None:
+        raise FrozenInstanceError(f"cannot delete field {name!r}")
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, ServerCapabilities):
+            return NotImplemented
+        return (
+            self.playlists,
+            self.users,
+            self.library_refresh,
+            self.mixes,
+            self.search,
+            self.file_paths,
+            self.folder_refresh,
+        ) == (
+            other.playlists,
+            other.users,
+            other.library_refresh,
+            other.mixes,
+            other.search,
+            other.file_paths,
+            other.folder_refresh,
+        )
 
 _SEARCH_PAGE = 20
 _TITLE_SEARCH_MAX = 100
@@ -234,6 +281,9 @@ class SubsonicMediaServer(MediaServer):
         self._finalizer = weakref.finalize(self, self._http.close)
         self._sleep = sleep
         self._api_key_checked = False
+        self._is_navidrome: Optional[bool] = None
+        self._navidrome_admin: Optional[NavidromeAdmin] = None
+        self._navidrome_admin_checked = False
 
     def with_login(self, username: str, password: str) -> "SubsonicMediaServer":
         """Return a new adapter against the same server authenticated with ``username`` and ``password``."""
@@ -251,13 +301,61 @@ class SubsonicMediaServer(MediaServer):
         copy.legacy_overrides = self.legacy_overrides
         return copy
 
+    def navidrome_admin(self) -> Optional[NavidromeAdmin]:
+        """Return a cached :class:`NavidromeAdmin` client when this server is Navidrome and uses an admin password login."""
+        if self._api_key or not self._user or not self._password:
+            return None
+        if self._navidrome_admin_checked:
+            return self._navidrome_admin
+        if self._is_navidrome is None:
+            try:
+                self._request("ping")
+            except MediaServerError as exc:
+                logger.debug("Navidrome detection ping failed: %s", exc.safe_detail)
+                return None
+        if not self._is_navidrome:
+            self._navidrome_admin_checked = True
+            self._navidrome_admin = None
+            return None
+        admin = NavidromeAdmin(
+            self._base,
+            self._user,
+            self._password,
+            verify_ssl=self._verify_ssl,
+            transport=self._transport,
+            timeout=self._timeout,
+            sleep=self._sleep,
+        )
+        try:
+            is_admin = admin.is_admin
+        except MediaServerAuthError as exc:
+            logger.warning("Navidrome native login rejected credentials: %s", exc.safe_detail)
+            admin.close()
+            self._navidrome_admin_checked = True
+            self._navidrome_admin = None
+            return None
+        except MediaServerError as exc:
+            logger.debug("Navidrome admin check failed: %s", exc.safe_detail)
+            admin.close()
+            return None
+        if not is_admin:
+            admin.close()
+            self._navidrome_admin_checked = True
+            self._navidrome_admin = None
+            return None
+        self._navidrome_admin_checked = True
+        self._navidrome_admin = admin
+        return admin
+
     # ------------------------------------------------------------------ transport
 
     @property
     def capabilities(self) -> ServerCapabilities:
-        return SUBSONIC_CAPABILITIES
+        return _SubsonicCapabilities(lambda: self.navidrome_admin() is not None)
 
     def close(self) -> None:
+        if self._navidrome_admin is not None:
+            self._navidrome_admin.close()
         self._http.close()
 
     def _auth_params(self) -> list[tuple[str, str]]:
@@ -338,6 +436,8 @@ class SubsonicMediaServer(MediaServer):
             detail = "Subsonic server returned an unexpected response"
             raise MediaServerError(detail, safe_detail=detail)
         if body.get("status") == "ok":
+            if endpoint == "ping":
+                self._is_navidrome = str(body.get("type") or "").strip().lower() == "navidrome"
             return body
         error = body.get("error") if isinstance(body.get("error"), dict) else {}
         code = error.get("code")
@@ -698,6 +798,9 @@ class SubsonicMediaServer(MediaServer):
         return isinstance(scan, dict) or body.get("status") == "ok"
 
     def list_users(self) -> list[ServerUser]:
+        admin = self.navidrome_admin()
+        if admin is not None:
+            return admin.list_users()
         body = self._request("getUsers")  # MediaServerUnsupported (code 50) when the account is not an admin
         raw = (body.get("users") or {}).get("user") or []
         return [
@@ -765,32 +868,43 @@ class SubsonicMediaServer(MediaServer):
         playlist = body.get("playlist") or {}
         return [str(e["id"]) for e in playlist.get("entry") or [] if isinstance(e, dict) and e.get("id")], playlist
 
-    def _push(self, playlist: Playlist, ids: list[str], options: PlaylistSyncOptions) -> None:
-        existing = [p for p in self._own_playlists() if p.get("name") == playlist.name]
-        if len(existing) > 1:
-            logger.warning("Subsonic has %d playlists named '%s'; updating the first", len(existing), playlist.name)
-        comment = playlist.description if options.add_description and playlist.description else None
-        if not existing:
-            first, rest = ids[:_ID_CHUNK], ids[_ID_CHUNK:]
-            body = self._request("createPlaylist", [("name", playlist.name), *(("songId", i) for i in first)], mutating=True)
-            created = body.get("playlist") or {}
-            playlist_id = str(created.get("id") or "")
-            if not playlist_id:  # older servers answer with a bare ok; look the playlist up by name
-                found = [p for p in self._own_playlists() if p.get("name") == playlist.name]
-                playlist_id = str(found[-1]["id"]) if found else ""
-            if not playlist_id:
-                raise MediaServerError("Subsonic did not report the created playlist", safe_detail="Subsonic did not report the created playlist")
-            extra: list[tuple[str, Any]] = []
-            if comment:
-                extra.append(("comment", comment))
-            for chunk in _chunks(rest):
-                self._request("updatePlaylist", [("playlistId", playlist_id), *extra, *(("songIdToAdd", i) for i in chunk)], mutating=True)
-                extra = []
-            if extra:
-                self._request("updatePlaylist", [("playlistId", playlist_id), *extra], mutating=True)
-            return
+    def _create_playlist_with_ids(
+        self,
+        name: str,
+        ids: list[str],
+        comment: Optional[str],
+        *,
+        lookup_own: bool,
+    ) -> str:
+        first, rest = ids[:_ID_CHUNK], ids[_ID_CHUNK:]
+        body = self._request("createPlaylist", [("name", name), *(("songId", i) for i in first)], mutating=True)
+        created = body.get("playlist") or {}
+        playlist_id = str(created.get("id") or "")
+        if not playlist_id and lookup_own:  # older servers answer with a bare ok; look the playlist up by name
+            found = [p for p in self._own_playlists() if p.get("name") == name]
+            playlist_id = str(found[-1]["id"]) if found else ""
+        if not playlist_id:
+            raise MediaServerError(
+                "Subsonic did not report the created playlist",
+                safe_detail="Subsonic did not report the created playlist",
+            )
+        extra: list[tuple[str, Any]] = []
+        if comment:
+            extra.append(("comment", comment))
+        for chunk in _chunks(rest):
+            self._request("updatePlaylist", [("playlistId", playlist_id), *extra, *(("songIdToAdd", i) for i in chunk)], mutating=True)
+            extra = []
+        if extra:
+            self._request("updatePlaylist", [("playlistId", playlist_id), *extra], mutating=True)
+        return playlist_id
 
-        playlist_id = str(existing[0]["id"])
+    def _update_playlist_by_id(
+        self,
+        playlist_id: str,
+        ids: list[str],
+        options: PlaylistSyncOptions,
+        comment: Optional[str],
+    ) -> None:
         current, details = self._playlist_entry_ids(playlist_id)
         if options.append:
             have = set(current)
@@ -813,10 +927,20 @@ class SubsonicMediaServer(MediaServer):
         for chunk in _chunks(rest_add):
             self._request("updatePlaylist", [("playlistId", playlist_id), *(("songIdToAdd", i) for i in chunk)], mutating=True)
 
-    def sync_playlist(
-        self, playlist: Playlist, targets: Sequence[str], options: PlaylistSyncOptions
-    ) -> list[SyncResult]:
-        names = list(targets) or [""]
+    def _push(self, playlist: Playlist, ids: list[str], options: PlaylistSyncOptions) -> None:
+        existing = [p for p in self._own_playlists() if p.get("name") == playlist.name]
+        if len(existing) > 1:
+            logger.warning("Subsonic has %d playlists named '%s'; updating the first", len(existing), playlist.name)
+        comment = playlist.description if options.add_description and playlist.description else None
+        if not existing:
+            self._create_playlist_with_ids(playlist.name, ids, comment, lookup_own=True)
+            return
+        self._update_playlist_by_id(str(existing[0]["id"]), ids, options, comment)
+
+    def match_and_prepare(
+        self, playlist: Playlist, options: PlaylistSyncOptions
+    ) -> tuple[list[ServerTrackRef], list[Track]]:
+        """Match ``playlist`` tracks against the Subsonic library and update missing CSV if enabled."""
         enricher = (
             get_shared_enricher(options.db)
             if options.db is not None and hasattr(options.db, "get_media_management_settings")
@@ -826,6 +950,41 @@ class SubsonicMediaServer(MediaServer):
         matched, missing = self.match_playlist_tracks(
             playlist.tracks, threshold=options.threshold, db=options.db, enricher=enricher, budget=budget
         )
+        if options.write_missing_as_csv:
+            if missing:
+                write_missing_csv(missing, playlist.name, data_dir=options.data_dir)
+            elif matched:
+                delete_missing_csv(playlist.name, data_dir=options.data_dir)
+        return matched, missing
+
+    def push_playlist_for_id(
+        self,
+        playlist: Playlist,
+        ids: list[str],
+        options: PlaylistSyncOptions,
+        *,
+        existing_id: Optional[str] = None,
+    ) -> tuple[str, bool]:
+        """Update an existing playlist by ``existing_id`` (if present) or create a fresh one; returns ``(id, created_new)``."""
+        comment = playlist.description if options.add_description and playlist.description else None
+        if existing_id:
+            try:
+                self._update_playlist_by_id(existing_id, ids, options, comment)
+                return existing_id, False
+            except MediaServerNotFound:
+                pass
+        created_id = self._create_playlist_with_ids(playlist.name, ids, comment, lookup_own=False)
+        return created_id, True
+
+    def delete_playlist(self, playlist_id: str) -> None:
+        """Delete a playlist by id on the Subsonic server."""
+        self._request("deletePlaylist", [("id", playlist_id)], mutating=True)
+
+    def sync_playlist(
+        self, playlist: Playlist, targets: Sequence[str], options: PlaylistSyncOptions
+    ) -> list[SyncResult]:
+        names = list(targets) or [""]
+        matched, missing = self.match_and_prepare(playlist, options)
         total = len(playlist.tracks)
 
         def result(success: bool, error: str = "") -> SyncResult:

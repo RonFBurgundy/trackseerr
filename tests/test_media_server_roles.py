@@ -421,3 +421,43 @@ def test_unidentified_webhook_single_login_plex_keeps_owner_rule(tmp_path):
     assert resp.status_code == 200
     assert resp.json() == {"status": "ok"}
     db.close()
+
+
+def test_discovery_links_imported_users_for_plex_jellyfin_and_subsonic(monkeypatch, tmp_path):
+    from trackseerr.media_servers.base import ServerUser
+    from trackseerr.media_servers.plex import PlexMediaServer
+
+    db = Database(str(tmp_path / "links.db"))
+    config = Config(plex_url="http://localhost:32400", plex_token="tok")
+
+    p_row = db.insert_media_server_row({"kind": "plex", "name": "Plex", "url": "http://plex:32400", "api_key": "tok"})
+    j_row = db.insert_media_server_row({"kind": "jellyfin", "name": "JF", "url": "http://jf:8096", "api_key": "k"})
+    n_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Nav", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+
+    rec_p = _make_record(p_row["id"], kind="plex", roles=frozenset({registry.ROLE_USERS}), is_login=True)
+    rec_j = _make_record(j_row["id"], kind="jellyfin", roles=frozenset({registry.ROLE_USERS}))
+    rec_n = _make_record(n_row["id"], kind="subsonic", roles=frozenset({registry.ROLE_USERS}))
+
+    plex_adapter = MagicMock(spec=PlexMediaServer)
+    plex_extras = MagicMock()
+    plex_extras.get_home_users.return_value = [{"id": "1001", "username": "alice", "email": "alice@x", "is_admin": True}]
+    plex_adapter.plex_extras.return_value = plex_extras
+
+    jf_adapter = _fake_adapter("jellyfin", [ServerUser(id="jf-1", name="bob", is_admin=False, extra={"email": ""})])
+    nav_adapter = _fake_adapter(
+        "subsonic", [ServerUser(id="nd-alice", name="ALICE", is_admin=False, extra={"email": "alice@x"})]
+    )
+
+    adapters = {p_row["id"]: plex_adapter, j_row["id"]: jf_adapter, n_row["id"]: nav_adapter}
+    monkeypatch.setattr(registry, "build_adapter", lambda rec: adapters[rec.id])
+    registry.install([rec_p, rec_j, rec_n])
+
+    cli._discover_all_server_users(db, config)
+
+    assert db.get_server_user_link("1001", p_row["id"])["server_user_id"] == "1001"
+    assert db.get_server_user_link("jf-1", j_row["id"])["server_user_id"] == "jf-1"
+    assert db.get_server_user_link("1001", n_row["id"])["server_user_id"] == "nd-alice"
+    assert len(db.list_users()) == 2
+    db.close()

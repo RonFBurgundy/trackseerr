@@ -659,6 +659,22 @@ CREATE TABLE user_server_accounts (
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 PRIMARY KEY (user_id, server_id)
             );
+CREATE TABLE server_user_links (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                server_user_id TEXT NOT NULL,
+                server_username TEXT NOT NULL,
+                source TEXT NOT NULL CHECK (source IN ('imported', 'manual')),
+                PRIMARY KEY (user_id, server_id)
+            );
+CREATE INDEX idx_server_user_links_server ON server_user_links(server_id, server_user_id);
+CREATE TABLE server_playlist_ids (
+                playlist_id TEXT NOT NULL,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_playlist_id TEXT NOT NULL,
+                PRIMARY KEY (playlist_id, server_id, user_id)
+            );
 CREATE TABLE server_playlist_sources (
                 playlist_id TEXT PRIMARY KEY REFERENCES playlists(id) ON DELETE CASCADE,
                 server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,

@@ -100,6 +100,7 @@ class MigrationsMixin:
                 (110, self._migration_v110),
                 (111, self._migration_v111),
                 (112, self._migration_v112),
+                (113, self._migration_v113),
             ]
 
             applied = 0
@@ -507,6 +508,35 @@ class MigrationsMixin:
                 created_by TEXT REFERENCES users(id),
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 UNIQUE (server_id, source_title, source_artist)
+            )
+            """
+        )
+
+    def _migration_v113(self, cur: sqlite3.Cursor) -> None:
+        """v113: server_user_links and server_playlist_ids for Navidrome admin user linking and per-user playlists."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS server_user_links (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                server_user_id TEXT NOT NULL,
+                server_username TEXT NOT NULL,
+                source TEXT NOT NULL CHECK (source IN ('imported', 'manual')),
+                PRIMARY KEY (user_id, server_id)
+            )
+            """
+        )
+        cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_server_user_links_server ON server_user_links(server_id, server_user_id)"
+        )
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS server_playlist_ids (
+                playlist_id TEXT NOT NULL,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_playlist_id TEXT NOT NULL,
+                PRIMARY KEY (playlist_id, server_id, user_id)
             )
             """
         )

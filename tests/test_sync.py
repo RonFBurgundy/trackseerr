@@ -256,10 +256,9 @@ def test_primary_result_drives_missing_tracks(monkeypatch: pytest.MonkeyPatch) -
 
         by_server = {s["server_id"]: s for s in db.list_playlist_server_state("imp_pl1")}
         assert (by_server[ids["Plex"]]["matched"], by_server[ids["Plex"]]["missing"]) == (1, 1)
-        # Navidrome push is per-user and no login is saved for the target, so the push itself
-        # reports every track missing (recorded from the push, not from a second match pass).
-        assert by_server[ids["Navidrome"]]["status"] == "failed"
-        assert (by_server[ids["Navidrome"]]["matched"], by_server[ids["Navidrome"]]["missing"]) == (0, 2)
+        # Navidrome push is per-user and no account is saved/linked for the target, so it is skipped.
+        assert by_server[ids["Navidrome"]]["status"] == "skipped"
+        assert (by_server[ids["Navidrome"]]["matched"], by_server[ids["Navidrome"]]["missing"]) == (0, 0)
     finally:
         db.close()
 

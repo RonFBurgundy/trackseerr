@@ -25,7 +25,7 @@ from trackseerr.api.dependencies import (
     require_permission,
 )
 from trackseerr.api.routes.issues import _Stripped, _is_admin, _reject_control_chars, file_issue
-from trackseerr.api.routes.sync import _playlist_servers, _push_results_outcome, _push_to_extra_server
+from trackseerr.api.routes.sync import _playlist_servers, _push_to_extra_server, _server_push_outcome
 from trackseerr.api.schemas.playlists import (
     FeaturedChart,
     ListeningSourcesResponse,
@@ -1060,7 +1060,22 @@ def _push_stored_to_first_server(
             results = first_server.sync_playlist(
                 model_playlist, target_usernames, options
             )
-        success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
+        server_status, matched_count, missing, error_msg = _server_push_outcome(
+            results, len(model_playlist.tracks)
+        )
+        if server_status == "skipped":
+            db.record_sync_result(playlist_id, status="skipped", missing_tracks=[])
+            if first_rec is not None:
+                db.record_playlist_server_state(
+                    playlist_id,
+                    first_rec.id,
+                    "skipped",
+                    matched=0,
+                    missing=0,
+                    error="",
+                )
+            return 0, 0
+        success = server_status == "success"
         missing_count = len(missing)
         db.record_sync_result(
             playlist_id,
@@ -1071,9 +1086,10 @@ def _push_stored_to_first_server(
             db.record_playlist_server_state(
                 playlist_id,
                 first_rec.id,
-                "success" if success else "failed",
+                server_status,
                 matched=matched_count,
                 missing=missing_count,
+                error=error_msg,
             )
     except Exception as e:
         logger.error("Error during direct import sync to %s: %s", server_name, describe_error(e))
