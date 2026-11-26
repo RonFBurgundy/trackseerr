@@ -180,6 +180,8 @@ heading becomes the version and date.
 
 ### Fixed
 
+- When a playlist starts syncing to a different Navidrome account (for example after you save your own login), the old copy TrackSeerr made is removed instead of left behind as a duplicate.
+- A scheduled sync keeps going to your other media servers when one of them fails.
 - Sync now on the Playlists page shows in the TrackSeerr logo menu, with which playlist is syncing to which server.
 - After an update, the app no longer keeps showing the old version until you force a refresh.
 - Songs a playlist sync found through their ISRC or MusicBrainz are no longer listed as missing right after the same sync, and each sync searches your media server half as often.
