@@ -956,6 +956,7 @@ class PlexClient:
                 missing_tracks=len(missing),
                 success=False,
                 error="Zero tracks matched in Plex library",
+                missing=list(missing),
             )
 
         try:
@@ -981,6 +982,7 @@ class PlexClient:
                 matched_tracks=len(matched),
                 missing_tracks=len(missing),
                 success=True,
+                missing=list(missing),
             )
         except Exception as e:
             logger.error("Error creating/updating playlist '%s': %s", playlist.name, safe_exc(e))
@@ -992,6 +994,7 @@ class PlexClient:
                 missing_tracks=len(missing),
                 success=False,
                 error=safe_exc(e),
+                missing=list(missing),
             )
 
     def sync_playlist_to_users(
@@ -1050,6 +1053,7 @@ class PlexClient:
                     missing_tracks=len(missing),
                     success=False,
                     error="Zero tracks matched in Plex library",
+                    missing=list(missing),
                 )
                 for _ in target_usernames
             ]
@@ -1090,6 +1094,7 @@ class PlexClient:
                         matched_tracks=len(matched),
                         missing_tracks=len(missing),
                         success=True,
+                        missing=list(missing),
                     )
                 )
             except (PlaylistProtectedError, PlexCloudCallsBlocked) as e:
@@ -1102,6 +1107,7 @@ class PlexClient:
                         missing_tracks=len(missing),
                         success=False,
                         error=redact_text(str(e)),
+                        missing=list(missing),
                     )
                 )
             except Exception as e:
@@ -1115,6 +1121,7 @@ class PlexClient:
                         missing_tracks=len(missing),
                         success=False,
                         error=f"User {username}: {safe_exc(e)}",
+                        missing=list(missing),
                     )
                 )
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from trackseerr.config import Config
 from trackseerr.media_servers.base import PlaylistSyncOptions
 from trackseerr.media_servers.registry import ServerRecord
@@ -179,6 +181,77 @@ def test_one_users_auth_failure_does_not_stop_another(tmp_path: Path) -> None:
         assert [r.success for r in results] == [False, True]
         assert "40" in results[0].error
         assert [p.owner for p in fake.state.playlists.values()] == ["alice"]
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_with_login_keeps_server_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+    db, cfg, rec, adapter, fake, _playlist, options = _setup(tmp_path)
+    try:
+        adapter.server_id = rec.id
+        adapter.legacy_overrides = False
+        user_adapter = adapter.with_login("alice", "alice-pw")
+        try:
+            assert user_adapter.server_id == rec.id
+            assert user_adapter.legacy_overrides is False
+        finally:
+            user_adapter.close()
+
+        # Server-scoped override applies during per-user push, while legacy (unscoped) override is ignored.
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+        db.add_server_match_override(rec.id, "Wanted Track", "Artist 1", "s1", "Song A", "Artist 1")
+        db.add_match_override("Legacy Track", "Artist 1", "s2", "Song B", "Artist 1")
+        pl = Playlist(
+            id="pl-scoped",
+            name="Scoped Mix",
+            tracks=[
+                Track("Wanted Track", "Artist 1", "Album X"),
+                Track("Legacy Track", "Artist 1", "Album X"),
+            ],
+        )
+
+        results = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice"], options)
+        assert len(results) == 1
+        assert results[0].success is True
+        assert results[0].matched_tracks == 1
+        assert [t.title for t in results[0].missing] == ["Legacy Track"]
+        assert [(p.owner, p.name, p.entries) for p in fake.state.playlists.values()] == [
+            ("alice", "Scoped Mix", ["s1"])
+        ]
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_per_user_missing_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+    from trackseerr.api.routes.playlists import _push_stored_to_first_server
+
+    db, cfg, rec, adapter, _fake, _playlist, options = _setup(tmp_path)
+    try:
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+        pl = Playlist(
+            id="pl-missing",
+            name="Missing Mix",
+            tracks=[
+                Track("Song A", "Artist 1", "Album X"),
+                Track("Missing Song", "Unknown Artist", "Unknown Album"),
+            ],
+        )
+        db.upsert_playlist(pl.id, pl.name, service="manual")
+
+        results = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["bob", "alice"], options)
+        assert len(results) == 2
+        assert results[0].success is False
+        assert [t.title for t in results[0].missing] == ["Song A", "Missing Song"]
+        assert results[1].success is True
+        assert [t.title for t in results[1].missing] == ["Missing Song"]
+
+        matched_count, missing_count = _push_stored_to_first_server(db, cfg, rec, adapter, pl, ["bob", "alice"])
+        assert (matched_count, missing_count) == (1, 1)
+        assert [m["title"] for m in db.get_missing_tracks(pl.id)] == ["Missing Song"]
     finally:
         adapter.close()
         db.close()

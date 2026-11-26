@@ -237,7 +237,7 @@ class SubsonicMediaServer(MediaServer):
 
     def with_login(self, username: str, password: str) -> "SubsonicMediaServer":
         """Return a new adapter against the same server authenticated with ``username`` and ``password``."""
-        return SubsonicMediaServer(
+        copy = SubsonicMediaServer(
             self._base,
             username,
             password,
@@ -247,6 +247,9 @@ class SubsonicMediaServer(MediaServer):
             transport=self._transport,
             sleep=self._sleep,
         )
+        copy.server_id = self.server_id
+        copy.legacy_overrides = self.legacy_overrides
+        return copy
 
     # ------------------------------------------------------------------ transport
 
@@ -826,7 +829,7 @@ class SubsonicMediaServer(MediaServer):
         total = len(playlist.tracks)
 
         def result(success: bool, error: str = "") -> SyncResult:
-            return SyncResult(playlist.name, total, len(matched), len(missing), success, error)
+            return SyncResult(playlist.name, total, len(matched), len(missing), success, error, missing=list(missing))
 
         if options.write_missing_as_csv:
             if missing:
@@ -847,7 +850,15 @@ class SubsonicMediaServer(MediaServer):
                 continue
             if not matched:
                 logger.warning("No tracks in playlist '%s' could be matched on the Subsonic server", playlist.name)
-                pushed = SyncResult(playlist.name, total, 0, len(missing), False, "Zero tracks matched on the Subsonic server")
+                pushed = SyncResult(
+                    playlist.name,
+                    total,
+                    0,
+                    len(missing),
+                    False,
+                    "Zero tracks matched on the Subsonic server",
+                    missing=list(missing),
+                )
             else:
                 self._push(playlist, [m.id for m in matched], options)
                 pushed = result(True)
