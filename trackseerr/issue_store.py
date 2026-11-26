@@ -124,18 +124,60 @@ class IssueStoreMixin:
                 trigger="system", trigger_label="Library health",
             )
 
-    def delete_library_health_findings_not_seen(self, kinds: list[str], seen_at: str) -> int:
-        """Drop findings of ``kinds`` whose last_seen is not ``seen_at`` (the current run's stamp)."""
+    def delete_library_health_findings_not_seen(
+        self,
+        kinds: list[str],
+        seen_at: str,
+        *,
+        keep_server_ids: Optional[set[str]] = None,
+    ) -> int:
+        """Drop findings of ``kinds`` whose last_seen is not ``seen_at``, keeping any owned by ``keep_server_ids``."""
         if not kinds:
             return 0
         marks = ",".join("?" for _ in kinds)
-        with self._lock:
-            cur = self.conn.execute(
-                f"DELETE FROM library_health_findings WHERE kind IN ({marks}) AND last_seen <> ?",
+        if not keep_server_ids:
+            with self._lock:
+                cur = self.conn.execute(
+                    f"DELETE FROM library_health_findings WHERE kind IN ({marks}) AND last_seen <> ?",
+                    (*kinds, seen_at),
+                )
+                self.conn.commit()
+                return cur.rowcount
+
+        with self.reader() as conn:
+            rows = conn.execute(
+                f"SELECT id, detail_json FROM library_health_findings WHERE kind IN ({marks}) AND last_seen <> ?",
                 (*kinds, seen_at),
-            )
+            ).fetchall()
+
+        delete_ids: list[str] = []
+        for row in rows:
+            try:
+                detail = json.loads(row["detail_json"] or "null")
+            except (TypeError, ValueError):
+                detail = None
+            servers = detail.get("servers") if isinstance(detail, dict) else None
+            if isinstance(servers, list):
+                ids = {s.get("id") for s in servers if isinstance(s, dict) and s.get("id")}
+                if ids & keep_server_ids:
+                    continue
+            delete_ids.append(row["id"])
+
+        if not delete_ids:
+            return 0
+
+        deleted = 0
+        with self._lock:
+            for i in range(0, len(delete_ids), 500):
+                batch = delete_ids[i : i + 500]
+                id_marks = ",".join("?" for _ in batch)
+                cur = self.conn.execute(
+                    f"DELETE FROM library_health_findings WHERE id IN ({id_marks})",
+                    batch,
+                )
+                deleted += cur.rowcount
             self.conn.commit()
-            return cur.rowcount
+        return deleted
 
     def list_library_health_findings(self, include_dismissed: bool = False) -> list[dict[str, Any]]:
         sql = "SELECT * FROM library_health_findings"
