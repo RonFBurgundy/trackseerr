@@ -844,3 +844,81 @@ def test_generate_cooldown_map_prunes_expired_entries(api, db, users):
         mixes_route._last_generate_request.pop("stale-mix", None)
         mixes_route._last_generate_request.pop(mid, None)
         mixes_route._generating.discard(mid)
+
+
+class TestMixFanout:
+    def test_mix_pushed_to_every_playlist_server(self, gen_env):
+        from trackseerr.media_servers import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_PLEX, registry
+        from trackseerr.media_servers.registry import ServerRecord
+
+        mix = make_mix(gen_env.db, gen_env.uid, track_count=10)
+        rec1 = ServerRecord(id="srv-1", name="Plex", kind=MEDIA_SERVER_PLEX, source="db", url="http://plex.local")
+        rec2 = ServerRecord(id="srv-2", name="Jellyfin", kind=MEDIA_SERVER_JELLYFIN, source="db", url="http://jf.local")
+        adapter1 = MagicMock()
+        adapter1.sync_playlist.return_value = [SyncResult("alice", 10, 10, 0, success=True)]
+        adapter2 = MagicMock()
+        adapter2.sync_playlist.return_value = [SyncResult("alice", 10, 10, 0, success=True)]
+
+        with patch.object(registry, "is_installed", return_value=True), \
+                patch.object(registry, "media_servers", return_value=[(rec2, adapter2), (rec1, adapter1)]), \
+                patch.object(registry, "primary_record", return_value=rec1):
+            res, _ = run_generate(gen_env, mix, None)
+
+        assert res.synced is True
+        assert res.sync_error is None
+        assert adapter1.sync_playlist.called
+        assert adapter2.sync_playlist.called
+
+    def test_mix_uses_user_login_on_subsonic(self, gen_env):
+        from trackseerr.media_servers import MEDIA_SERVER_SUBSONIC, registry
+        from trackseerr.media_servers.registry import ServerRecord
+
+        mix = make_mix(gen_env.db, gen_env.uid, track_count=10)
+        rec = ServerRecord(id="srv-sub", name="Navidrome", kind=MEDIA_SERVER_SUBSONIC, source="db", url="http://sub.local")
+        adapter = MagicMock()
+
+        with patch.object(registry, "is_installed", return_value=True), \
+                patch.object(registry, "media_servers", return_value=[(rec, adapter)]), \
+                patch.object(registry, "primary_record", return_value=rec), \
+                patch("trackseerr.media_servers.user_logins.sync_subsonic_for_users",
+                      return_value=[SyncResult("alice", 10, 10, 0, success=True)]) as sub_sync:
+            res, _ = run_generate(gen_env, mix, None)
+
+        assert res.synced is True
+        assert res.sync_error is None
+        assert sub_sync.called
+        adapter.sync_playlist.assert_not_called()
+
+    def test_one_server_failure_reported_others_synced(self, gen_env):
+        from trackseerr.media_servers import MEDIA_SERVER_JELLYFIN, MEDIA_SERVER_PLEX, MediaServerError, registry
+        from trackseerr.media_servers.registry import ServerRecord
+
+        mix = make_mix(gen_env.db, gen_env.uid, track_count=10)
+        rec1 = ServerRecord(id="srv-1", name="Plex", kind=MEDIA_SERVER_PLEX, source="db", url="http://plex.local")
+        rec2 = ServerRecord(id="srv-2", name="Navidrome", kind=MEDIA_SERVER_JELLYFIN, source="db", url="http://jf.local")
+        adapter1 = MagicMock()
+        adapter1.sync_playlist.return_value = [SyncResult("alice", 10, 10, 0, success=True)]
+        adapter2 = MagicMock()
+        adapter2.sync_playlist.side_effect = MediaServerError("ReadTimeout")
+
+        with patch.object(registry, "is_installed", return_value=True), \
+                patch.object(registry, "media_servers", return_value=[(rec1, adapter1), (rec2, adapter2)]), \
+                patch.object(registry, "primary_record", return_value=rec1):
+            res, _ = run_generate(gen_env, mix, None)
+
+        assert res.synced is True
+        assert res.sync_error == "Navidrome: Media server sync failed (MediaServerError)"
+        assert adapter1.sync_playlist.called
+        assert adapter2.sync_playlist.called
+
+    def test_not_installed_uses_passed_client(self, gen_env):
+        from trackseerr.media_servers import registry
+
+        mix = make_mix(gen_env.db, gen_env.uid, track_count=10)
+        plex = fake_plex()
+        with patch.object(registry, "is_installed", return_value=False):
+            res, _ = run_generate(gen_env, mix, plex)
+
+        assert res.synced is True
+        assert res.sync_error is None
+        assert plex.sync_playlist_to_users.called
