@@ -102,6 +102,14 @@ def test_status_endpoint_reports_jellyfin_capabilities(env):
         "type": "jellyfin",
         "connected": True,
         "capabilities": {"playlists": True, "users": True, "mixes": False, "library_refresh": True, "file_paths": True},
+        "kinds": ["jellyfin"],
+        "all_capabilities": {
+            "playlists": True,
+            "users": True,
+            "mixes": False,
+            "library_refresh": True,
+            "file_paths": True,
+        },
     }
 
 
