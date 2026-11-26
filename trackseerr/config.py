@@ -95,6 +95,11 @@ class Config:
     data_dir: str = "/data"
     config_dir: str = "/config"
 
+    @property
+    def state_dir(self) -> str:
+        """Folder that holds the database and its secrets."""
+        return self.config_dir if (os.getenv("CONFIG_DIR") or os.path.isdir("/config")) else self.data_dir
+
     spotify_client_id: Optional[str] = None
     spotify_client_secret: Optional[str] = None
     spotify_user_id: Optional[str] = None

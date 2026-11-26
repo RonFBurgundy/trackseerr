@@ -241,7 +241,7 @@ def _make_plex_provider(
 
 
 def _db_base_dir(config: Config) -> str:
-    return config.config_dir if (os.getenv("CONFIG_DIR") or os.path.isdir("/config")) else config.data_dir
+    return config.state_dir
 
 
 def _apply_saved_media_server_settings(config: Config) -> None:
@@ -262,6 +262,10 @@ def _apply_saved_media_server_settings(config: Config) -> None:
     try:
         media_server_settings.load_into_process(db)
         registry.reload(config, db)
+        if config.data_dir != config.state_dir:
+            from .secret_box import migrate_key
+
+            migrate_key(config.data_dir, config.state_dir)
     finally:
         db.close()
 
@@ -807,6 +811,10 @@ def _prepare_core(db: Database, config: Config, clients: _Clients, role: str) ->
         # The Settings page may name media servers when the environment does not; follow later saves live.
         media_server_settings.load_into_process(db)
         registry.reload(config, db)
+        if config.data_dir != config.state_dir:
+            from .secret_box import migrate_key
+
+            migrate_key(config.data_dir, config.state_dir)
 
         def _reconnect_media_server() -> None:
             with clients.lock:  # one reconnect at a time: the reload and the assignment go together

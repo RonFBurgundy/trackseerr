@@ -114,7 +114,7 @@ def save_account_media_server(
             detail=result.message or "Subsonic rejected the credentials",
         )
 
-    sealed = seal(password, data_dir=config.data_dir)
+    sealed = seal(password, data_dir=config.state_dir)
     try:
         db.set_server_account(current_user["id"], rec.id, username, sealed)
     except sqlite3.Error as exc:

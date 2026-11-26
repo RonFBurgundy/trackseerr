@@ -95,6 +95,7 @@ environment:
 - TrackSeerr writes every playlist to this one account. The Subsonic API has no way to write playlists for other users.
 - Create a separate account for TrackSeerr so its playlists are easy to tell apart, and share them from the server if your users need them.
 - If the server supports OpenSubsonic API keys, you can set `SUBSONIC_API_KEY` instead of a user and password.
+- Per-user Subsonic logins are stored encrypted; the key is kept in the config folder and is not part of backups, so after restoring on a new machine users save their logins again.
 
 ## No media server
 

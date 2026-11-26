@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import threading
 from pathlib import Path
 from typing import Optional
@@ -99,3 +100,27 @@ def unseal(token: str, data_dir: str = "/data") -> Optional[str]:
     except (InvalidToken, ValueError):
         logger.warning("Failed to unseal stored media server credential (key missing or rotated)")
         return None
+
+
+def migrate_key(from_dir: str, to_dir: str) -> None:
+    """Move ``.server_credentials_key`` from ``from_dir`` to ``to_dir`` once if the target has none."""
+    from_base = Path(from_dir).resolve()
+    to_base = Path(to_dir).resolve()
+    if from_base == to_base:
+        return
+
+    src = safe_data_path(_KEY_FILENAME, base_dir=str(from_base))
+    if not src.exists():
+        return
+
+    to_base.mkdir(parents=True, exist_ok=True)
+    dst = safe_data_path(_KEY_FILENAME, base_dir=str(to_base))
+    if dst.exists():
+        return
+
+    shutil.move(str(src), str(dst))
+    try:
+        os.chmod(dst, 0o600)
+    except OSError:
+        pass
+    logger.info("Migrated server credentials key from %s to %s", from_base, to_base)

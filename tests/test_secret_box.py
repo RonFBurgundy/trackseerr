@@ -10,7 +10,7 @@ from pathlib import Path
 from cryptography.fernet import Fernet
 import pytest
 
-from trackseerr.secret_box import seal, unseal
+from trackseerr.secret_box import migrate_key, seal, unseal
 
 
 def test_round_trip(tmp_path: Path) -> None:
@@ -63,3 +63,33 @@ def test_unwritable_data_dir_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(os, "access", lambda _path, _mode: False)
     with pytest.raises(PermissionError):
         seal("secret", data_dir=str(tmp_path))
+
+
+def test_migrate_key_moves_once(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    from_dir = tmp_path / "data"
+    to_dir = tmp_path / "config"
+    token = seal("my-secret", data_dir=str(from_dir))
+    src_key = from_dir / ".server_credentials_key"
+    dst_key = to_dir / ".server_credentials_key"
+    assert src_key.exists()
+
+    with caplog.at_level(logging.INFO):
+        migrate_key(str(from_dir), str(to_dir))
+
+    assert not src_key.exists()
+    assert dst_key.exists()
+    assert stat.S_IMODE(dst_key.stat().st_mode) == 0o600
+    assert unseal(token, data_dir=str(to_dir)) == "my-secret"
+    assert "Migrated server credentials key" in caplog.text
+
+    # Second call is a no-op
+    caplog.clear()
+    migrate_key(str(from_dir), str(to_dir))
+    assert dst_key.exists()
+    assert not caplog.text
+
+    # Existing target is never overwritten
+    existing_bytes = dst_key.read_bytes()
+    src_key.write_bytes(Fernet.generate_key())
+    migrate_key(str(from_dir), str(to_dir))
+    assert dst_key.read_bytes() == existing_bytes

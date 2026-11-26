@@ -204,3 +204,22 @@ def test_delete_removes_login_and_isolates_users(env) -> None:
     assert after.json() == [
         {"server_id": env.sub_id, "name": "Navidrome", "username": "", "saved": False}
     ]
+
+
+def test_saved_login_key_lands_in_state_dir(env, tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_dir = tmp_path / "config_dir"
+    config_dir.mkdir()
+    monkeypatch.setenv("CONFIG_DIR", str(config_dir))
+    env.cfg.config_dir = str(config_dir)
+
+    put_resp = env.tc.put(
+        f"/api/account/media-servers/{env.sub_id}",
+        json={"username": "alice", "password": "alice-pw"},
+        headers=env.alice,
+    )
+    assert put_resp.status_code == 200
+    assert (config_dir / ".server_credentials_key").exists()
+    assert not (tmp_path / ".server_credentials_key").exists()
+    acct = env.db.get_server_account("u1", env.sub_id)
+    assert acct is not None
+    assert unseal(acct["secret_sealed"], data_dir=str(config_dir)) == "alice-pw"

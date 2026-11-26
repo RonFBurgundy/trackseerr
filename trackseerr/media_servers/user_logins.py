@@ -35,7 +35,7 @@ def _sync_user_account(
 ) -> list[SyncResult]:
     total = len(playlist.tracks)
     account = db.get_server_account(user["id"], rec.id) if user is not None else None
-    password = unseal(account["secret_sealed"], data_dir=config.data_dir) if account is not None else None
+    password = unseal(account["secret_sealed"], data_dir=config.state_dir) if account is not None else None
     if account is None or not account.get("username") or not password:
         return [SyncResult(playlist.name, total, 0, total, False, f"No {rec.name} login saved for {name}")]
 
