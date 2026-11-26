@@ -546,3 +546,187 @@ def test_navidrome_admin_with_imported_link_updates_in_place_never_duplicates(tm
     finally:
         adapter.close()
         db.close()
+
+
+def test_saved_login_retires_previous_own_account_copy(tmp_path: Path) -> None:
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    fake.add_user("nd-alice", "alice", admin=False, password="alice-pw")
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-alice", "alice", "alice@x")
+        db.link_server_user("u-alice", rec.id, "nd-admin", "admin", source="imported")
+        pl = Playlist(id="pl-1", name="Road Trip", tracks=[Track("Song A", "Artist 1", "Album X")])
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        res1 = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice"], options)
+        assert [r.success for r in res1] == [True]
+        old_id = db.get_server_playlist_id("pl-1", rec.id, "u-alice")
+        assert old_id and old_id in fake.state.playlists
+        assert fake.state.playlists[old_id].owner == "admin"
+
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+        res2 = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice"], options)
+        assert [r.success for r in res2] == [True]
+        new_id = db.get_server_playlist_id("pl-1", rec.id, "u-alice")
+        assert new_id and new_id != old_id
+        assert old_id not in fake.state.playlists
+        assert [(p.owner, p.name) for p in fake.state.playlists.values()] == [("alice", "Road Trip")]
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_retire_skips_unmapped_copies(tmp_path: Path) -> None:
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    fake.add_user("nd-alice", "alice", admin=False, password="alice-pw")
+    fake.add_user("nd-bob", "bob", admin=False, password="bob-pw")
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        # Pre-existing unmapped playlist under another owner with the same name
+        bob_adapter = adapter.with_login("bob", "bob-pw")
+        try:
+            bob_adapter.sync_playlist(
+                Playlist(id="pl-bob", name="Road Trip", tracks=[Track("Song A", "Artist 1", "Album X")]),
+                [""],
+                PlaylistSyncOptions.from_config(cfg, db=db),
+            )
+        finally:
+            bob_adapter.close()
+
+        db.upsert_user("u-alice", "alice", "alice@x")
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+        pl = Playlist(id="pl-1", name="Road Trip", tracks=[Track("Song A", "Artist 1", "Album X")])
+        res = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice"], PlaylistSyncOptions.from_config(cfg, db=db))
+        assert [r.success for r in res] == [True]
+        assert sorted((p.owner, p.name) for p in fake.state.playlists.values()) == [
+            ("alice", "Road Trip"),
+            ("bob", "Road Trip"),
+        ]
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_retire_delete_failure_logs_and_keeps_new_copy(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import logging
+    from trackseerr.media_servers.base import MediaServerError
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    fake.add_user("nd-alice", "alice", admin=False, password="alice-pw")
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-alice", "alice", "alice@x")
+        db.link_server_user("u-alice", rec.id, "nd-admin", "admin", source="imported")
+        pl = Playlist(id="pl-1", name="Road Trip", tracks=[Track("Song A", "Artist 1", "Album X")])
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice"], options)
+        old_id = db.get_server_playlist_id("pl-1", rec.id, "u-alice")
+        assert old_id
+
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+
+        def _fail_delete(_pid: str) -> None:
+            raise MediaServerError("delete failed", safe_detail="delete failed")
+
+        monkeypatch.setattr(adapter, "delete_playlist", _fail_delete)
+        with caplog.at_level(logging.WARNING):
+            res2 = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice"], options)
+        assert [r.success for r in res2] == [True]
+        assert any("delete failed" in r.message for r in caplog.records)
+        new_id = db.get_server_playlist_id("pl-1", rec.id, "u-alice")
+        assert new_id and new_id != old_id
+        assert new_id in fake.state.playlists
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_unchanged_id_does_not_delete(tmp_path: Path) -> None:
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    fake.add_user("nd-alice", "alice", admin=False, password="alice-pw")
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-alice", "alice", "alice@x")
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+        pl1 = Playlist(id="pl-1", name="Road Trip", tracks=[Track("Song A", "Artist 1", "Album X")])
+        pl2 = Playlist(
+            id="pl-1",
+            name="Road Trip",
+            tracks=[Track("Song A", "Artist 1", "Album X"), Track("Song B", "Artist 1", "Album X")],
+        )
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        res1 = sync_subsonic_for_users(db, cfg, rec, adapter, pl1, ["alice"], options)
+        res2 = sync_subsonic_for_users(db, cfg, rec, adapter, pl2, ["alice"], options)
+        assert [r.success for r in res1] == [True]
+        assert [r.success for r in res2] == [True]
+        assert [ep for ep, _ in fake.state.calls if ep == "deletePlaylist"] == []
+    finally:
+        adapter.close()
+        db.close()

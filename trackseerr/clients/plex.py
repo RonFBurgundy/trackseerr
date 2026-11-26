@@ -117,7 +117,7 @@ def classify_playlist_owner(
     return "trackseerr"
 
 
-_WARNED_MISSING_SECTIONS: set[str] = set()
+_WARNED_MISSING_SECTIONS: set[tuple[str, str]] = set()
 
 
 def music_sections(server: Any, preferred: Optional[str] = None) -> list[Any]:
@@ -148,8 +148,10 @@ def music_sections(server: Any, preferred: Optional[str] = None) -> list[Any]:
     if matching:
         return matching + others
 
-    if target not in _WARNED_MISSING_SECTIONS:
-        _WARNED_MISSING_SECTIONS.add(target)
+    server_key = str(getattr(server, "machineIdentifier", "") or getattr(server, "_baseurl", "") or id(server))
+    warn_key = (server_key, target)
+    if warn_key not in _WARNED_MISSING_SECTIONS:
+        _WARNED_MISSING_SECTIONS.add(warn_key)
         available = [str(getattr(s, "title", "") or "") for s in sections]
         logger.warning(
             "Configured Plex music section '%s' not found. Available music sections: %s. Falling back to '%s'.",

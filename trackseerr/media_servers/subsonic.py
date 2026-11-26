@@ -1001,15 +1001,16 @@ class SubsonicMediaServer(MediaServer):
         for chunk in _chunks(rest_add):
             self._request("updatePlaylist", [("playlistId", playlist_id), *(("songIdToAdd", i) for i in chunk)], mutating=True)
 
-    def _push(self, playlist: Playlist, ids: list[str], options: PlaylistSyncOptions) -> None:
+    def _push(self, playlist: Playlist, ids: list[str], options: PlaylistSyncOptions) -> str:
         existing = [p for p in self._own_playlists() if p.get("name") == playlist.name]
         if len(existing) > 1:
             logger.warning("Subsonic has %d playlists named '%s'; updating the first", len(existing), playlist.name)
         comment = playlist.description if options.add_description and playlist.description else None
         if not existing:
-            self._create_playlist_with_ids(playlist.name, ids, comment, lookup_own=True)
-            return
-        self._update_playlist_by_id(str(existing[0]["id"]), ids, options, comment)
+            return self._create_playlist_with_ids(playlist.name, ids, comment, lookup_own=True)
+        playlist_id = str(existing[0]["id"])
+        self._update_playlist_by_id(playlist_id, ids, options, comment)
+        return playlist_id
 
     def match_and_prepare(
         self, playlist: Playlist, options: PlaylistSyncOptions
@@ -1073,8 +1074,17 @@ class SubsonicMediaServer(MediaServer):
         matched, missing = self.match_and_prepare(playlist, options)
         total = len(playlist.tracks)
 
-        def result(success: bool, error: str = "") -> SyncResult:
-            return SyncResult(playlist.name, total, len(matched), len(missing), success, error, missing=list(missing))
+        def result(success: bool, error: str = "", *, server_playlist_id: str = "") -> SyncResult:
+            return SyncResult(
+                playlist.name,
+                total,
+                len(matched),
+                len(missing),
+                success,
+                error,
+                missing=list(missing),
+                server_playlist_id=server_playlist_id,
+            )
 
         if options.write_missing_as_csv:
             if missing:
@@ -1105,7 +1115,7 @@ class SubsonicMediaServer(MediaServer):
                     missing=list(missing),
                 )
             else:
-                self._push(playlist, [m.id for m in matched], options)
-                pushed = result(True)
+                server_playlist_id = self._push(playlist, [m.id for m in matched], options)
+                pushed = result(True, server_playlist_id=server_playlist_id)
             results.append(pushed)
         return results

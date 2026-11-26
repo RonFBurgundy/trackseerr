@@ -7,7 +7,7 @@ import threading
 from typing import Any, Optional, Sequence
 
 from trackseerr.config import Config
-from trackseerr.media_servers.base import MediaServerError, PlaylistSyncOptions
+from trackseerr.media_servers.base import MediaServerError, MediaServerNotFound, PlaylistSyncOptions
 from trackseerr.media_servers.registry import ServerRecord
 from trackseerr.models import Playlist, SyncResult
 from trackseerr.secret_box import unseal
@@ -179,7 +179,17 @@ def _sync_navidrome_owner_transfer(
         )
         db.set_server_playlist_id(playlist.id, rec.id, user["id"], server_playlist_id)
         if nav_admin.set_owner(server_playlist_id, owner_id):
-            return [SyncResult(playlist.name, total, len(matched), len(missing), True, missing=list(missing))]
+            return [
+                SyncResult(
+                    playlist.name,
+                    total,
+                    len(matched),
+                    len(missing),
+                    True,
+                    missing=list(missing),
+                    server_playlist_id=server_playlist_id,
+                )
+            ]
         _warn_owner_transfer_ignored(rec.id, rec.name)
         _cleanup_rejected_copy(db, adapter, playlist.id, rec.id, user["id"], server_playlist_id, created_new)
         return None
@@ -196,6 +206,49 @@ def _can_use_own_account(cleaned: str, own_username: str, link: Optional[dict[st
         if linked_name and linked_name != own_username:
             return False
     return True
+
+
+def _retire_previous_copy(
+    db: Any,
+    adapter: Any,
+    playlist_id: str,
+    server_id: str,
+    user_id: Optional[str],
+    new_id: str,
+) -> None:
+    """Delete any previously mapped remote playlist copy if ``new_id`` replaced it, then update the mapping."""
+    if db is None or not user_id or not new_id:
+        return
+    old = db.get_server_playlist_id(playlist_id, server_id, user_id)
+    if old and old != new_id and hasattr(adapter, "delete_playlist"):
+        try:
+            adapter.delete_playlist(old)
+        except MediaServerNotFound:
+            pass
+        except MediaServerError as exc:
+            logger.warning(
+                "Could not delete previous playlist '%s' copy '%s' on server '%s': %s",
+                playlist_id,
+                old,
+                server_id,
+                exc.safe_detail,
+            )
+    db.set_server_playlist_id(playlist_id, server_id, user_id, new_id)
+
+
+def _retire_from_results(
+    db: Any,
+    adapter: Any,
+    playlist_id: str,
+    server_id: str,
+    user: Optional[dict[str, Any]],
+    results: Sequence[SyncResult],
+) -> None:
+    if db is None or user is None:
+        return
+    for res in results:
+        if res.success and res.server_playlist_id:
+            _retire_previous_copy(db, adapter, playlist_id, server_id, user["id"], res.server_playlist_id)
 
 
 def _missing_target_result(
@@ -261,7 +314,9 @@ def sync_subsonic_for_users(
         user = users_by_name.get(cleaned.lower())
         account = db.get_server_account(user["id"], rec.id) if (db is not None and user is not None) else None
         if account is not None and account.get("username"):
-            results.extend(_sync_user_account(config, rec, adapter, playlist, cleaned, account, options))
+            account_results = _sync_user_account(config, rec, adapter, playlist, cleaned, account, options)
+            _retire_from_results(db, adapter, playlist.id, rec.id, user, account_results)
+            results.extend(account_results)
             continue
 
         link = db.get_server_user_link(user["id"], rec.id) if (db is not None and user is not None) else None
@@ -269,6 +324,7 @@ def sync_subsonic_for_users(
         if own_username and link_username == own_username:
             if own_results is None:
                 own_results = _sync_own_account(adapter, playlist, options)
+            _retire_from_results(db, adapter, playlist.id, rec.id, user, own_results)
             results.extend(own_results)
             continue
 
@@ -285,6 +341,7 @@ def sync_subsonic_for_users(
         if _can_use_own_account(cleaned, own_username, link):
             if own_results is None:
                 own_results = _sync_own_account(adapter, playlist, options)
+            _retire_from_results(db, adapter, playlist.id, rec.id, user, own_results)
             results.extend(own_results)
             continue
 
