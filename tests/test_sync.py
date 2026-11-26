@@ -68,6 +68,7 @@ class _FakePlaylistAdapter:
         self._success = success
         self._exc = exc
         self.calls: list[tuple[Playlist, list[str], PlaylistSyncOptions]] = []
+        self.match_dbs: list[Optional[Any]] = []
 
     def sync_playlist(
         self, playlist: Playlist, target_usernames: list[str], options: PlaylistSyncOptions
@@ -86,9 +87,19 @@ class _FakePlaylistAdapter:
         ]
 
     def match_playlist_tracks(
-        self, tracks: list[Track], threshold: float = 0.9
+        self, tracks: list[Track], threshold: float = 0.9, db: Optional[Any] = None
     ) -> tuple[list[Track], list[Track]]:
-        return list(self._matched), list(self._missing)
+        self.match_dbs.append(db)
+        if db is None:
+            return list(self._matched), list(self._missing)
+        matched = list(self._matched)
+        missing: list[Track] = []
+        for track in self._missing:
+            if db.get_match_override(track.title, track.artist):
+                matched.append(track)
+            else:
+                missing.append(track)
+        return matched, missing
 
 
 def _seed_fanout_db(tracks: Optional[list[dict[str, str]]] = None) -> tuple[Database, Config]:
@@ -482,6 +493,109 @@ def test_server_adopted_playlist_refreshes_from_source(monkeypatch: pytest.Monke
         db.close()
 
 
+def test_post_push_matching_receives_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    db, cfg = _seed_fanout_db()
+    try:
+        t1 = Track("Song 1", "Artist 1", "Album 1")
+        t2 = Track("Song 2", "Artist 2", "Album 2")
+        plex_adapter = _FakePlaylistAdapter(matched=[t1, t2], missing=[])
+        jf_adapter = _FakePlaylistAdapter(matched=[t1, t2], missing=[])
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "plex", "name": "Plex", "url": "http://plex:32400", "sort_order": 0}, plex_adapter),
+                ({"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf:8096", "sort_order": 1}, jf_adapter),
+            ],
+        )
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert plex_adapter.match_dbs == [db]
+        assert jf_adapter.match_dbs == [db]
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_override_matched_track_not_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    db, cfg = _seed_fanout_db()
+    try:
+        db.add_match_override("Song 2", "Artist 2", "999", "Song 2", "Artist 2")
+        t1 = Track("Song 1", "Artist 1", "Album 1")
+        t2 = Track("Song 2", "Artist 2", "Album 2")
+        plex_adapter = _FakePlaylistAdapter(matched=[t1], missing=[t2])
+        jf_adapter = _FakePlaylistAdapter(matched=[t1], missing=[t2])
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "plex", "name": "Plex", "url": "http://plex:32400", "sort_order": 0}, plex_adapter),
+                ({"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf:8096", "sort_order": 1}, jf_adapter),
+            ],
+        )
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert db.get_missing_tracks("imp_pl1") == []
+        states = {s["server_id"]: s for s in db.list_playlist_server_state("imp_pl1")}
+        assert states[ids["Plex"]]["matched"] == 2
+        assert states[ids["Plex"]]["missing"] == 0
+        assert states[ids["Jellyfin"]]["matched"] == 2
+        assert states[ids["Jellyfin"]]["missing"] == 0
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_skip_keys_follow_login_plex_not_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = Database(":memory:")
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "alice", "alice@example.com")
+        db.upsert_playlist("plex_admin_42", "Adopted Mix", service="plex")
+        db.set_playlist_tracks_json(
+            "plex_admin_42",
+            json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]),
+        )
+        db.set_playlist_targets("plex_admin_42", ["u1"])
+        db.upsert_plex_registry(
+            "admin",
+            "42",
+            "Adopted Mix",
+            "regular",
+            "trackseerr",
+            trackseerr_playlist_id="plex_admin_42",
+        )
+
+        t1 = Track("Song 1", "Artist 1", "Album 1")
+        primary_jf = _FakePlaylistAdapter(matched=[t1], missing=[])
+        login_plex = _FakePlaylistAdapter(matched=[t1], missing=[])
+
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "jellyfin", "name": "Primary JF", "url": "http://jf:8096", "sort_order": 0, "is_primary": True}, primary_jf),
+                ({"kind": "plex", "name": "Login Plex", "url": "http://plex1:32400", "sort_order": 1, "is_login": True}, login_plex),
+            ],
+        )
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert len(primary_jf.calls) == 1
+        assert len(login_plex.calls) == 1
+        assert primary_jf.calls[0][2].skip_item_ids is None
+        assert login_plex.calls[0][2].skip_item_ids == {"42"}
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+
 def test_server_adopted_keeps_snapshot_when_server_down(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -521,4 +635,107 @@ def test_server_adopted_keeps_snapshot_when_server_down(
     finally:
         registry._reset_for_tests()
         db.close()
+
+
+def test_post_push_matching_receives_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    db, cfg = _seed_fanout_db()
+    try:
+        t1 = Track("Song 1", "Artist 1", "Album 1")
+        t2 = Track("Song 2", "Artist 2", "Album 2")
+        plex_adapter = _FakePlaylistAdapter(matched=[t1, t2], missing=[])
+        jf_adapter = _FakePlaylistAdapter(matched=[t1, t2], missing=[])
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "plex", "name": "Plex", "url": "http://plex:32400", "sort_order": 0}, plex_adapter),
+                ({"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf:8096", "sort_order": 1}, jf_adapter),
+            ],
+        )
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert plex_adapter.match_dbs == [db]
+        assert jf_adapter.match_dbs == [db]
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_override_matched_track_not_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    db, cfg = _seed_fanout_db()
+    try:
+        db.add_match_override("Song 2", "Artist 2", "999", "Song 2", "Artist 2")
+        t1 = Track("Song 1", "Artist 1", "Album 1")
+        t2 = Track("Song 2", "Artist 2", "Album 2")
+        plex_adapter = _FakePlaylistAdapter(matched=[t1], missing=[t2])
+        jf_adapter = _FakePlaylistAdapter(matched=[t1], missing=[t2])
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "plex", "name": "Plex", "url": "http://plex:32400", "sort_order": 0}, plex_adapter),
+                ({"kind": "jellyfin", "name": "Jellyfin", "url": "http://jf:8096", "sort_order": 1}, jf_adapter),
+            ],
+        )
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert db.get_missing_tracks("imp_pl1") == []
+        states = {s["server_id"]: s for s in db.list_playlist_server_state("imp_pl1")}
+        assert states[ids["Plex"]]["matched"] == 2
+        assert states[ids["Plex"]]["missing"] == 0
+        assert states[ids["Jellyfin"]]["matched"] == 2
+        assert states[ids["Jellyfin"]]["missing"] == 0
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_skip_keys_follow_login_plex_not_position(monkeypatch: pytest.MonkeyPatch) -> None:
+    db = Database(":memory:")
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "alice", "alice@example.com")
+        db.upsert_playlist("plex_admin_42", "Adopted Mix", service="plex")
+        db.set_playlist_tracks_json(
+            "plex_admin_42",
+            json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]),
+        )
+        db.set_playlist_targets("plex_admin_42", ["u1"])
+        db.upsert_plex_registry(
+            "admin",
+            "42",
+            "Adopted Mix",
+            "regular",
+            "trackseerr",
+            trackseerr_playlist_id="plex_admin_42",
+        )
+
+        t1 = Track("Song 1", "Artist 1", "Album 1")
+        primary_jf = _FakePlaylistAdapter(matched=[t1], missing=[])
+        login_plex = _FakePlaylistAdapter(matched=[t1], missing=[])
+
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "jellyfin", "name": "Primary JF", "url": "http://jf:8096", "sort_order": 0, "is_primary": True}, primary_jf),
+                ({"kind": "plex", "name": "Login Plex", "url": "http://plex1:32400", "sort_order": 1, "is_login": True}, login_plex),
+            ],
+        )
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert len(primary_jf.calls) == 1
+        assert len(login_plex.calls) == 1
+        assert primary_jf.calls[0][2].skip_item_ids is None
+        assert login_plex.calls[0][2].skip_item_ids == {"42"}
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
 

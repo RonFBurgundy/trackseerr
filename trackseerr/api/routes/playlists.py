@@ -47,11 +47,12 @@ from trackseerr.clients.import_lists import listenbrainz as lb_provider
 from trackseerr.clients.import_lists.base import ImportListError
 from trackseerr.media_servers import PlaylistSyncOptions, as_media_server, describe_error
 from trackseerr.media_servers.registry import ServerRecord
+from trackseerr.media_servers.user_logins import sync_subsonic_for_users
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.spotify_scraper import SpotifyWebScraper
 from trackseerr.clients.youtube_music import get_shared_youtube_music_client
 from ytmusicapi.exceptions import YTMusicError
-from trackseerr.config import MEDIA_SERVER_NONE, Config
+from trackseerr.config import MEDIA_SERVER_NONE, MEDIA_SERVER_SUBSONIC, Config
 from trackseerr.native_match import match_playlist_tracks_native
 from trackseerr.library_monitoring import validate_list_monitor_mode
 from trackseerr.list_monitoring import apply_playlist_missing_safely
@@ -1050,11 +1051,17 @@ def _push_stored_to_first_server(
     playlist_id = model_playlist.id
     server_name = first_rec.name if first_rec is not None else "Plex"
     try:
-        results = first_server.sync_playlist(
-            model_playlist, target_usernames, PlaylistSyncOptions.from_config(config, db=db)
-        )
+        options = PlaylistSyncOptions.from_config(config, db=db)
+        if first_rec is not None and first_rec.kind == MEDIA_SERVER_SUBSONIC:
+            results = sync_subsonic_for_users(
+                db, config, first_rec, first_server, model_playlist, target_usernames, options
+            )
+        else:
+            results = first_server.sync_playlist(
+                model_playlist, target_usernames, options
+            )
         matched, missing = first_server.match_playlist_tracks(
-            model_playlist.tracks, threshold=config.search_similarity_threshold
+            model_playlist.tracks, threshold=config.search_similarity_threshold, db=db
         )
         matched_count = len(matched)
         missing_count = len(missing)

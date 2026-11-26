@@ -142,10 +142,11 @@ def _push_to_extra_server(
     adapter: Any,
     model_playlist: Playlist,
     target_usernames: list[str],
+    skip_item_ids: Optional[set[str]] = None,
 ) -> None:
     """Push ``model_playlist`` to an additional playlist server and record only its per-server state."""
     try:
-        options = PlaylistSyncOptions.from_config(config, db=db)
+        options = PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_item_ids)
         if rec.kind == MEDIA_SERVER_SUBSONIC:
             results = sync_subsonic_for_users(
                 db, config, rec, adapter, model_playlist, target_usernames, options
@@ -159,6 +160,7 @@ def _push_to_extra_server(
         matched, missing = adapter.match_playlist_tracks(
             model_playlist.tracks,
             threshold=config.search_similarity_threshold,
+            db=db,
         )
         success = any(r.success for r in results) if results else False
         error_msg = "" if success else next((r.error for r in results if not r.success and r.error), "")
@@ -414,7 +416,7 @@ class SyncState:
                     options,
                 )
             matched, missing = server.match_playlist_tracks(
-                model_playlist.tracks, threshold=config.search_similarity_threshold
+                model_playlist.tracks, threshold=config.search_similarity_threshold, db=db
             )
             missing = restore_missing(missing, original_by_effective, ignored_ids)
             success = any(r.success for r in results) if results else False
@@ -479,7 +481,10 @@ class SyncState:
             )
         for rec, adapter in servers[1:]:
             if rec is not None:
-                _push_to_extra_server(db, config, rec, adapter, model_playlist, target_usernames)
+                extra_skip = skip_rating_keys if rec.is_login else None
+                _push_to_extra_server(
+                    db, config, rec, adapter, model_playlist, target_usernames, skip_item_ids=extra_skip
+                )
 
     @staticmethod
     def _unchanged_since_last_sync(

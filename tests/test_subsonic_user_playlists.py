@@ -126,7 +126,44 @@ def test_unsealable_login_returns_failed_result(tmp_path: Path) -> None:
         results = sync_subsonic_for_users(db, cfg, rec, adapter, playlist, ["alice"], options)
         assert len(results) == 1
         assert results[0].success is False
-        assert results[0].error == "No Navidrome login saved for alice"
+        assert results[0].error == (
+            "The saved Navidrome login for alice can't be read any more; save it again on the Account page"
+        )
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_unreadable_saved_login_message(tmp_path: Path) -> None:
+    db, cfg, rec, adapter, _fake, playlist, options = _setup(tmp_path)
+    try:
+        db.set_server_account("u-bob", rec.id, "bob", "corrupted-sealed-token")
+        results = sync_subsonic_for_users(db, cfg, rec, adapter, playlist, ["bob"], options)
+        assert len(results) == 1
+        assert results[0].success is False
+        assert results[0].error == (
+            "The saved Navidrome login for bob can't be read any more; save it again on the Account page"
+        )
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_stored_playlist_push_uses_user_logins(tmp_path: Path) -> None:
+    from trackseerr.api.routes.playlists import _push_stored_to_first_server
+
+    db, cfg, rec, adapter, fake, playlist, _options = _setup(tmp_path)
+    try:
+        db.upsert_playlist(playlist.id, playlist.name, service="manual")
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+        matched_count, missing_count = _push_stored_to_first_server(
+            db, cfg, rec, adapter, playlist, ["alice"]
+        )
+        assert matched_count == 2
+        assert missing_count == 0
+        assert [(p.owner, p.name, p.entries) for p in fake.state.playlists.values()] == [
+            ("alice", "Road Trip", ["s1", "s2"])
+        ]
     finally:
         adapter.close()
         db.close()
