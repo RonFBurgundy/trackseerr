@@ -691,6 +691,10 @@ def test_missing_comes_from_push_not_second_match(monkeypatch: pytest.MonkeyPatc
             }
         ]
         monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: enricher)
+        monkeypatch.setattr(
+            "trackseerr.api.routes.sync.resolve_playlist_library_hits",
+            lambda _db, _tracks: ({}, set()),
+        )
 
         match_calls: list[Any] = []
         orig_match = sub_adapter.match_playlist_tracks

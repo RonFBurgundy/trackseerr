@@ -351,8 +351,8 @@ def test_sync_result_lists_missing(adapter: str, tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("adapter", ["subsonic", "jellyfin", "plex"])
-def test_library_missing_skips_server_searches(adapter: str, tmp_path: Path) -> None:
-    """Indexes in ``library_missing`` trigger zero server searches and are counted missing."""
+def test_unowned_song_gets_single_search(adapter: str, tmp_path: Path) -> None:
+    """Indexes in ``library_missing`` get exactly one plain search; server-only songs still match."""
     from types import SimpleNamespace
     from unittest.mock import patch
     from trackseerr.clients.plex import PlexClient
@@ -367,25 +367,86 @@ def test_library_missing_skips_server_searches(adapter: str, tmp_path: Path) -> 
     if adapter == "plex":
         admin_server = MagicMock()
         admin_server.myPlexAccount.return_value = SimpleNamespace(username="admin", id=1, email="", thumb="", users=lambda: [])
+        admin_server.search.return_value = []
         with patch("trackseerr.clients.plex.PlexServer"):
             client = PlexClient("http://localhost:32400", "token")
         client.server = admin_server
         server: MediaServer = PlexMediaServer(client)
         results = server.sync_playlist(pl, [], opts)
-        assert admin_server.search.call_count == 0
-    elif adapter == "subsonic":
-        server, fake = _make_server(adapter, [("Unowned Track", "No Artist", "No Album", "", ())])
-        results = server.sync_playlist(pl, ["admin"], opts)
-        assert [ep for ep, _ in fake.state.calls if ep == "search3"] == []
-    else:
-        server, fake = _make_server(adapter, [("Unowned Track", "No Artist", "No Album", "", ())])
-        results = server.sync_playlist(pl, ["admin"], opts)
-        assert [p for _, p, _ in fake.state.calls if p == "/Items"] == []
+        assert admin_server.search.call_count == 1
+        assert len(results) == 1
+        assert results[0].matched_tracks == 0
+        assert results[0].missing_tracks == 1
 
-    assert len(results) == 1
-    assert results[0].matched_tracks == 0
-    assert results[0].missing_tracks == 1
-    assert [t.title for t in results[0].missing] == ["Unowned Track"]
+        # Server-only song (present on Plex, absent from native library) still matches in 1 search.
+        admin_server.search.reset_mock()
+        admin_server.search.return_value = [
+            SimpleNamespace(
+                ratingKey=42,
+                title="Unowned Track",
+                grandparentTitle="No Artist",
+                parentTitle="No Album",
+                originalTitle="",
+                type="track",
+                duration=200000,
+                media=[],
+            )
+        ]
+        results_hit = server.sync_playlist(pl, [], opts)
+        assert admin_server.search.call_count == 1
+        assert results_hit[0].matched_tracks == 1
+        assert results_hit[0].missing_tracks == 0
+    elif adapter == "subsonic":
+        server, fake = _make_server(adapter, [("Other Song", "Other Artist", "Other Album", "", ())])
+        results = server.sync_playlist(pl, ["admin"], opts)
+        assert len([ep for ep, _ in fake.state.calls if ep == "search3"]) == 1
+        assert len(results) == 1
+        assert results[0].matched_tracks == 0
+        assert results[0].missing_tracks == 1
+
+        server_hit, fake_hit = _make_server(adapter, [("Unowned Track", "No Artist", "No Album", "", ())])
+        results_hit = server_hit.sync_playlist(pl, ["admin"], opts)
+        assert len([ep for ep, _ in fake_hit.state.calls if ep == "search3"]) == 1
+        assert results_hit[0].matched_tracks == 1
+        assert results_hit[0].missing_tracks == 0
+    else:
+        server, fake = _make_server(adapter, [("Other Song", "Other Artist", "Other Album", "", ())])
+        results = server.sync_playlist(pl, ["admin"], opts)
+        assert len([p for _, p, q in fake.state.calls if p == "/Items" and q.get("IncludeItemTypes") == "Audio"]) == 1
+        assert len(results) == 1
+        assert results[0].matched_tracks == 0
+        assert results[0].missing_tracks == 1
+
+        server_hit, fake_hit = _make_server(adapter, [("Unowned Track", "No Artist", "No Album", "", ())])
+        results_hit = server_hit.sync_playlist(pl, ["admin"], opts)
+        assert len([p for _, p, q in fake_hit.state.calls if p == "/Items" and q.get("IncludeItemTypes") == "Audio"]) == 1
+        assert results_hit[0].matched_tracks == 1
+        assert results_hit[0].missing_tracks == 0
+
+
+@pytest.mark.parametrize("adapter", ["subsonic", "jellyfin", "plex"])
+def test_unowned_song_skips_musicbrainz(adapter: str) -> None:
+    """Indexes in ``library_missing`` (``skip_search=True``) never invoke MusicBrainz resolution."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from trackseerr.clients.plex import PlexClient
+
+    track = Track("Unowned Track", "No Artist", "No Album")
+    with patch("trackseerr.playlist_identity.resolve_with_musicbrainz") as mb_mock:
+        if adapter == "plex":
+            admin_server = MagicMock()
+            admin_server.myPlexAccount.return_value = SimpleNamespace(
+                username="admin", id=1, email="", thumb="", users=lambda: []
+            )
+            admin_server.search.return_value = []
+            with patch("trackseerr.clients.plex.PlexServer"):
+                client = PlexClient("http://localhost:32400", "token")
+            client.server = admin_server
+            client.match_track(track, db=MagicMock(), enricher=MagicMock(), budget=MagicMock(), skip_search=True)
+        else:
+            server, _ = _make_server(adapter, [("Other Song", "Other Artist", "Other Album", "", ())])
+            server.match_track(track, db=MagicMock(), enricher=MagicMock(), budget=MagicMock(), skip_search=True)
+        assert mb_mock.call_count == 0
 
 
 @pytest.mark.parametrize("adapter", ["subsonic", "jellyfin", "plex"])
