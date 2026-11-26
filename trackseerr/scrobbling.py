@@ -24,17 +24,19 @@ def resolve_plex_user(
     account_id: Any,
     account_title: Optional[str],
     admin_username: Optional[str] = None,
+    owner_is_admin: bool = True,
 ) -> Optional[dict[str, Any]]:
     """Map a Plex account (webhook or history) to a TrackSeerr user, or None.
 
-    Rules: (1) account id 1 is the server owner and maps to the admin user matching ``admin_username``
-    (else the first admin); (2) ``str(account_id) == users.id``; (3) case-insensitive title/username match;
-    (4) otherwise None. Never creates users and never calls Plex (pass the cached ``admin_username``).
+    Rules: (1) when ``owner_is_admin`` is True, account id 1 is the server owner and maps to the admin user
+    matching ``admin_username`` (else the first admin); (2) ``str(account_id) == users.id``; (3) case-insensitive
+    title/username match; (4) otherwise None. Never creates users and never calls Plex (pass the cached
+    ``admin_username``).
     """
     users = db.list_users()
     aid = str(account_id).strip() if account_id is not None else ""
     # The owner rule is evaluated first so a users.id of "1" can never capture the server owner.
-    if aid == OWNER_LOCAL_ACCOUNT_ID:
+    if owner_is_admin and aid == OWNER_LOCAL_ACCOUNT_ID:
         admins = [u for u in users if u.get("is_admin")]
         if admin_username:
             for u in admins:

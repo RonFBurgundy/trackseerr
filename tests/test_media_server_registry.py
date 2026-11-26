@@ -665,3 +665,58 @@ def test_is_installed() -> None:
     assert registry.is_installed() is True
     registry._reset_for_tests()
     assert registry.is_installed() is False
+
+
+def test_non_login_plex_gets_no_account_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class _FakePlexClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            calls.append({"args": args, "kwargs": kwargs})
+
+    monkeypatch.setattr("trackseerr.clients.plex.PlexClient", _FakePlexClient)
+    monkeypatch.setattr("trackseerr.media_servers.registry.PlexMediaServer", _FakeAdapter)
+    registry._reset_for_tests()
+
+    login_rec = registry.ServerRecord(
+        id="p-login",
+        kind="plex",
+        name="LoginPlex",
+        source="settings",
+        url=PLEX_URL,
+        api_key="tok1",
+        enabled=True,
+        is_login=True,
+    )
+    other_rec = registry.ServerRecord(
+        id="p-other",
+        kind="plex",
+        name="OtherPlex",
+        source="settings",
+        url="http://plex2.example.com:32400",
+        api_key="tok2",
+        enabled=True,
+        is_login=False,
+    )
+
+    a1 = registry.build_adapter(login_rec)
+    a2 = registry.build_adapter(other_rec)
+    assert a1 is not None and a2 is not None
+    assert calls[0]["kwargs"]["account_token"] is None
+    assert calls[1]["kwargs"]["account_token"] == ""
+
+    # Toggling is_login must bust the adapter cache key.
+    other_as_login = registry.ServerRecord(
+        id="p-other",
+        kind="plex",
+        name="OtherPlex",
+        source="settings",
+        url="http://plex2.example.com:32400",
+        api_key="tok2",
+        enabled=True,
+        is_login=True,
+    )
+    a3 = registry.build_adapter(other_as_login)
+    assert a3 is not a2
+    assert calls[2]["kwargs"]["account_token"] is None
+    registry._reset_for_tests()
