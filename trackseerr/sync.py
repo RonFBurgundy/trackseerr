@@ -3,9 +3,10 @@ from typing import TYPE_CHECKING, List, Optional
 
 from .clients.deezer import DeezerClient
 from .clients.plex import PlexClient
-from .media_servers import PlaylistSyncOptions, as_media_server
+from .media_servers import PlaylistSyncOptions, as_media_server, registry
+from .media_servers.user_logins import sync_subsonic_for_users
 from .clients.spotify import SpotifyClient
-from .config import Config
+from .config import MEDIA_SERVER_SUBSONIC, Config
 from .models import Playlist, SyncResult
 from .native_match import match_playlist_tracks_native
 
@@ -37,6 +38,25 @@ class SyncCoordinator:
         self.db = db
 
     def _sync_one(self, pl: Playlist) -> SyncResult:
+        if registry.is_installed():
+            servers = registry.media_servers(registry.ROLE_PLAYLISTS, self.config)
+            if not servers:
+                return self._match_without_media_server(pl)
+            options = PlaylistSyncOptions.from_config(self.config, db=self.db)
+            first_result: Optional[SyncResult] = None
+            for rec, adapter in servers:
+                if rec.kind == MEDIA_SERVER_SUBSONIC:
+                    res_list = sync_subsonic_for_users(
+                        self.db, self.config, rec, adapter, pl, [], options
+                    )
+                else:
+                    res_list = adapter.sync_playlist(pl, [], options)
+                if first_result is None and res_list:
+                    first_result = res_list[0]
+            if first_result is not None:
+                return first_result
+            return self._match_without_media_server(pl)
+
         server = as_media_server(self.plex)
         if server is not None:
             return server.sync_playlist(pl, [], PlaylistSyncOptions.from_config(self.config, db=self.db))[0]
