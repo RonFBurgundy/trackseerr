@@ -44,9 +44,9 @@ def clean_title(title: str) -> str:
         title,
         flags=re.IGNORECASE,
     )
-    # Remove trailing ' - Remastered...' or ' - Live...'
+    # Remove trailing ' - Remastered...' or ' - 2011 Remaster' or ' - Live...'
     cleaned = re.sub(
-        r"\s*-\s*(remastered|remaster|live|deluxe|radio edit|mono|stereo).*$",
+        r"\s*-\s*(?:\d{4}\s+)?(remastered|remaster|live|deluxe|radio edit|mono|stereo).*$",
         "",
         cleaned,
         flags=re.IGNORECASE,
@@ -734,12 +734,18 @@ class PlexClient:
             return isrc_match
 
         if skip_search:
-            candidates = []
-            try:
-                candidates = self.server.search(track.title, mediatype="track", limit=10)
-            except BadRequest as e:
-                logger.debug("BadRequest searching for %s: %s", track.title, safe_exc(e))
-            return self._eval_candidates(candidates, track, threshold)
+            cleaned = clean_title(track.title)
+            queries = [q for q in dict.fromkeys([cleaned, track.title]) if q]
+            for query in queries:
+                try:
+                    candidates = self.server.search(query, mediatype="track", limit=10)
+                except BadRequest as e:
+                    logger.debug("BadRequest searching for %s: %s", query, safe_exc(e))
+                    continue
+                match = self._eval_candidates(candidates, track, threshold)
+                if match is not None:
+                    return match
+            return None
 
         searched = self._search_plex_track(track, threshold)
         if searched is not None:
@@ -1137,7 +1143,23 @@ class PlexClient:
         results: List[SyncResult] = []
         for username in target_usernames:
             try:
-                user_server = self.get_user_server(username, admin_username=admin_username)
+                try:
+                    user_server = self.get_user_server(username, admin_username=admin_username)
+                except NotFound:
+                    logger.info("Skipping Plex target '%s' for playlist '%s': no Plex account", username, playlist.name)
+                    results.append(
+                        SyncResult(
+                            playlist_name=playlist.name,
+                            total_tracks=len(playlist.tracks),
+                            matched_tracks=len(matched),
+                            missing_tracks=len(missing),
+                            success=False,
+                            error=f"No Plex account for {username}",
+                            missing=list(missing),
+                            skipped=True,
+                        )
+                    )
+                    continue
                 if db is not None:
                     self.refresh_playlist_registry(user_server, username, db)
 

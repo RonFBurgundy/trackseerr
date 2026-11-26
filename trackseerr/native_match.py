@@ -7,9 +7,38 @@ matcher is the one the iTunes import uses (normalized artist + album + title aga
 from typing import Any, Sequence
 
 from trackseerr.itunes_import import TrackMatcher
+from trackseerr.media_match import split_artist_credits
+from trackseerr.media_servers.song_scoring import clean_title
 from trackseerr.models import Track
 from trackseerr.playlist_identity import LibraryHit, hit_from_track
 from trackseerr.storage import Database
+
+
+def _match_with_fallbacks(matcher: TrackMatcher, track: Track) -> tuple[str, str] | None:
+    """Try ``TrackMatcher`` with raw metadata, then cleaned title and/or first credited artist."""
+    cleaned_title = clean_title(track.title) or track.title
+    credits = split_artist_credits(track.artist)
+    first_artist = credits[0] if credits else track.artist
+    attempts = [
+        (track.title, track.artist),
+        (cleaned_title, track.artist),
+        (track.title, first_artist),
+        (cleaned_title, first_artist),
+    ]
+    for title, artist in dict.fromkeys(attempts):
+        if not title:
+            continue
+        matched = matcher.match(
+            {
+                "name": title,
+                "artist": artist,
+                "album_artist": "",
+                "album": track.album,
+            }
+        )
+        if matched is not None:
+            return matched
+    return None
 
 
 def resolve_playlist_library_hits(
@@ -24,13 +53,7 @@ def resolve_playlist_library_hits(
         if pin_hit is not None:
             hits[idx] = pin_hit
             continue
-        entry: dict[str, Any] = {
-            "name": track.title,
-            "artist": track.artist,
-            "album_artist": "",
-            "album": track.album,
-        }
-        matched = matcher.match(entry)
+        matched = _match_with_fallbacks(matcher, track)
         if matched is None:
             missing.add(idx)
             continue

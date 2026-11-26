@@ -138,8 +138,8 @@ def test_list_jellyfin_playlists_for_named_user(env) -> None:
     resp = env.tc.get(f"/api/media-servers/{env.jf_id}/playlists?user=kid", headers=env.admin)
     assert resp.status_code == 200
     assert resp.json() == [
-        {"id": "jf-kid-priv", "title": "Kid Mix", "owner": "", "track_count": 2, "adopted_playlist_id": None},
-        {"id": "jf-shared", "title": "Shared Vibes", "owner": "", "track_count": 1, "adopted_playlist_id": None},
+        {"id": "jf-kid-priv", "title": "Kid Mix", "owner": "kid", "track_count": 2, "adopted_playlist_id": None},
+        {"id": "jf-shared", "title": "Shared Vibes", "owner": "kid", "track_count": 1, "adopted_playlist_id": None},
     ]
 
     missing_user = env.tc.get(f"/api/media-servers/{env.jf_id}/playlists?user=nobody", headers=env.admin)

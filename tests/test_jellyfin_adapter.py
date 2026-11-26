@@ -479,7 +479,7 @@ def test_disabled_users_are_not_listed_or_targeted_but_login_screen_hidden_ones_
     assert all(u.hidden for u in fake.state.users if u.id in ("u-admin", "u-kid"))
     assert [u.name for u in server.list_users()] == ["admin", "kid", "shown"]
     (r,) = server.sync_playlist(pl("Song A"), ["off"], PlaylistSyncOptions())
-    assert not r.success and "not found" in r.error and not fake.state.playlists
+    assert r.skipped and not r.success and "No Jellyfin account for off" in r.error and not fake.state.playlists
 
 
 def test_listing_stops_when_the_server_ignores_start_index():

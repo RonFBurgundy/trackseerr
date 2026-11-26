@@ -721,14 +721,22 @@ class SubsonicMediaServer(MediaServer):
         if isrc_match is not None:
             return isrc_match
         if skip_search:
-            title = norm_title(track.title.replace("$", "s")) or (
-                "" if is_censored(track.title) else clean_library_name(track.title)
+            cleaned = clean_title(track.title)
+            normed = norm_title(cleaned.replace("$", "s")) or (
+                "" if is_censored(track.title) else clean_library_name(cleaned)
             )
-            query = f"{title} {first_artist_query(track.artist)}".strip() if title else ""
-            if not query:
-                return None
-            match, _ = self._search_and_pick(track, query, _SEARCH_PAGE, threshold)
-            return match
+            first_artist = first_artist_query(track.artist)
+            queries: list[str] = []
+            if normed:
+                queries.append(f"{normed} {first_artist}".strip())
+            raw_norm = "" if is_censored(track.title) else clean_library_name(track.title)
+            if raw_norm and raw_norm != normed:
+                queries.append(f"{raw_norm} {first_artist}".strip())
+            for query in dict.fromkeys(q for q in queries if q):
+                match, _ = self._search_and_pick(track, query, _SEARCH_PAGE, threshold)
+                if match is not None:
+                    return match
+            return None
         fuzzy = self._search_fuzzy(track, threshold)
         if fuzzy is not None:
             return fuzzy
