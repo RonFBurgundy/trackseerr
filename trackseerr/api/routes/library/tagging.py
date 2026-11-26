@@ -15,6 +15,7 @@ import httpx
 from trackseerr import art_pipeline
 from trackseerr.file_relink import RelinkConflict, relink_file, relink_files
 from trackseerr.item_history import emit
+from trackseerr.media_servers import registry
 from trackseerr.redaction import redact_text, safe_exc
 from trackseerr.import_files import (
     prepare_file_for_tagging,
@@ -431,6 +432,24 @@ def rename_safety(
     _admin: dict[str, Any] = Depends(require_admin),
 ) -> dict[str, Any]:
     """Reports warnings about media-server settings that could drop play history or ratings during a rename."""
+    if registry.is_installed():
+        from trackseerr.media_servers.base import MediaServerError
+
+        servers = registry.media_servers(registry.ROLE_REFRESH)
+        multi = len(servers) > 1
+        warnings: list[str] = []
+        for rec, adapter in servers:
+            try:
+                server_warnings = adapter.rename_warnings()
+            except MediaServerError as e:
+                logger.warning("Failed to check rename safety for %s: %s", rec.name, safe_exc(e))
+                continue
+            if multi:
+                warnings.extend(f"{rec.name}: {w}" for w in server_warnings)
+            else:
+                warnings.extend(server_warnings)
+        return {"warnings": warnings}
+
     server = as_media_server(plex_client)
     warnings = server.rename_warnings() if server else []
     return {"warnings": warnings}

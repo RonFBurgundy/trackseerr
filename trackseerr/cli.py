@@ -246,11 +246,9 @@ def _db_base_dir(config: Config) -> str:
 
 def _apply_saved_media_server_settings(config: Config) -> None:
     """Run-once and headless runs open no database, but they usually share the data directory with a web instance
-    where the media server was chosen on the Settings page. When the environment names no media server and that
-    database already exists, load the saved choice (read once, then closed) so these runs sync to the same server.
+    where the media server was chosen on the Settings page. When that database already exists, load the saved
+    servers (read once, then closed) so these runs sync to every configured server.
     A missing or unreadable database leaves the environment-only behaviour in place."""
-    if registry.env_records(config):
-        return
     try:
         db_path = safe_data_path("sync_db.sqlite", base_dir=_db_base_dir(config))
         if not os.path.exists(db_path):
