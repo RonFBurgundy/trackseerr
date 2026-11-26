@@ -652,6 +652,25 @@ class PlexClient:
             logger.debug("Failed match override fetch for '%s': %s", track.title, safe_exc(e))
         return None
 
+    def _match_library_pin(self, track: Track, db: Optional[Any]) -> Optional[object]:
+        if db is None or not hasattr(db, "get_library_pin"):
+            return None
+        try:
+            hit = db.get_library_pin(track.title, track.artist)
+        except (sqlite3.Error, AttributeError, TypeError, ValueError) as e:
+            logger.debug("Library pin lookup failed for '%s': %s", track.title, safe_exc(e))
+            return None
+        if hit is None:
+            return None
+        try:
+            item = self._plex_item_for_file(hit)
+        except (PlexApiException, requests.RequestException) as e:
+            logger.warning("Library pin resolution failed for '%s': %s", track.title, safe_exc(e))
+            return None
+        if item is not None:
+            logger.debug("Applied library match pin for '%s - %s'", track.artist, track.title)
+        return item
+
     def _search_plex_track(self, track: Track, threshold: float) -> Optional[object]:
         """Search Plex by title, cleaned title, artist-scoped title, and censored pattern."""
         candidates = []
@@ -698,7 +717,12 @@ class PlexClient:
         if override_match is not None:
             return override_match
 
-        # 2. Pre-resolved native library hit: map file path directly before falling back to search
+        # 2. Cross-server library pin check
+        pin_match = self._match_library_pin(track, db)
+        if pin_match is not None:
+            return pin_match
+
+        # 3. Pre-resolved native library hit: map file path directly before falling back to search
         if library_hit is not None:
             item = self._plex_item_for_file(library_hit)
             if item is not None:

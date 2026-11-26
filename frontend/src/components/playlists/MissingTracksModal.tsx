@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   Ban,
   Check,
+  ChevronDown,
   History,
   Loader2,
   Search,
@@ -11,7 +12,7 @@ import { ObsidianModal, PageLoader, TapeDeckButton } from '@/components/ui';
 import { ExcludeConfirm } from '@/components/library/ExcludeConfirm';
 import { compactInputClass, compactLabelClass } from '@/components/settings/formClasses';
 import { usePlaylistServers } from '@/hooks';
-import type { MissingTrack, MediaTrackHit } from '@/services/missingService';
+import type { MatchSource, MissingTrack, MediaTrackHit } from '@/services/missingService';
 import { errorMessage } from '@/services/apiClient';
 
 export interface MissingTracksModalProps {
@@ -19,7 +20,7 @@ export interface MissingTracksModalProps {
   onClose: () => void;
   playlistName?: string;
   tracks: MissingTrack[];
-  onSearch: (query: string, serverId?: string) => Promise<MediaTrackHit[]>;
+  onSearch: (query: string, serverId?: string, source?: MatchSource) => Promise<MediaTrackHit[]>;
   onMatch: (track: MissingTrack, hit: MediaTrackHit, serverId?: string) => Promise<void>;
   onOpenOverrides?: () => void;
   overridesCount?: number;
@@ -54,6 +55,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
   const searchInputId = useId();
   const serverSelectId = useId();
   const { playlistServers } = usePlaylistServers(isAdmin);
+  const [showServerOnly, setShowServerOnly] = useState<boolean>(false);
   const [selectedServerId, setSelectedServerId] = useState<string>('');
   const [excludeTrack, setExcludeTrack] = useState<MissingTrack | null>(null);
   const [matchingTrack, setMatchingTrack] = useState<MissingTrack | null>(null);
@@ -65,7 +67,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
   const [errorMessageText, setErrorMessageText] = useState<string | null>(null);
 
   const activeServerId =
-    playlistServers.length > 1
+    showServerOnly && playlistServers.length > 0
       ? playlistServers.some((s) => s.id === selectedServerId)
         ? selectedServerId
         : playlistServers[0].id
@@ -74,6 +76,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
   const handleStartMatch = useCallback(
     async (track: MissingTrack) => {
       setMatchingTrack(track);
+      setShowServerOnly(false);
       const initialQuery = `${track.artist} ${track.title}`.trim();
       setQuery(initialQuery);
       setResults([]);
@@ -81,7 +84,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
       setStatusMessage(null);
       setIsSearching(true);
       try {
-        const hits = await onSearch(initialQuery, activeServerId);
+        const hits = await onSearch(initialQuery, undefined, 'library');
         setResults(hits);
       } catch (err: unknown) {
         setErrorMessageText(errorMessage(err, 'Failed to search library'));
@@ -89,7 +92,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
         setIsSearching(false);
       }
     },
-    [activeServerId, onSearch]
+    [onSearch]
   );
 
   const handleSearchSubmit = async (e: React.FormEvent) => {
@@ -98,7 +101,30 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
     setIsSearching(true);
     setErrorMessageText(null);
     try {
-      const hits = await onSearch(query.trim(), activeServerId);
+      const hits = await onSearch(query.trim(), activeServerId, showServerOnly ? 'server' : 'library');
+      setResults(hits);
+    } catch (err: unknown) {
+      setErrorMessageText(errorMessage(err, 'Failed to search library'));
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleToggleServerOnly = async () => {
+    const nextShow = !showServerOnly;
+    const nextServerId =
+      nextShow && playlistServers.length > 0
+        ? playlistServers.some((s) => s.id === selectedServerId)
+          ? selectedServerId
+          : playlistServers[0].id
+        : undefined;
+    setShowServerOnly(nextShow);
+    setResults([]);
+    setErrorMessageText(null);
+    if (!query.trim()) return;
+    setIsSearching(true);
+    try {
+      const hits = await onSearch(query.trim(), nextServerId, nextShow ? 'server' : 'library');
       setResults(hits);
     } catch (err: unknown) {
       setErrorMessageText(errorMessage(err, 'Failed to search library'));
@@ -114,7 +140,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
     if (!query.trim()) return;
     setIsSearching(true);
     try {
-      const hits = await onSearch(query.trim(), nextServerId);
+      const hits = await onSearch(query.trim(), nextServerId, 'server');
       setResults(hits);
     } catch (err: unknown) {
       setErrorMessageText(errorMessage(err, 'Failed to search library'));
@@ -128,9 +154,10 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
     setIsMatching(true);
     setErrorMessageText(null);
     try {
-      await onMatch(matchingTrack, hit, activeServerId);
+      await onMatch(matchingTrack, hit, showServerOnly ? activeServerId : undefined);
       setStatusMessage(`Matched "${matchingTrack.title}" to "${hit.title}"`);
       setMatchingTrack(null);
+      setShowServerOnly(false);
       setResults([]);
       setQuery('');
     } catch (err: unknown) {
@@ -144,6 +171,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
   useEffect(() => {
     if (!isOpen) {
       setMatchingTrack(null);
+      setShowServerOnly(false);
       setSelectedServerId('');
       setQuery('');
       setResults([]);
@@ -211,6 +239,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
                 size="sm"
                 onClick={() => {
                   setMatchingTrack(null);
+                  setShowServerOnly(false);
                   setResults([]);
                 }}
                 icon={<ArrowLeft className="h-3.5 w-3.5" />}
@@ -220,31 +249,11 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
             </div>
 
             <form onSubmit={handleSearchSubmit} className="space-y-2">
-              {playlistServers.length > 1 && (
-                <div>
-                  <label htmlFor={serverSelectId} className={compactLabelClass}>
-                    Server
-                  </label>
-                  <select
-                    id={serverSelectId}
-                    name="match-server-id"
-                    value={activeServerId}
-                    onChange={(e) => void handleServerChange(e.target.value)}
-                    className={compactInputClass}
-                  >
-                    {playlistServers.map((srv) => (
-                      <option key={srv.id} value={srv.id}>
-                        {srv.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
               <label
                 htmlFor={searchInputId}
                 className="block text-xs uppercase font-mono tracking-wider text-neutral-300"
               >
-                Search your media server
+                {showServerOnly ? 'Search your media server' : 'Search your library'}
               </label>
               <div className="flex items-center gap-1.5">
                 <input
@@ -266,10 +275,43 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
                   Search
                 </TapeDeckButton>
               </div>
+              {playlistServers.length > 0 && (
+                <div className="space-y-2 pt-1">
+                  <TapeDeckButton
+                    type="button"
+                    size="sm"
+                    onClick={() => void handleToggleServerOnly()}
+                    aria-expanded={showServerOnly}
+                    icon={<ChevronDown className={`h-3.5 w-3.5 transition-transform ${showServerOnly ? 'rotate-180' : ''}`} />}
+                  >
+                    Match on one server only
+                  </TapeDeckButton>
+                  {showServerOnly && (
+                    <div>
+                      <label htmlFor={serverSelectId} className={compactLabelClass}>
+                        Server
+                      </label>
+                      <select
+                        id={serverSelectId}
+                        name="match-server-id"
+                        value={activeServerId ?? ''}
+                        onChange={(e) => void handleServerChange(e.target.value)}
+                        className={compactInputClass}
+                      >
+                        {playlistServers.map((srv) => (
+                          <option key={srv.id} value={srv.id}>
+                            {srv.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
             </form>
 
             {isSearching ? (
-              <PageLoader size="sm" message="Searching your media server" />
+              <PageLoader size="sm" message={showServerOnly ? 'Searching your media server' : 'Searching your library'} />
             ) : results.length === 0 ? (
               <div className="py-8 text-center text-xs font-mono text-neutral-500">
                 No matching tracks found in library for "{query}".
@@ -290,7 +332,7 @@ export const MissingTracksModal: React.FC<MissingTracksModalProps> = ({
 
                     return (
                       <div
-                        key={hit.rating_key}
+                        key={hit.track_id ?? hit.rating_key ?? `${hit.title}-${hit.artist}`}
                         className="p-2.5 flex items-center justify-between gap-3 hover:bg-[#141414] transition-colors"
                       >
                         <div className="min-w-0 flex-1 space-y-0.5">

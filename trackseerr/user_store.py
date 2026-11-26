@@ -427,6 +427,7 @@ class UserStoreMixin:
                 self.conn.execute("UPDATE playlists SET creator_id = NULL WHERE creator_id = ?", (uid,))
                 self.conn.execute("UPDATE match_overrides SET created_by = NULL WHERE created_by = ?", (uid,))
                 self.conn.execute("UPDATE server_match_overrides SET created_by = NULL WHERE created_by = ?", (uid,))
+                self.conn.execute("UPDATE library_match_pins SET created_by = NULL WHERE created_by = ?", (uid,))
                 self.conn.execute("DELETE FROM plex_mix_snapshots WHERE created_by = ?", (uid,))
                 if not uid.startswith("local-"):
                     self.conn.execute("DELETE FROM plex_playlist_registry WHERE plex_user = ?", (username,))

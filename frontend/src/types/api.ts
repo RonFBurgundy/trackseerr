@@ -3870,7 +3870,7 @@ export interface paths {
         put?: never;
         /**
          * Create Match Override
-         * @description Records a manual match override (Match Memory) and removes corresponding missing tracks.
+         * @description Records a library match pin or manual server override (Match Memory) and clears missing rows.
          */
         post: operations["create_match_override_api_missing_match_post"];
         delete?: never;
@@ -3891,7 +3891,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Match Override
-         * @description Deletes a Match Memory override.
+         * @description Deletes a Match Memory override or library match pin.
          */
         delete: operations["delete_match_override_api_missing_match__override_id__delete"];
         options?: never;
@@ -3908,7 +3908,7 @@ export interface paths {
         };
         /**
          * List Match Overrides
-         * @description Lists all stored Match Memory overrides.
+         * @description Lists all stored Match Memory overrides and cross-server library pins.
          */
         get: operations["list_match_overrides_api_missing_matches_get"];
         put?: never;
@@ -3948,7 +3948,7 @@ export interface paths {
         };
         /**
          * Search Plex Tracks
-         * @description Searches a media server library for tracks to enable manual matching and correction.
+         * @description Searches Trackseerr's library or a media server library for tracks to enable manual matching.
          */
         get: operations["search_plex_tracks_api_missing_search_get"];
         put?: never;
@@ -11380,6 +11380,8 @@ export interface components {
             created_by?: string | null;
             /** Id */
             id: number;
+            /** Kind */
+            kind?: ("library" | "server" | "legacy") | null;
             /** Plex Artist */
             plex_artist: string;
             /** Plex Rating Key */
@@ -11394,6 +11396,8 @@ export interface components {
             source_artist: string;
             /** Source Title */
             source_title: string;
+            /** Track Id */
+            track_id?: string | null;
         };
         /** MatchOverrideRequest */
         MatchOverrideRequest: {
@@ -11401,17 +11405,17 @@ export interface components {
              * Plex Artist
              * @description Artist of matched track in media server
              */
-            plex_artist: string;
+            plex_artist?: string | null;
             /**
              * Plex Rating Key
              * @description Library item id or Plex ratingKey of matched track
              */
-            plex_rating_key: string;
+            plex_rating_key?: string | null;
             /**
              * Plex Title
              * @description Title of matched track in media server
              */
-            plex_title: string;
+            plex_title?: string | null;
             /**
              * Server Id
              * @description Optional media server ID for server-scoped overrides
@@ -11427,6 +11431,11 @@ export interface components {
              * @description Title of the track from source playlist
              */
             source_title: string;
+            /**
+             * Track Id
+             * @description Library track ID for a cross-server library pin
+             */
+            track_id?: string | null;
         };
         /**
          * MatchReleaseGroup
@@ -12129,7 +12138,7 @@ export interface components {
         };
         /**
          * MediaTrackHit
-         * @description A media-server track search hit. Plex adds ``thumb``; Jellyfin and Subsonic add ``id``.
+         * @description A track search hit from Trackseerr's library or a media server.
          */
         MediaTrackHit: {
             /** Album */
@@ -12141,11 +12150,13 @@ export interface components {
             /** Id */
             id?: string | null;
             /** Rating Key */
-            rating_key: string;
+            rating_key?: string | null;
             /** Thumb */
             thumb?: string | null;
             /** Title */
             title: string;
+            /** Track Id */
+            track_id?: string | null;
         };
         /** MetadataProfile */
         MetadataProfile: {
@@ -22999,6 +23010,8 @@ export interface operations {
             query?: {
                 /** @description Optional media server ID for server-scoped overrides */
                 server_id?: string | null;
+                /** @description Override kind ('library' for library pins) */
+                kind?: ("library" | "server" | "legacy") | null;
             };
             header?: never;
             path: {
@@ -23087,6 +23100,8 @@ export interface operations {
                 /** @description Query string to search library tracks */
                 query: string;
                 limit?: number;
+                /** @description Search Trackseerr's library ('library') or a media server ('server') */
+                source?: "library" | "server";
                 /** @description Optional media server ID (defaults to primary server) */
                 server_id?: string | null;
             };

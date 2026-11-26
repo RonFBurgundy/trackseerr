@@ -1003,4 +1003,113 @@ def test_push_resolves_native_library_once_and_skips_unowned_searches(monkeypatc
         db.close()
 
 
+def test_library_pin_clears_missing_and_matches_across_servers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single library pin resolves a mismatched track on both Subsonic and Jellyfin during sync."""
+    from tests.jellyfin_fake import API_KEY as JELLYFIN_KEY
+    from tests.jellyfin_fake import FakeAudio, FakeJellyfin, JellyfinState
+    from tests.jellyfin_fake import FakeUser as JfUser
+    from tests.subsonic_fake import FakeSong, FakeSubsonic, SubsonicState
+    from tests.subsonic_fake import FakeUser as SubUser
+    from trackseerr.media_servers.jellyfin import JellyfinMediaServer
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    jf_adapter: Optional[JellyfinMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "admin", "admin@example.com")
+        db.upsert_library_artist({"id": "art-1", "name": "Real Artist"})
+        db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Real Album"})
+        db.upsert_library_track(
+            {
+                "id": "trk-1",
+                "album_id": "alb-1",
+                "artist_id": "art-1",
+                "title": "Real Title",
+                "track_number": 1,
+                "disc_number": 1,
+                "duration_seconds": 180.0,
+            }
+        )
+        db.upsert_library_file(
+            {
+                "id": "file-1",
+                "track_id": "trk-1",
+                "file_path": "/music/Real Artist/Real Album/01 Real Title.flac",
+                "relative_path": "01 Real Title.flac",
+                "codec": "flac",
+                "quality_name": "FLAC",
+                "size_bytes": 123456,
+            }
+        )
+        db.set_library_pin("Spotify Weird Title", "Weird Credit", "trk-1")
+
+        sub_fake = FakeSubsonic(
+            SubsonicState(
+                songs=[
+                    FakeSong(
+                        id="s1",
+                        title="Real Title",
+                        artist="Real Artist",
+                        album="Real Album",
+                        path="/srv/Real Artist/Real Album/01 Real Title.flac",
+                    )
+                ],
+                users={"admin": SubUser("admin", admin=True, password="pw")},
+            )
+        )
+        jf_fake = FakeJellyfin(
+            JellyfinState(
+                songs=[
+                    FakeAudio(
+                        id="j1",
+                        title="Real Title",
+                        artist="Real Artist",
+                        album="Real Album",
+                        path="/srv/Real Artist/Real Album/01 Real Title.flac",
+                    )
+                ],
+                users=[JfUser("u-admin", "admin", admin=True)],
+            )
+        )
+        sub_adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=sub_fake.transport(), sleep=lambda _: None)
+        jf_adapter = JellyfinMediaServer("http://jf:8096", JELLYFIN_KEY, "admin", transport=jf_fake.transport(), sleep=lambda _: None)
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+        monkeypatch.setattr("trackseerr.media_servers.jellyfin.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "subsonic", "name": "Nav", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True}, sub_adapter),
+                ({"kind": "jellyfin", "name": "JF", "url": "http://jf:8096", "api_key": JELLYFIN_KEY, "sort_order": 1}, jf_adapter),
+            ],
+        )
+
+        db.upsert_playlist("pl_pin", "Pin Mix", service="spotify")
+        db.set_playlist_tracks_json(
+            "pl_pin",
+            json.dumps([{"title": "Spotify Weird Title", "artist": "Weird Credit", "album": "Mix"}]),
+        )
+        db.set_playlist_targets("pl_pin", ["u1"])
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert out["stats"]["total_matched"] == 1
+        assert out["stats"]["total_missing"] == 0
+        assert db.get_missing_tracks("pl_pin") == []
+        states = {s["server_id"]: s for s in db.list_playlist_server_state("pl_pin")}
+        assert (states[ids["Nav"]]["matched"], states[ids["Nav"]]["missing"]) == (1, 0)
+        assert (states[ids["JF"]]["matched"], states[ids["JF"]]["missing"]) == (1, 0)
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        if jf_adapter is not None:
+            jf_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
 
