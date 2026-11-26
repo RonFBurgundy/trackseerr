@@ -25,7 +25,7 @@ from trackseerr.api.dependencies import (
     require_permission,
 )
 from trackseerr.api.routes.issues import _Stripped, _is_admin, _reject_control_chars, file_issue
-from trackseerr.api.routes.sync import _playlist_servers, _push_to_extra_server
+from trackseerr.api.routes.sync import _playlist_servers, _push_results_outcome, _push_to_extra_server
 from trackseerr.api.schemas.playlists import (
     FeaturedChart,
     ListeningSourcesResponse,
@@ -1060,12 +1060,8 @@ def _push_stored_to_first_server(
             results = first_server.sync_playlist(
                 model_playlist, target_usernames, options
             )
-        matched, missing = first_server.match_playlist_tracks(
-            model_playlist.tracks, threshold=config.search_similarity_threshold, db=db
-        )
-        matched_count = len(matched)
+        success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
         missing_count = len(missing)
-        success = any(r.success for r in results) if results else False
         db.record_sync_result(
             playlist_id,
             status="success" if (success and not missing) else ("partial" if success else "error"),

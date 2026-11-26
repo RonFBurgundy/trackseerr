@@ -296,3 +296,55 @@ def test_search_artist_title_query(adapter: str) -> None:
 
     hits_artist_only = server.search_tracks("Artist 2")
     assert [h["id"] for h in hits_artist_only] == ["s2"]
+
+
+@pytest.mark.parametrize("adapter", ["subsonic", "jellyfin", "plex"])
+def test_sync_result_lists_missing(adapter: str, tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from plexapi.exceptions import NotFound
+    from trackseerr.clients.plex import PlexClient
+    from trackseerr.media_servers.plex import PlexMediaServer
+
+    pl = Playlist(
+        id="pl-miss",
+        name="Parity Mix",
+        tracks=[
+            Track("Song A", "Artist 1", "Album X"),
+            Track("Not In Library", "Artist 2", "Album Y"),
+        ],
+    )
+    if adapter == "plex":
+        plex_track = SimpleNamespace(
+            ratingKey="101",
+            title="Song A",
+            grandparentTitle="Artist 1",
+            parentTitle="Album X",
+            duration=180000,
+        )
+        admin_server = MagicMock()
+        admin_server.myPlexAccount.return_value = SimpleNamespace(username="admin", id=1, email="", thumb="", users=lambda: [])
+        admin_server.search.side_effect = lambda title, **kwargs: [plex_track] if title == "Song A" else []
+        admin_server.playlist.side_effect = [NotFound("missing"), MagicMock()]
+        with patch("trackseerr.clients.plex.PlexServer"):
+            client = PlexClient("http://localhost:32400", "token")
+        client.server = admin_server
+        server: MediaServer = PlexMediaServer(client)
+        single = server.sync_playlist(pl, [], PlaylistSyncOptions(data_dir=str(tmp_path)))
+        assert len(single) == 1
+        assert single[0].success is True
+        assert single[0].matched_tracks == 1
+        assert single[0].missing_tracks == 1
+        assert [t.title for t in single[0].missing] == ["Not In Library"]
+
+        admin_server.playlist.side_effect = [NotFound("missing"), MagicMock()]
+        results = server.sync_playlist(pl, ["admin"], PlaylistSyncOptions(data_dir=str(tmp_path)))
+    else:
+        server, _ = _make_server(adapter, [("Song A", "Artist 1", "Album X", "", ())])
+        results = server.sync_playlist(pl, ["admin"], PlaylistSyncOptions(data_dir=str(tmp_path)))
+
+    assert len(results) == 1
+    assert results[0].success is True
+    assert results[0].matched_tracks == 1
+    assert results[0].missing_tracks == 1
+    assert [t.title for t in results[0].missing] == ["Not In Library"]

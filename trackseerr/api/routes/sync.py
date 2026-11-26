@@ -38,7 +38,7 @@ from trackseerr.list_monitoring import apply_playlist_missing_safely
 from trackseerr.listening_playlists import fetch_listening_tracks
 from trackseerr.playlist_policy import is_listening_playlist, is_smart_collection
 from trackseerr.smart_collections import SmartCollectionError, refresh_tracks
-from trackseerr.models import Playlist, RequestStatus, Track
+from trackseerr.models import Playlist, RequestStatus, SyncResult, Track
 from trackseerr.native_match import match_playlist_tracks_native
 from trackseerr.storage import Database
 from trackseerr.track_aliases import apply_track_aliases, restore_missing
@@ -135,6 +135,16 @@ def _playlist_servers(
     return [(None, fallback_server)] if fallback_server else []
 
 
+def _push_results_outcome(results: Sequence[SyncResult], total_tracks: int) -> tuple[bool, int, list[Track]]:
+    """Derive ``(success, matched_count, missing)`` from per-target push results."""
+    if not results:
+        return False, 0, []
+    chosen = next((r for r in results if r.success), results[0])
+    missing = list(chosen.missing)
+    matched_count = max(0, total_tracks - len(missing))
+    return any(r.success for r in results), matched_count, missing
+
+
 def _push_to_extra_server(
     db: Database,
     config: Config,
@@ -157,18 +167,13 @@ def _push_to_extra_server(
                 target_usernames,
                 options,
             )
-        matched, missing = adapter.match_playlist_tracks(
-            model_playlist.tracks,
-            threshold=config.search_similarity_threshold,
-            db=db,
-        )
-        success = any(r.success for r in results) if results else False
+        success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
         error_msg = "" if success else next((r.error for r in results if not r.success and r.error), "")
         db.record_playlist_server_state(
             model_playlist.id,
             rec.id,
             "success" if success else "failed",
-            matched=len(matched),
+            matched=matched_count,
             missing=len(missing),
             error=error_msg,
         )
@@ -415,11 +420,8 @@ class SyncState:
                     target_usernames,
                     options,
                 )
-            matched, missing = server.match_playlist_tracks(
-                model_playlist.tracks, threshold=config.search_similarity_threshold, db=db
-            )
+            success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
             missing = restore_missing(missing, original_by_effective, ignored_ids)
-            success = any(r.success for r in results) if results else False
             db.record_sync_result(
                 playlist_id=pl_id,
                 status="success" if success else "failed",
@@ -429,9 +431,9 @@ class SyncState:
             apply_playlist_missing_safely(db, config, pl_id)
             if success:
                 stats["success_count"] += 1
-            stats["total_matched"] += len(matched)
+            stats["total_matched"] += matched_count
             stats["total_missing"] += len(missing)
-            return success, len(matched), len(missing)
+            return success, matched_count, len(missing)
         except Exception as e:
             logger.error("Error syncing playlist '%s' to %s: %s", pl["name"], server_name, describe_error(e))
             logger.debug("Playlist sync traceback", exc_info=True)
@@ -537,10 +539,10 @@ class SyncState:
         push = bool(target_usernames)
 
         skip_rating_keys: Optional[set[str]] = None
-        if pl.get("service", "spotify") == "plex":
-            skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
-        elif (source := db.get_server_playlist_source(pl_id)) is not None:
+        if (source := db.get_server_playlist_source(pl_id)) is not None:
             self._refresh_server_adopted(db, pl, source)
+        elif pl.get("service", "spotify") == "plex":
+            skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
         try:
             tracks = self._load_source_tracks(db, config, pl, spotify_client, deezer_client)
         except SmartCollectionError as e:

@@ -20,7 +20,7 @@ def _sync_own_account(adapter: Any, playlist: Playlist, options: PlaylistSyncOpt
         return list(adapter.sync_playlist(playlist, [""], options))
     except MediaServerError as exc:
         logger.warning("Subsonic sync failed for server account on '%s': %s", playlist.name, exc.safe_detail)
-        return [SyncResult(playlist.name, total, 0, total, False, exc.safe_detail)]
+        return [SyncResult(playlist.name, total, 0, total, False, exc.safe_detail, missing=list(playlist.tracks))]
 
 
 def _sync_user_account(
@@ -36,7 +36,17 @@ def _sync_user_account(
     total = len(playlist.tracks)
     account = db.get_server_account(user["id"], rec.id) if user is not None else None
     if account is None or not account.get("username"):
-        return [SyncResult(playlist.name, total, 0, total, False, f"No {rec.name} login saved for {name}")]
+        return [
+            SyncResult(
+                playlist.name,
+                total,
+                0,
+                total,
+                False,
+                f"No {rec.name} login saved for {name}",
+                missing=list(playlist.tracks),
+            )
+        ]
     password = unseal(account["secret_sealed"], data_dir=config.state_dir)
     if not password:
         return [
@@ -47,6 +57,7 @@ def _sync_user_account(
                 total,
                 False,
                 f"The saved {rec.name} login for {name} can't be read any more; save it again on the Account page",
+                missing=list(playlist.tracks),
             )
         ]
 
@@ -56,7 +67,7 @@ def _sync_user_account(
         return list(user_adapter.sync_playlist(playlist, [""], options))
     except MediaServerError as exc:
         logger.warning("Subsonic sync failed for user '%s' on '%s': %s", name, rec.name, exc.safe_detail)
-        return [SyncResult(playlist.name, total, 0, total, False, exc.safe_detail)]
+        return [SyncResult(playlist.name, total, 0, total, False, exc.safe_detail, missing=list(playlist.tracks))]
     finally:
         if user_adapter is not None and hasattr(user_adapter, "close"):
             user_adapter.close()

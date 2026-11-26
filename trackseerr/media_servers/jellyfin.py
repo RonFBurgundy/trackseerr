@@ -877,14 +877,32 @@ class JellyfinMediaServer(MediaServer):
             user = self._resolve_user(name, users)
             if user is None:
                 who = f"'{name}'" if name else "the default account (set JELLYFIN_USER)"
-                results.append(SyncResult(playlist.name, total, len(matched), len(missing), False, f"Jellyfin user {who} not found"))
+                results.append(
+                    SyncResult(
+                        playlist.name,
+                        total,
+                        len(matched),
+                        len(missing),
+                        False,
+                        f"Jellyfin user {who} not found",
+                        missing=list(missing),
+                    )
+                )
                 continue
             if user.id in done:
                 results.append(done[user.id])
                 continue
             if not matched:
                 logger.warning("No tracks in playlist '%s' could be matched on the Jellyfin server", playlist.name)
-                outcome = SyncResult(playlist.name, total, 0, len(missing), False, "Zero tracks matched on the Jellyfin server")
+                outcome = SyncResult(
+                    playlist.name,
+                    total,
+                    0,
+                    len(missing),
+                    False,
+                    "Zero tracks matched on the Jellyfin server",
+                    missing=list(missing),
+                )
             else:
                 try:
                     self._push(playlist, user, ids, options)
@@ -892,9 +910,13 @@ class JellyfinMediaServer(MediaServer):
                     raise  # the key or the server is the problem: it applies to every target
                 except MediaServerError as exc:  # e.g. this user cannot see the library: the other targets still sync
                     logger.warning("Jellyfin sync of '%s' failed for one target: %s", playlist.name, exc.safe_detail)
-                    outcome = SyncResult(playlist.name, total, len(matched), len(missing), False, exc.safe_detail)
+                    outcome = SyncResult(
+                        playlist.name, total, len(matched), len(missing), False, exc.safe_detail, missing=list(missing)
+                    )
                 else:
-                    outcome = SyncResult(playlist.name, total, len(matched), len(missing), True)
+                    outcome = SyncResult(
+                        playlist.name, total, len(matched), len(missing), True, missing=list(missing)
+                    )
             done[user.id] = outcome
             results.append(outcome)
         return results
