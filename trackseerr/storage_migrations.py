@@ -102,6 +102,7 @@ class MigrationsMixin:
                 (112, self._migration_v112),
                 (113, self._migration_v113),
                 (114, self._migration_v114),
+                (115, self._migration_v115),
             ]
 
             applied = 0
@@ -552,6 +553,22 @@ class MigrationsMixin:
                 FROM server_playlist_sources s
                 WHERE s.playlist_id = playlist_server_excludes.playlist_id
                   AND s.server_id = playlist_server_excludes.server_id
+            )
+            """
+        )
+
+    def _migration_v115(self, cur: sqlite3.Cursor) -> None:
+        """v115: library_match_pins pins playlist tracks to a library track/file across all media servers."""
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS library_match_pins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_title TEXT NOT NULL,
+                source_artist TEXT NOT NULL,
+                track_id TEXT NOT NULL REFERENCES library_tracks(id) ON DELETE CASCADE,
+                created_by TEXT REFERENCES users(id),
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                UNIQUE (source_title, source_artist)
             )
             """
         )

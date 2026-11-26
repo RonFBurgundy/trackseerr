@@ -9,8 +9,13 @@ export interface MatchOverridesModalProps {
   onClose: () => void;
   overrides: MatchOverride[];
   loading: boolean;
-  onDelete: (id: number, serverId?: string | null) => Promise<void>;
+  onDelete: (id: number, serverId?: string | null, kind?: MatchOverride['kind']) => Promise<void>;
   onReload: () => Promise<void>;
+}
+
+function overrideKey(override: MatchOverride): string {
+  const scope = override.kind ?? (override.server_id ? 'server' : 'legacy');
+  return `${scope}-${override.server_id ?? 'all'}-${override.id}`;
 }
 
 export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
@@ -25,11 +30,11 @@ export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
   const [actionError, setActionError] = useState<string | null>(null);
 
   const handleDelete = async (override: MatchOverride) => {
-    const key = `${override.server_id ?? 'legacy'}-${override.id}`;
+    const key = overrideKey(override);
     setDeletingKey(key);
     setActionError(null);
     try {
-      await onDelete(override.id, override.server_id);
+      await onDelete(override.id, override.server_id, override.kind);
     } catch (err: unknown) {
       setActionError(errorMessage(err, 'Failed to undo match override'));
     } finally {
@@ -88,8 +93,9 @@ export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
               className="virtual-scroll overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c] max-h-[60vh]"
             >
               {overrides.map((override) => {
-                const rowKey = `${override.server_id ?? 'legacy'}-${override.id}`;
+                const rowKey = overrideKey(override);
                 const isDeleting = deletingKey === rowKey;
+                const scopeLabel = override.kind === 'library' ? 'All servers' : override.server_name;
 
                 return (
                   <div
@@ -110,9 +116,9 @@ export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
                           {override.plex_artist} - {override.plex_title}
                         </span>
                       </div>
-                      {(override.server_name || override.created_at) && (
+                      {(scopeLabel || override.created_at) && (
                         <div className="text-[10px] text-neutral-500">
-                          {override.server_name ? `${override.server_name}${override.created_at ? ' · ' : ''}` : ''}
+                          {scopeLabel ? `${scopeLabel}${override.created_at ? ' · ' : ''}` : ''}
                           {override.created_at ? `Matched on ${new Date(override.created_at).toLocaleString()}` : ''}
                         </div>
                       )}

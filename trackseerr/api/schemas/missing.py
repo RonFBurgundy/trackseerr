@@ -24,10 +24,11 @@ class MissingTrack(ApiModel):
 
 
 class MediaTrackHit(ApiModel):
-    """A media-server track search hit. Plex adds ``thumb``; Jellyfin and Subsonic add ``id``."""
+    """A track search hit from Trackseerr's library or a media server."""
 
     id: Optional[str] = None
-    rating_key: str
+    track_id: Optional[str] = None
+    rating_key: Optional[str] = None
     title: str
     artist: str
     album: Optional[str] = None
@@ -42,6 +43,8 @@ class MatchOverride(ApiModel):
     plex_rating_key: str
     plex_title: str
     plex_artist: str
+    track_id: Optional[str] = None
+    kind: Optional[Literal["library", "server", "legacy"]] = None
     server_id: Optional[str] = None
     server_name: Optional[str] = None
     created_by: Optional[str] = None

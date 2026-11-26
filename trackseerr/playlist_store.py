@@ -10,12 +10,15 @@ import sqlite3
 import uuid
 from collections.abc import Iterable
 from datetime import datetime, timezone
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from trackseerr.models import (
     Playlist,
     Track,
 )
+
+if TYPE_CHECKING:
+    from trackseerr.playlist_identity import LibraryHit
 from trackseerr.storage_common import (
     LIDARR_WEEKLY_RETRY,
     _RETRY_TS_FORMAT,
@@ -944,6 +947,109 @@ class PlaylistStoreMixin:
                     "DELETE FROM match_overrides WHERE id = ?",
                     (int(override_id),),
                 )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    # -------------------------------------------------------------------------
+    # Cross-server Library Match Pins
+    # -------------------------------------------------------------------------
+
+    _LIBRARY_PIN_SELECT = """
+        SELECT p.id, p.source_title, p.source_artist, p.track_id,
+               t.title AS track_title, COALESCE(ar.name, '') AS track_artist,
+               p.created_by, p.created_at
+        FROM library_match_pins p
+        JOIN library_tracks t ON t.id = p.track_id
+        LEFT JOIN library_artists ar ON ar.id = t.artist_id
+    """
+
+    @staticmethod
+    def _library_pin_row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "source_title": row["source_title"],
+            "source_artist": row["source_artist"],
+            "track_id": row["track_id"],
+            "plex_rating_key": row["track_id"],
+            "plex_title": row["track_title"],
+            "plex_artist": row["track_artist"],
+            "server_id": None,
+            "server_name": None,
+            "kind": "library",
+            "created_by": row["created_by"],
+            "created_at": row["created_at"],
+        }
+
+    def set_library_pin(
+        self,
+        source_title: str,
+        source_artist: str,
+        track_id: str,
+        created_by: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Insert or update a cross-server manual match pin pointing to a native library track."""
+        s_title = str(source_title).strip()
+        s_artist = str(source_artist).strip()
+        t_id = str(track_id).strip()
+        c_by = str(created_by) if created_by else None
+
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO library_match_pins (source_title, source_artist, track_id, created_by, created_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(source_title, source_artist) DO UPDATE SET
+                    track_id = excluded.track_id,
+                    created_by = excluded.created_by,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                (s_title, s_artist, t_id, c_by),
+            )
+            self.conn.commit()
+            cur = self.conn.execute(
+                f"{self._LIBRARY_PIN_SELECT} WHERE p.source_title = ? AND p.source_artist = ?",
+                (s_title, s_artist),
+            )
+            row = cur.fetchone()
+            return self._library_pin_row_to_dict(row) if row else {}
+
+    def get_library_pin(self, source_title: str, source_artist: str) -> Optional[LibraryHit]:
+        """Resolve a cross-server library pin to a :class:`LibraryHit` with an indexed file."""
+        from trackseerr.playlist_identity import _hit_from_track
+
+        s_title = str(source_title).strip()
+        s_artist = str(source_artist).strip()
+        if not s_title or not s_artist:
+            return None
+        with self.reader() as conn:
+            row = conn.execute(
+                """
+                SELECT track_id
+                FROM library_match_pins
+                WHERE LOWER(source_title) = LOWER(?) AND LOWER(source_artist) = LOWER(?)
+                """,
+                (s_title, s_artist),
+            ).fetchone()
+        if not row:
+            return None
+        track_row = self.get_library_track(str(row["track_id"]))
+        if not track_row:
+            return None
+        return _hit_from_track(self, track_row, via="library_pin")
+
+    def list_library_pins(self) -> list[dict[str, Any]]:
+        """List all stored cross-server library match pins, newest first."""
+        with self.reader() as conn:
+            cur = conn.execute(f"{self._LIBRARY_PIN_SELECT} ORDER BY p.created_at DESC, p.id DESC")
+            return [self._library_pin_row_to_dict(r) for r in cur.fetchall()]
+
+    def delete_library_pin(self, pin_id: int) -> bool:
+        """Delete a cross-server library match pin by id."""
+        with self._lock:
+            cur = self.conn.execute(
+                "DELETE FROM library_match_pins WHERE id = ?",
+                (int(pin_id),),
+            )
             self.conn.commit()
             return cur.rowcount > 0
 

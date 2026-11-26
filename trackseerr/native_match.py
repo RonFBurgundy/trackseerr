@@ -20,6 +20,10 @@ def resolve_playlist_library_hits(
     hits: dict[int, LibraryHit] = {}
     missing: set[int] = set()
     for idx, track in enumerate(tracks):
+        pin_hit = db.get_library_pin(track.title, track.artist) if hasattr(db, "get_library_pin") else None
+        if pin_hit is not None:
+            hits[idx] = pin_hit
+            continue
         entry: dict[str, Any] = {
             "name": track.title,
             "artist": track.artist,
@@ -46,6 +50,9 @@ def match_playlist_tracks_native(db: Database, tracks: list[Track]) -> tuple[lis
     matched: list[Track] = []
     missing: list[Track] = []
     for track in tracks:
+        if hasattr(db, "get_library_pin") and db.get_library_pin(track.title, track.artist) is not None:
+            matched.append(track)
+            continue
         entry: dict[str, Any] = {
             "name": track.title,
             "artist": track.artist,

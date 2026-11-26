@@ -544,3 +544,52 @@ def test_search_cache_avoids_duplicate_requests_and_clears_per_sync(adapter: str
     assert res2[0].matched_tracks == 2
     assert _search_count() == first_run_searches * 2
 
+
+@pytest.mark.parametrize("adapter", ["subsonic", "jellyfin", "plex"])
+def test_library_pin_maps_by_path_tail_even_with_skip_search(adapter: str, tmp_path: Path) -> None:
+    """A cross-server library pin resolves via path tail on every adapter even when ``skip_search=True``."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from trackseerr.clients.plex import PlexClient
+
+    db = Database(str(tmp_path / "pins.db"))
+    try:
+        _seed_library_track(
+            db,
+            track_id="trk-pin",
+            title="Local Name",
+            artist="Artist 1",
+            album="Album X",
+            file_path="/music/Artist 1/Album X/01 Local Name.flac",
+        )
+        db.set_library_pin("Mismatched Title", "Other Credit", "trk-pin")
+        target = Track("Mismatched Title", "Other Credit", "Album X")
+
+        if adapter == "plex":
+            part = SimpleNamespace(file="/srv/music/Artist 1/Album X/01 Local Name.flac")
+            plex_track = SimpleNamespace(
+                ratingKey="101",
+                title="Local Name",
+                grandparentTitle="Artist 1",
+                parentTitle="Album X",
+                duration=180000,
+                media=[SimpleNamespace(parts=[part])],
+            )
+            admin_server = MagicMock()
+            admin_server.myPlexAccount.return_value = SimpleNamespace(username="admin", id=1, email="", thumb="", users=lambda: [])
+            admin_server.search.side_effect = lambda title, **kwargs: [plex_track] if title == "Local Name" else []
+            with patch("trackseerr.clients.plex.PlexServer"):
+                client = PlexClient("http://localhost:32400", "token")
+            client.server = admin_server
+            hit = client.match_track(target, db=db, skip_search=True)
+            assert hit is plex_track
+        else:
+            server, _ = _make_server(
+                adapter,
+                [("Local Name", "Artist 1", "Album X", "/srv/music/Artist 1/Album X/01 Local Name.flac", ())],
+            )
+            hit = server.match_track(target, db=db, skip_search=True)
+            assert hit is not None and hit.id == "s1"
+    finally:
+        db.close()
+

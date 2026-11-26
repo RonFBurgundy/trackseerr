@@ -33,6 +33,7 @@ from trackseerr.api.schemas.missing import (
 )
 from trackseerr.api.routes.issues import FINAL_STATUSES, _apply_status
 from trackseerr.config import Config
+from trackseerr.library_search import search_library
 from trackseerr.media_servers import MediaServer, as_media_server, registry
 from trackseerr.models import IssueStatus
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
@@ -46,9 +47,10 @@ router = APIRouter()
 class MatchOverrideRequest(BaseModel):
     source_title: str = Field(..., min_length=1, max_length=500, description="Title of the track from source playlist")
     source_artist: str = Field(..., min_length=1, max_length=500, description="Artist of the track from source playlist")
-    plex_rating_key: str = Field(..., min_length=1, max_length=100, description="Library item id or Plex ratingKey of matched track")
-    plex_title: str = Field(..., min_length=1, max_length=500, description="Title of matched track in media server")
-    plex_artist: str = Field(..., min_length=1, max_length=500, description="Artist of matched track in media server")
+    track_id: Optional[str] = Field(default=None, min_length=1, max_length=100, description="Library track ID for a cross-server library pin")
+    plex_rating_key: Optional[str] = Field(default=None, min_length=1, max_length=100, description="Library item id or Plex ratingKey of matched track")
+    plex_title: Optional[str] = Field(default=None, min_length=1, max_length=500, description="Title of matched track in media server")
+    plex_artist: Optional[str] = Field(default=None, min_length=1, max_length=500, description="Artist of matched track in media server")
     server_id: Optional[str] = Field(default=None, max_length=128, description="Optional media server ID for server-scoped overrides")
 
 
@@ -268,16 +270,40 @@ def _resolve_search_server(
     return server
 
 
-@router.get("/search", response_model=list[MediaTrackHit], response_model_exclude_unset=True, dependencies=[Depends(require_media_server)])
+def _clear_missing_track(db: Database, source_title: str, source_artist: str) -> None:
+    """Delete matching rows from ``missing_tracks`` once a track is matched everywhere."""
+    with db._lock:
+        db.conn.execute(
+            "DELETE FROM missing_tracks WHERE LOWER(title) = LOWER(?) AND LOWER(artist) = LOWER(?)",
+            (source_title.strip(), source_artist.strip()),
+        )
+        db.conn.commit()
+
+
+@router.get("/search", response_model=list[MediaTrackHit], response_model_exclude_unset=True)
 def search_plex_tracks(
     query: str = Query(..., min_length=1, description="Query string to search library tracks"),
     limit: int = Query(default=15, ge=1, le=50),
+    source: Literal["library", "server"] = Query(default="server", description="Search Trackseerr's library ('library') or a media server ('server')"),
     server_id: Optional[str] = Query(default=None, description="Optional media server ID (defaults to primary server)"),
     current_user: dict[str, Any] = Depends(require_admin),
+    db: Database = Depends(get_db),
     plex_client: Optional[Any] = Depends(get_media_client),
     config: Config = Depends(get_config),
 ) -> list[dict[str, Any]]:
-    """Searches a media server library for tracks to enable manual matching and correction."""
+    """Searches Trackseerr's library or a media server library for tracks to enable manual matching."""
+    if source == "library":
+        found = search_library(db, query, limit=limit)
+        return [
+            {
+                "track_id": str(t["id"]),
+                "title": str(t["title"]),
+                "artist": str(t.get("artist_name") or ""),
+                "album": t.get("album_title") or None,
+            }
+            for t in found.get("tracks", [])
+        ]
+    require_media_server(config)
     server = _resolve_search_server(server_id, plex_client, config)
     return server.search_tracks(query, limit=limit)
 
@@ -289,8 +315,33 @@ def create_match_override(
     db: Database = Depends(get_db),
     config: Config = Depends(get_config),
 ) -> dict[str, Any]:
-    """Records a manual match override (Match Memory) and removes corresponding missing tracks."""
+    """Records a library match pin or manual server override (Match Memory) and clears missing rows."""
+    tid = req.track_id.strip() if req.track_id and req.track_id.strip() else None
     sid = req.server_id.strip() if req.server_id and req.server_id.strip() else None
+
+    if tid is not None:
+        if sid is not None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Specify either track_id or server_id, not both",
+            )
+        if db.get_library_track(tid) is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library track not found")
+        override = db.set_library_pin(
+            source_title=req.source_title,
+            source_artist=req.source_artist,
+            track_id=tid,
+            created_by=str(current_user["id"]),
+        )
+        _clear_missing_track(db, req.source_title, req.source_artist)
+        return {"status": "matched", "override": override}
+
+    if not (req.plex_rating_key and req.plex_title and req.plex_artist):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="plex_rating_key, plex_title, and plex_artist are required when track_id is not provided",
+        )
+
     if sid is not None:
         srv_row = db.get_media_server_row(sid)
         if srv_row is None:
@@ -305,6 +356,7 @@ def create_match_override(
             created_by=str(current_user["id"]),
         )
         override["server_name"] = srv_row["name"]
+        override["kind"] = "server"
     else:
         override = db.add_match_override(
             source_title=req.source_title,
@@ -314,14 +366,11 @@ def create_match_override(
             plex_artist=req.plex_artist,
             created_by=str(current_user["id"]),
         )
+        override["kind"] = "legacy"
     # Remove from missing_tracks only for legacy or primary server overrides
-    if sid is None or sid == registry.primary_record(config).id:
-        with db._lock:
-            db.conn.execute(
-                "DELETE FROM missing_tracks WHERE LOWER(title) = LOWER(?) AND LOWER(artist) = LOWER(?)",
-                (req.source_title.strip(), req.source_artist.strip()),
-            )
-            db.conn.commit()
+    primary = registry.primary_record(config)
+    if sid is None or (primary is not None and sid == primary.id):
+        _clear_missing_track(db, req.source_title, req.source_artist)
 
     return {"status": "matched", "override": override}
 
@@ -331,25 +380,33 @@ def list_match_overrides(
     current_user: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    """Lists all stored Match Memory overrides."""
+    """Lists all stored Match Memory overrides and cross-server library pins."""
     server_names = {row["id"]: row["name"] for row in db.list_media_server_rows()}
+    pins = db.list_library_pins()
     overrides = db.list_match_overrides()
     for override in overrides:
         sid = override.get("server_id")
         override["server_name"] = server_names.get(sid) if sid else None
-    return overrides
+        override["kind"] = "server" if sid else "legacy"
+    combined = pins + overrides
+    combined.sort(key=lambda item: (str(item.get("created_at") or ""), int(item.get("id") or 0)), reverse=True)
+    return combined
 
 
 @router.delete("/match/{override_id}", response_model=MatchDeletedResponse, response_model_exclude_unset=True)
 def delete_match_override(
     override_id: int,
     server_id: Optional[str] = Query(default=None, description="Optional media server ID for server-scoped overrides"),
+    kind: Optional[Literal["library", "server", "legacy"]] = Query(default=None, description="Override kind ('library' for library pins)"),
     current_user: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
-    """Deletes a Match Memory override."""
-    sid = server_id.strip() if server_id and server_id.strip() else None
-    success = db.delete_match_override(override_id, server_id=sid)
+    """Deletes a Match Memory override or library match pin."""
+    if kind == "library":
+        success = db.delete_library_pin(override_id)
+    else:
+        sid = server_id.strip() if server_id and server_id.strip() else None
+        success = db.delete_match_override(override_id, server_id=sid)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

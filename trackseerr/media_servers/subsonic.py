@@ -552,6 +552,24 @@ class SubsonicMediaServer(MediaServer):
             )
             return None
 
+    def _match_library_pin(self, track: Track, db: Optional[Any]) -> Optional[_Song]:
+        if db is None or not hasattr(db, "get_library_pin"):
+            return None
+        try:
+            hit = db.get_library_pin(track.title, track.artist)
+        except (sqlite3.Error, AttributeError, TypeError, ValueError) as exc:
+            logger.debug("Library pin lookup failed for '%s': %s", track.title, type(exc).__name__)
+            return None
+        if hit is None:
+            return None
+        try:
+            return self._song_for_hit(hit)
+        except MediaServerError as exc:
+            logger.warning(
+                "Library pin for '%s' could not be looked up (%s); searching instead", track.title, type(exc).__name__
+            )
+            return None
+
     def _song_for_hit(self, hit: LibraryHit) -> Optional[_Song]:
         target_tail = tail_two_components(hit.file_path)
         if target_tail is None or not hit.title:
@@ -692,6 +710,9 @@ class SubsonicMediaServer(MediaServer):
         override = self._match_override(track, db)
         if override is not None:
             return override
+        pin_song = self._match_library_pin(track, db)
+        if pin_song is not None:
+            return pin_song
         if library_hit is not None:
             hit_song = self._song_for_hit(library_hit)
             if hit_song is not None:

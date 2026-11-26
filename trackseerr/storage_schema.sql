@@ -464,6 +464,15 @@ CREATE TABLE IF NOT EXISTS server_match_overrides (
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 UNIQUE (server_id, source_title, source_artist)
             );
+CREATE TABLE IF NOT EXISTS library_match_pins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_title TEXT NOT NULL,
+                source_artist TEXT NOT NULL,
+                track_id TEXT NOT NULL REFERENCES library_tracks(id) ON DELETE CASCADE,
+                created_by TEXT REFERENCES users(id),
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                UNIQUE (source_title, source_artist)
+            );
 CREATE TABLE track_aliases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_title TEXT NOT NULL,
