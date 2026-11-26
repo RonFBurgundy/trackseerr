@@ -965,8 +965,8 @@ class LibraryScanner:
                     with self._lock:
                         self._status["files_pruned"] += 1
 
-        # Step f: Notify Plex client if available and scan was not cancelled
-        if run.plex_client is not None and not self._stop_event.is_set():
+        # Step f: Notify media servers if scan was not cancelled
+        if not self._stop_event.is_set():
             request_library_refresh(as_media_server(run.plex_client), reason="library scan")
 
         # Step g: Conclude scan

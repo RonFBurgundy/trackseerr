@@ -829,17 +829,16 @@ def manual_import_commit(
     if run.download_row is not None and str(run.download_row.get("status")) == DownloadStatus.WARNING.value:
         download_cleared = _settle_download_after_manual_import(db, run.download_row, run.results, run.media_settings)
 
-    if plex_client:
-        request_library_refresh(
-            as_media_server(plex_client),
-            reason="manual import",
-            paths=[
-                r["destination_path"]
-                for r in run.results
-                if r.get("status") == "imported" and r.get("destination_path")
-            ],
-            db=db,
-        )
+    request_library_refresh(
+        as_media_server(plex_client),
+        reason="manual import",
+        paths=[
+            r["destination_path"]
+            for r in run.results
+            if r.get("status") == "imported" and r.get("destination_path")
+        ],
+        db=db,
+    )
 
     return {
         "imported_count": run.imported_count,

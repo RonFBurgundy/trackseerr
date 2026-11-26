@@ -644,13 +644,12 @@ def apply_renames(db: Database, file_ids: list[str], media_server: Any = None) -
             logger.exception("Failed to rename file ID %s: %s", fid, redact_text(str(exc)))
             errors.append(f"Error renaming file '{fid}': {redact_text(str(exc))}")
 
-    if media_server:
-        request_library_refresh(
-            as_media_server(media_server),
-            reason="rename",
-            paths=renamed_paths,
-            db=db,
-        )
+    request_library_refresh(
+        as_media_server(media_server),
+        reason="rename",
+        paths=renamed_paths,
+        db=db,
+    )
 
     return {"renamed_count": renamed_count, "errors": errors, "blocked_count": blocked_count}
 
@@ -1213,7 +1212,7 @@ def _finish_retag(
             details={"count": len(file_paths), "files": file_paths},
         )
 
-    if run.plex_client and run.retagged_count > 0:
+    if run.retagged_count > 0:
         paths = [p for files in run.album_retagged_files.values() for p in files]
         request_library_refresh(
             as_media_server(run.plex_client),
