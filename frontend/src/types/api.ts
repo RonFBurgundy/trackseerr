@@ -3904,7 +3904,7 @@ export interface paths {
         };
         /**
          * Search Plex Tracks
-         * @description Searches the Plex library for tracks to enable manual matching and correction.
+         * @description Searches a media server library for tracks to enable manual matching and correction.
          */
         get: operations["search_plex_tracks_api_missing_search_get"];
         put?: never;
@@ -11342,6 +11342,10 @@ export interface components {
             plex_rating_key: string;
             /** Plex Title */
             plex_title: string;
+            /** Server Id */
+            server_id?: string | null;
+            /** Server Name */
+            server_name?: string | null;
             /** Source Artist */
             source_artist: string;
             /** Source Title */
@@ -11351,19 +11355,24 @@ export interface components {
         MatchOverrideRequest: {
             /**
              * Plex Artist
-             * @description Artist of matched track in Plex
+             * @description Artist of matched track in media server
              */
             plex_artist: string;
             /**
              * Plex Rating Key
-             * @description Plex ratingKey of matched library track
+             * @description Library item id or Plex ratingKey of matched track
              */
             plex_rating_key: string;
             /**
              * Plex Title
-             * @description Title of matched track in Plex
+             * @description Title of matched track in media server
              */
             plex_title: string;
+            /**
+             * Server Id
+             * @description Optional media server ID for server-scoped overrides
+             */
+            server_id?: string | null;
             /**
              * Source Artist
              * @description Artist of the track from source playlist
@@ -22809,7 +22818,10 @@ export interface operations {
     };
     delete_match_override_api_missing_match__override_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional media server ID for server-scoped overrides */
+                server_id?: string | null;
+            };
             header?: never;
             path: {
                 override_id: number;
@@ -22894,9 +22906,11 @@ export interface operations {
     search_plex_tracks_api_missing_search_get: {
         parameters: {
             query: {
-                /** @description Query string to search Plex library tracks */
+                /** @description Query string to search library tracks */
                 query: string;
                 limit?: number;
+                /** @description Optional media server ID (defaults to primary server) */
+                server_id?: string | null;
             };
             header?: never;
             path?: never;

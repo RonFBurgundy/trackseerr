@@ -242,6 +242,9 @@ def _set_plexapi_identity() -> None:
 class PlexClient:
     """Manages interactions with the Plex Media Server."""
 
+    server_id: Optional[str] = None
+    legacy_overrides: bool = True
+
     def __init__(
         self,
         base_url: str,
@@ -633,7 +636,12 @@ class PlexClient:
         if db is None:
             return None
         try:
-            override = db.get_match_override(track.title, track.artist)
+            override = db.get_match_override(
+                track.title,
+                track.artist,
+                server_id=self.server_id,
+                use_legacy=self.legacy_overrides,
+            )
             if override and override.get("plex_rating_key"):
                 target_key = int(override["plex_rating_key"])
                 fetched = self.server.fetchItem(target_key)

@@ -196,7 +196,7 @@ def test_pinned_match_override_wins():
     server, _, _ = make()
 
     class DB:
-        def get_match_override(self, title, artist):
+        def get_match_override(self, title, artist, server_id=None, use_legacy=True):
             return {"plex_rating_key": "s3"}
 
     ref = server.match_track(Track("Totally different", "Nobody", ""), db=DB())
@@ -436,7 +436,7 @@ def test_stale_override_lookup_failure_falls_back_to_search(status, caplog):
     server, fake, _ = make()
 
     class DB:
-        def get_match_override(self, title, artist):
+        def get_match_override(self, title, artist, server_id=None, use_legacy=True):
             return {"plex_rating_key": "gone"}
 
     def respond(method, path, n):
@@ -448,6 +448,24 @@ def test_stale_override_lookup_failure_falls_back_to_search(status, caplog):
         ref = server.match_track(Track("Song A", "Artist 1", "Album X"), db=DB())
     assert ref is not None and ref.id == "s1"
     assert any("Pinned match" in r.getMessage() and "MediaServer" in r.getMessage() for r in caplog.records)
+
+
+def test_server_override_used():
+    server, _, _ = make()
+    server.server_id = "jf-2"
+    server.legacy_overrides = False
+    seen_calls = []
+
+    class DB:
+        def get_match_override(self, title, artist, server_id=None, use_legacy=True):
+            seen_calls.append((title, artist, server_id, use_legacy))
+            if server_id == "jf-2":
+                return {"plex_rating_key": "s4", "server_id": "jf-2"}
+            return None
+
+    ref = server.match_track(Track("Unfindable", "Nobody", ""), db=DB())
+    assert ref is not None and ref.id == "s4"
+    assert seen_calls == [("Unfindable", "Nobody", "jf-2", False)]
 
 
 # ----------------------------------------------------------------------------- users, paging, targets (J5)

@@ -24,10 +24,10 @@ export interface UseMissingTracksReturn {
   loadingOverrides: boolean;
   overridesError: string | null;
   reload: () => Promise<void>;
-  searchTracks: (query: string) => Promise<MediaTrackHit[]>;
-  matchTrack: (track: MissingTrack, hit: MediaTrackHit) => Promise<void>;
+  searchTracks: (query: string, serverId?: string) => Promise<MediaTrackHit[]>;
+  matchTrack: (track: MissingTrack, hit: MediaTrackHit, serverId?: string) => Promise<void>;
   loadOverrides: () => Promise<void>;
-  deleteOverride: (overrideId: number) => Promise<void>;
+  deleteOverride: (overrideId: number, serverId?: string | null) => Promise<void>;
 }
 
 export function useMissingTracks({ isAdmin = false }: UseMissingTracksOptions): UseMissingTracksReturn {
@@ -84,21 +84,22 @@ export function useMissingTracks({ isAdmin = false }: UseMissingTracksOptions): 
   }, [missingTracks]);
 
   const searchTracks = useCallback(
-    async (query: string): Promise<MediaTrackHit[]> => {
+    async (query: string, serverId?: string): Promise<MediaTrackHit[]> => {
       if (!query.trim()) return [];
-      return searchMissingTracks(query.trim());
+      return searchMissingTracks(query.trim(), 15, serverId);
     },
     []
   );
 
   const matchTrack = useCallback(
-    async (track: MissingTrack, hit: MediaTrackHit): Promise<void> => {
+    async (track: MissingTrack, hit: MediaTrackHit, serverId?: string): Promise<void> => {
       await createMatchOverride({
         source_title: track.title,
         source_artist: track.artist,
         plex_rating_key: hit.rating_key,
         plex_title: hit.title,
         plex_artist: hit.artist,
+        ...(serverId ? { server_id: serverId } : {}),
       });
 
       // The server deletes missing tracks matching title and artist.
@@ -116,9 +117,11 @@ export function useMissingTracks({ isAdmin = false }: UseMissingTracksOptions): 
   );
 
   const deleteOverride = useCallback(
-    async (overrideId: number): Promise<void> => {
-      await apiDeleteMatchOverride(overrideId);
-      setOverrides((prev) => prev.filter((o) => o.id !== overrideId));
+    async (overrideId: number, serverId?: string | null): Promise<void> => {
+      await apiDeleteMatchOverride(overrideId, serverId);
+      setOverrides((prev) =>
+        prev.filter((o) => !(o.id === overrideId && (o.server_id ?? null) === (serverId ?? null)))
+      );
       // Re-fetch missing tracks in case deleting the override re-exposed missing items
       void reload();
     },

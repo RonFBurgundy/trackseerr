@@ -364,7 +364,12 @@ class JellyfinMediaServer(MediaServer):
         if db is None:
             return None
         try:
-            override = db.get_match_override(track.title, track.artist)
+            override = db.get_match_override(
+                track.title,
+                track.artist,
+                server_id=self.server_id,
+                use_legacy=self.legacy_overrides,
+            )
         except (AttributeError, TypeError, ValueError) as exc:
             logger.debug("Match override lookup failed for '%s': %s", track.title, type(exc).__name__)
             return None

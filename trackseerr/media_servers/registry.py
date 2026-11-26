@@ -334,6 +334,19 @@ def _saved_url_is_unsafe(source: str, kind: str, url: str) -> bool:
     return True
 
 
+def _apply_override_scope(adapter: MediaServer, record: ServerRecord) -> MediaServer:
+    """Attach server identity and legacy-override eligibility to a built adapter."""
+    primary = primary_record()
+    use_legacy = bool(record.is_login or (primary is not None and record.id == primary.id))
+    adapter.server_id = record.id
+    adapter.legacy_overrides = use_legacy
+    if isinstance(adapter, PlexMediaServer):
+        client = adapter.plex_extras()
+        client.server_id = record.id
+        client.legacy_overrides = use_legacy
+    return adapter
+
+
 def build_adapter(record: ServerRecord) -> Optional[MediaServer]:
     """Return the cached adapter for ``record``, building a new one if configuration changed.
 
@@ -347,11 +360,15 @@ def build_adapter(record: ServerRecord) -> Optional[MediaServer]:
     with _adapters_lock:
         cached = _adapters.get(record.id)
         if cached is not None and cached[0] == key:
-            return cached[1]
-        failure = _failures.get(record.id)
-        if failure is not None and failure[0] == key and (time.monotonic() - failure[1]) < RETRY_SECONDS:
-            logger.debug("Skipping build for %s during failure backoff", record.id)
-            return None
+            chosen: Optional[MediaServer] = cached[1]
+        else:
+            chosen = None
+            failure = _failures.get(record.id)
+            if failure is not None and failure[0] == key and (time.monotonic() - failure[1]) < RETRY_SECONDS:
+                logger.debug("Skipping build for %s during failure backoff", record.id)
+                return None
+    if chosen is not None:
+        return _apply_override_scope(chosen, record)
     adapter = _instantiate_adapter(record)
     with _adapters_lock:
         if adapter is None:
@@ -360,9 +377,11 @@ def build_adapter(record: ServerRecord) -> Optional[MediaServer]:
         _failures.pop(record.id, None)
         cached = _adapters.get(record.id)
         if cached is not None and cached[0] == key:
-            return cached[1]
-        _adapters[record.id] = (key, adapter)
-        return adapter
+            chosen = cached[1]
+        else:
+            _adapters[record.id] = (key, adapter)
+            chosen = adapter
+    return _apply_override_scope(chosen, record)
 
 
 def reset_adapters() -> None:

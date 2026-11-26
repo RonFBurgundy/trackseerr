@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from trackseerr.item_history import TRIGGER_PLAYLIST, GrabTrigger
 from trackseerr.acquisition_coordinator import acquisition_coordinator
 from trackseerr.api.dependencies import (
+    get_config,
     get_db,
     get_media_client,
     require_media_server,
@@ -31,7 +32,8 @@ from trackseerr.api.schemas.missing import (
     TrackAliasDeletedResponse,
 )
 from trackseerr.api.routes.issues import FINAL_STATUSES, _apply_status
-from trackseerr.media_servers import as_media_server
+from trackseerr.config import Config
+from trackseerr.media_servers import MediaServer, as_media_server, registry
 from trackseerr.models import IssueStatus
 from trackseerr.library_manager import MODE_NATIVE, ModeChanged, work_guard
 from trackseerr.storage import Database
@@ -44,9 +46,10 @@ router = APIRouter()
 class MatchOverrideRequest(BaseModel):
     source_title: str = Field(..., min_length=1, max_length=500, description="Title of the track from source playlist")
     source_artist: str = Field(..., min_length=1, max_length=500, description="Artist of the track from source playlist")
-    plex_rating_key: str = Field(..., min_length=1, max_length=100, description="Plex ratingKey of matched library track")
-    plex_title: str = Field(..., min_length=1, max_length=500, description="Title of matched track in Plex")
-    plex_artist: str = Field(..., min_length=1, max_length=500, description="Artist of matched track in Plex")
+    plex_rating_key: str = Field(..., min_length=1, max_length=100, description="Library item id or Plex ratingKey of matched track")
+    plex_title: str = Field(..., min_length=1, max_length=500, description="Title of matched track in media server")
+    plex_artist: str = Field(..., min_length=1, max_length=500, description="Artist of matched track in media server")
+    server_id: Optional[str] = Field(default=None, max_length=128, description="Optional media server ID for server-scoped overrides")
 
 
 class TrackAliasCreateRequest(BaseModel):
@@ -238,20 +241,44 @@ def feed_missing_text(
 
 
 
-@router.get("/search", response_model=list[MediaTrackHit], response_model_exclude_unset=True, dependencies=[Depends(require_media_server)])
-def search_plex_tracks(
-    query: str = Query(..., min_length=1, description="Query string to search Plex library tracks"),
-    limit: int = Query(default=15, ge=1, le=50),
-    current_user: dict[str, Any] = Depends(require_admin),
-    plex_client: Optional[Any] = Depends(get_media_client),
-) -> list[dict[str, Any]]:
-    """Searches the Plex library for tracks to enable manual matching and correction."""
+def _resolve_search_server(
+    server_id: Optional[str],
+    plex_client: Optional[Any],
+    config: Config,
+) -> MediaServer:
+    """Resolve the media server adapter for manual track search."""
+    sid = server_id.strip() if server_id and server_id.strip() else None
+    if sid is not None:
+        pair = registry.server_by_id(sid, config=config)
+        if pair is not None:
+            return pair[1]
+        rec = next((r for r in registry.records(config) if r.id == sid), None)
+        if rec is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media server not found")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Media server '{rec.name}' is not configured",
+        )
     server = as_media_server(plex_client)
     if not server:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Plex Media Server client is not configured",
         )
+    return server
+
+
+@router.get("/search", response_model=list[MediaTrackHit], response_model_exclude_unset=True, dependencies=[Depends(require_media_server)])
+def search_plex_tracks(
+    query: str = Query(..., min_length=1, description="Query string to search library tracks"),
+    limit: int = Query(default=15, ge=1, le=50),
+    server_id: Optional[str] = Query(default=None, description="Optional media server ID (defaults to primary server)"),
+    current_user: dict[str, Any] = Depends(require_admin),
+    plex_client: Optional[Any] = Depends(get_media_client),
+    config: Config = Depends(get_config),
+) -> list[dict[str, Any]]:
+    """Searches a media server library for tracks to enable manual matching and correction."""
+    server = _resolve_search_server(server_id, plex_client, config)
     return server.search_tracks(query, limit=limit)
 
 
@@ -262,14 +289,30 @@ def create_match_override(
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Records a manual match override (Match Memory) and removes corresponding missing tracks."""
-    override = db.add_match_override(
-        source_title=req.source_title,
-        source_artist=req.source_artist,
-        plex_rating_key=req.plex_rating_key,
-        plex_title=req.plex_title,
-        plex_artist=req.plex_artist,
-        created_by=str(current_user["id"]),
-    )
+    sid = req.server_id.strip() if req.server_id and req.server_id.strip() else None
+    if sid is not None:
+        srv_row = db.get_media_server_row(sid)
+        if srv_row is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media server not found")
+        override = db.add_server_match_override(
+            server_id=sid,
+            source_title=req.source_title,
+            source_artist=req.source_artist,
+            item_id=req.plex_rating_key,
+            item_title=req.plex_title,
+            item_artist=req.plex_artist,
+            created_by=str(current_user["id"]),
+        )
+        override["server_name"] = srv_row["name"]
+    else:
+        override = db.add_match_override(
+            source_title=req.source_title,
+            source_artist=req.source_artist,
+            plex_rating_key=req.plex_rating_key,
+            plex_title=req.plex_title,
+            plex_artist=req.plex_artist,
+            created_by=str(current_user["id"]),
+        )
     # Remove from missing_tracks where title and artist match
     with db._lock:
         db.conn.execute(
@@ -287,17 +330,24 @@ def list_match_overrides(
     db: Database = Depends(get_db),
 ) -> list[dict[str, Any]]:
     """Lists all stored Match Memory overrides."""
-    return db.list_match_overrides()
+    server_names = {row["id"]: row["name"] for row in db.list_media_server_rows()}
+    overrides = db.list_match_overrides()
+    for override in overrides:
+        sid = override.get("server_id")
+        override["server_name"] = server_names.get(sid) if sid else None
+    return overrides
 
 
 @router.delete("/match/{override_id}", response_model=MatchDeletedResponse, response_model_exclude_unset=True)
 def delete_match_override(
     override_id: int,
+    server_id: Optional[str] = Query(default=None, description="Optional media server ID for server-scoped overrides"),
     current_user: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
 ) -> dict[str, Any]:
     """Deletes a Match Memory override."""
-    success = db.delete_match_override(override_id)
+    sid = server_id.strip() if server_id and server_id.strip() else None
+    success = db.delete_match_override(override_id, server_id=sid)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
