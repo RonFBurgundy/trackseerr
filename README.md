@@ -97,7 +97,7 @@ services:
       # - ADMIN_PASSWORD=change-me-to-12-or-more-characters
 ```
 
-Start it with `docker compose up -d` and open `http://<server-ip>:5250`. Jellyfin, Subsonic servers, download clients, indexers, and Lidarr are set up in the web UI.
+Start it with `docker compose up -d` and open `http://<server-ip>:5250`. Media servers (Plex, Jellyfin, Navidrome and other Subsonic servers, several at once), download clients, indexers, and Lidarr are set up in the web UI.
 
 ## Documentation
 

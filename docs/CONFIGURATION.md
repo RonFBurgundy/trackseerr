@@ -87,7 +87,7 @@ Each complete environment block (`PLEX_*`, `JELLYFIN_*`, or `SUBSONIC_*`) adds a
 | `SEARCH_SIMILARITY_THRESHOLD` | `0.9` | How close a track must be to count as a match, from `0.0` to `1.0`. |
 | `APPEND_SERVICE_SUFFIX` | `1` | Add ` - Spotify` or ` - Deezer` to playlist names. |
 | `ADD_PLAYLIST_POSTER` | `1` | Copy playlist artwork to the media server. Plex only. |
-| `ADD_PLAYLIST_DESCRIPTION` | `1` | Copy playlist descriptions to the media server. Plex only. |
+| `ADD_PLAYLIST_DESCRIPTION` | `1` | Copy playlist descriptions to the media server. Plex and Subsonic servers. |
 | `APPEND_INSTEAD_OF_SYNC` | `0` | `1` only adds tracks. Tracks removed from the source stay in the playlist. |
 | `WRITE_MISSING_AS_CSV` | `0` | `1` writes a CSV of missing tracks to `/data` after each sync. |
 

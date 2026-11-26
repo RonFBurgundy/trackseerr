@@ -9,15 +9,18 @@ You can use several media servers at once, for example Plex for your users and N
 | Feature | Plex | Jellyfin | Subsonic (Navidrome, Gonic, Airsonic) | None |
 |---|---|---|---|---|
 | Push playlists | Yes | Yes | Yes | No |
-| Separate playlists per user | Yes | Yes | No, one account only | No |
+| Separate playlists per user | Yes | Yes | Yes, when each user saves their own login | No |
 | Import server users as playlist targets | Yes | Yes | No | No |
 | Sign in to TrackSeerr with the server account | Yes | No | No | No |
 | Rescan after import | Yes | Yes | Yes | No |
 | Library health check | Yes | Yes | Yes | No |
-| Playlist artwork and descriptions | Yes | No | No | No |
-| Manage existing playlists on the server | Yes | No | No | No |
-| Mixes built from listening history | Yes | No | No | No |
-| Scrobbling from server webhooks | Yes (needs Plex Pass) | No | No | No |
+| Playlist artwork | Yes | No | No | No |
+| Playlist descriptions | Yes | No | Yes | No |
+| Bring existing server playlists into TrackSeerr | Yes | Yes | Yes | No |
+| Rename, reorder or copy server playlists | Yes (sign-in Plex) | No | No | No |
+| Mixes built from listening history | Yes | Yes | Yes | No |
+| Plexamp mixes | Yes | No | No | No |
+| Read play history for scrobbling | Yes (webhook needs Plex Pass) | Yes | No, the server does it itself | No |
 
 Without a media server, TrackSeerr still manages your library, downloads music, and imports playlists. It matches playlists against its own library to find missing tracks, but it pushes nothing.
 
@@ -30,9 +33,13 @@ Add each server under **Settings > Media Management > Media Server**. Every serv
 - **Refresh library after imports**: the server rescans after TrackSeerr imports music.
 - **Push playlists**: playlists are sent to this server.
 - **Import users**: the server's accounts show up as playlist targets.
-- **Read play history**: listens on this server are sent to Last.fm and ListenBrainz. Only Plex can do this today.
+- **Read play history**: listens on this server are sent to Last.fm and ListenBrainz. Plex and Jellyfin only. Jellyfin keeps only the last time each song was played, so a song played twice between two checks counts once. A play reported by two servers is counted once.
 
-Every playlist goes to every server that has **Push playlists** on. To keep a playlist off a server, open the playlist and turn that server off under **Servers**. The same place shows how many songs each server matched.
+Every playlist, and every mix, goes to every server that has **Push playlists** on. To keep a playlist off a server, open the playlist and turn that server off under **Servers**. The same place shows how many songs each server matched.
+
+When you fix a song with **Match** on the Missing tracks list, pick the server first: each server keeps its own fixes.
+
+Library health checks every server that has **Refresh library after imports** on, each with its own path mapping.
 
 One Plex server is the one people sign in with. Pick it with **Use for sign-in** on its card. A server set with environment variables is in the list too. You can rename it, turn it off, or change its switches there, but its address and token stay in your environment. Each complete `PLEX_*`, `JELLYFIN_*`, or `SUBSONIC_*` environment block adds a server, so you can set several at once.
 
@@ -92,8 +99,9 @@ environment:
   - SUBSONIC_PASSWORD=your_password
 ```
 
-- TrackSeerr writes every playlist to this one account. The Subsonic API has no way to write playlists for other users.
-- Create a separate account for TrackSeerr so its playlists are easy to tell apart, and share them from the server if your users need them.
+- The account you enter here gets playlists that have no target user, and the server's own playlists you bring in.
+- The Subsonic API only lets an account write its own playlists. So each user who wants playlists on their own account saves their login once under **Settings > Account > Media server logins**. Users without a saved login are skipped, and the playlist shows why.
+- Leave **Read play history** off: Navidrome can send plays to Last.fm and ListenBrainz itself.
 - If the server supports OpenSubsonic API keys, you can set `SUBSONIC_API_KEY` instead of a user and password.
 - Per-user Subsonic logins are stored encrypted; the key is kept in the config folder and is not part of backups, so after restoring on a new machine users save their logins again.
 
@@ -105,7 +113,7 @@ Leave the server list empty and set no `PLEX_*`, `SUBSONIC_*` or `JELLYFIN_*` va
 
 TrackSeerr compares the files on disk with the files your media server knows about. It lists files the server skipped, for example because of bad tags or an unsupported format.
 
-Run the check from **Activity > Needs review**. You can set it to run weekly. With several servers, the check looks at the main one: the sign-in Plex, or else the first server in the list.
+Run the check from **Activity > Needs review**. You can set it to run weekly. With several servers, it checks each server that has **Refresh library after imports** on and shows which servers are missing a file.
 
 The media server and TrackSeerr often see the library at different paths, for example `/data/media/music` in TrackSeerr and `/music` in Jellyfin. TrackSeerr guesses the mapping from a sample of files. You can check and change it under **Path mapping** on the same page.
 

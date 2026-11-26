@@ -74,7 +74,7 @@ Each playlist card shows the users it is synced to. Click a user to add or remov
 - Regular users can only add playlists for themselves.
 - Admins can send a playlist to any user.
 - On Plex and Jellyfin, each user gets their own copy on the media server.
-- On Subsonic servers, every playlist goes to the one account TrackSeerr signs in with. See [Media servers](MEDIA_SERVERS.md).
+- On Subsonic servers such as Navidrome, a user's copy goes to their own account once they save their login under **Settings > Account**. See [Media servers](MEDIA_SERVERS.md).
 
 ## Missing tracks
 
@@ -144,13 +144,15 @@ Notes:
 - Play counts and ratings are not imported.
 - The largest accepted file is 100 MB. Change it with `ITUNES_IMPORT_MAX_MB`.
 
-## Plex extras
+## Playlists already on your servers
 
-These only work with Plex.
+The **Playlists** page has a tab for each media server that lists the playlists already on it. Open one to see its songs, and **Adopt** it to bring it into TrackSeerr, which then tracks its missing songs. The original stays untouched: TrackSeerr turns that server off for its copy so it never writes over it. Turn the server back on under **Servers** if you want TrackSeerr to take it over.
 
-**Your Plex playlists.** The **Playlists** page also lists the playlists you already have in Plex, including ones made in Plexamp. Admins can see the playlists of every Plex Home user.
+On the sign-in Plex you can also rename, reorder and copy playlists, and admins can see every Plex Home user's playlists.
 
-**Mixes.** TrackSeerr can build playlists from listening history: **Daily Blend**, **Discover Weekly**, and **Artist Radio** from a seed artist. Save a mix as a playlist, or replace an existing one. Plexamp's own mixes are shown too, and you can save a snapshot of any of them as a normal playlist.
+## Mixes
+
+TrackSeerr can build playlists from listening history: **Daily Blend**, **Discover Weekly**, and **Artist Radio** from a seed artist. Mixes go to every server that takes playlists. On Plex, Plexamp's own mixes are shown too, and you can save a snapshot of any of them as a normal playlist.
 
 Mixes work best with scrobbling turned on. See [Media servers: Plex](MEDIA_SERVERS.md#plex).
 
