@@ -30,7 +30,7 @@ function errMsg(err: unknown, fallback: string): string {
 
 export function useServerPlaylists(
   serverId: string,
-  kind: Exclude<MediaServerKind, 'plex'>
+  kind: MediaServerKind
 ): UseServerPlaylistsReturn {
   const [selectedUser, setSelectedUserState] = useState<string | undefined>(undefined);
   const [playlists, setPlaylists] = useState<ServerPlaylistSummary[]>([]);
