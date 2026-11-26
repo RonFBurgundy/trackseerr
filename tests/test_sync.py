@@ -999,4 +999,180 @@ def test_push_resolves_native_library_once_and_skips_unowned_searches(monkeypatc
         db.close()
 
 
+def test_adopted_navidrome_playlist_shares_to_other_user_but_skips_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_ken", "ken_ts", "ken@x")
+        db.upsert_user("u_alice", "alice_ts", "alice@x")
+        db.upsert_library_artist({"id": "art-1", "name": "Artist 1"})
+        db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Album 1"})
+        db.upsert_library_track(
+            {
+                "id": "trk-1",
+                "album_id": "alb-1",
+                "artist_id": "art-1",
+                "title": "Song 1",
+                "track_number": 1,
+                "disc_number": 1,
+                "duration_seconds": 180.0,
+            }
+        )
+        db.upsert_library_file(
+            {
+                "id": "file-1",
+                "track_id": "trk-1",
+                "file_path": "/music/Artist 1/Album 1/01 Song 1.flac",
+                "relative_path": "01 Song 1.flac",
+                "codec": "flac",
+                "quality_name": "FLAC",
+                "size_bytes": 123456,
+            }
+        )
+
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={
+                    "sub-ken": FakePlaylist("sub-ken", "Ken Mix", "ken", ["s1"]),
+                },
+                users={"admin": FakeUser("admin", admin=True, password="pw")},
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        transferred_to: list[tuple[str, str]] = []
+        fake_nav_admin = SimpleNamespace(
+            set_owner=lambda pid, uid: transferred_to.append((pid, uid)) or True,
+        )
+        monkeypatch.setattr(sub_adapter, "navidrome_admin", lambda: fake_nav_admin)
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        db.link_server_user("u_ken", nav_id, "nd-ken", "ken", source="imported")
+        db.link_server_user("u_alice", nav_id, "nd-alice", "alice", source="imported")
+
+        pl_id = f"subsonic_{nav_id[:8]}_sub-ken"
+        db.upsert_playlist(pl_id, "Ken Mix", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-ken", "ken")
+        db.set_playlist_targets(pl_id, ["u_ken", "u_alice"])
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        # Alice got a copy transferred to nd-alice; Ken (nd-ken) was never pushed to and sub-ken was untouched.
+        assert [uid for _, uid in transferred_to] == ["nd-alice"]
+        assert fake.state.playlists["sub-ken"].entries == ["s1"]
+        assert fake.state.playlists["sub-ken"].owner == "ken"
+
+        # Now target ONLY the source owner Ken: sync must skip the push and record the reason.
+        db.set_playlist_targets(pl_id, ["u_ken"])
+        transferred_to.clear()
+        fake.state.calls.clear()
+        out_only_owner = SyncState().execute_sync(db, cfg, None, None, None, force=True)
+        assert out_only_owner["status"] == "success"
+        assert transferred_to == []
+        assert [ep for ep, _ in fake.state.calls if ep in ("createPlaylist", "updatePlaylist")] == []
+        by_server = {s["server_id"]: s for s in db.list_playlist_server_state(pl_id)}
+        assert by_server[nav_id]["status"] == "skipped"
+        assert by_server[nav_id]["error"] == "This is the original playlist"
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_adopted_playlist_empty_server_user_skips_server_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_admin", "admin", "a@x")
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={"sub-1": FakePlaylist("sub-1", "Server Own", "admin", ["s1"])},
+                users={"admin": FakeUser("admin", admin=True, password="pw")},
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        pl_id = f"subsonic_{nav_id[:8]}_sub-1"
+        db.upsert_playlist(pl_id, "Server Own", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-1", "")
+        db.set_playlist_targets(pl_id, ["u_admin"])
+
+        SyncState().execute_sync(db, cfg, None, None, None)
+        assert [ep for ep, _ in fake.state.calls if ep in ("createPlaylist", "updatePlaylist")] == []
+        by_server = {s["server_id"]: s for s in db.list_playlist_server_state(pl_id)}
+        assert by_server[nav_id]["status"] == "skipped"
+        assert by_server[nav_id]["error"] == "This is the original playlist"
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_migration_v114_removes_only_adoption_server_excludes(tmp_path) -> None:
+    from pathlib import Path
+
+    db = Database(str(Path(tmp_path) / "v114.db"))
+    try:
+        srv_src = db.insert_media_server_row({"kind": "subsonic", "name": "Nav", "url": "http://nav:4533"})
+        srv_other = db.insert_media_server_row({"kind": "jellyfin", "name": "JF", "url": "http://jf:8096"})
+        db.upsert_playlist("pl_adopted", "Adopted", service="subsonic")
+        db.upsert_playlist("pl_manual", "Manual", service="spotify")
+
+        db.set_server_playlist_source("pl_adopted", srv_src["id"], "sub-1", "ken")
+        db.set_playlist_server_excludes("pl_adopted", [srv_src["id"], srv_other["id"]])
+        db.set_playlist_server_excludes("pl_manual", [srv_src["id"]])
+
+        cur = db.conn.cursor()
+        db._migration_v114(cur)
+        db.conn.commit()
+
+        assert db.get_playlist_server_excludes("pl_adopted") == {srv_other["id"]}
+        assert db.get_playlist_server_excludes("pl_manual") == {srv_src["id"]}
+    finally:
+        db.close()
+
+
 

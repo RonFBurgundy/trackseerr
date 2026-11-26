@@ -132,11 +132,13 @@ export const ServerPlaylistsSection: React.FC<ServerPlaylistsSectionProps> = ({
         playlist={state.selected}
         serverName={serverName}
         selectedUser={kind === 'jellyfin' ? state.selectedUser : undefined}
+        users={users}
         items={state.items}
         isItemsLoading={state.isItemsLoading}
         isMutating={state.isMutating}
         onClose={() => void state.selectPlaylist(null)}
         onAdopt={state.adopt}
+        onSetTargets={state.setTargets}
       />
     </div>
   );
