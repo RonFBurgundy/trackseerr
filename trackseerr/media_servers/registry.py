@@ -260,9 +260,16 @@ def _instantiate_adapter(record: ServerRecord) -> Optional[MediaServer]:
         from trackseerr.clients.plex import PlexClient
 
         section = record.music_section or None
+        account_token = None if record.is_login else ""
         try:
             return PlexMediaServer(
-                PlexClient(record.url, record.api_key, verify_ssl=record.verify_ssl, music_section=section),
+                PlexClient(
+                    record.url,
+                    record.api_key,
+                    verify_ssl=record.verify_ssl,
+                    music_section=section,
+                    account_token=account_token,
+                ),
                 music_section=section,
             )
         except Exception as exc:  # noqa: BLE001 - PlexServer raises plexapi/requests/ssl errors; cause is logged
@@ -304,7 +311,18 @@ def _adapter_key(record: ServerRecord) -> tuple[Any, ...]:
         record.api_key,
         record.music_section,
         record.verify_ssl,
+        record.is_login,
     )
+
+
+def cached_adapter(record: ServerRecord) -> Optional[MediaServer]:
+    """Return an already-built cached adapter for ``record`` without connecting."""
+    key = _adapter_key(record)
+    with _adapters_lock:
+        cached = _adapters.get(record.id)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+    return None
 
 
 def _saved_url_is_unsafe(source: str, kind: str, url: str) -> bool:
