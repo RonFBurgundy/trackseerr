@@ -184,6 +184,30 @@ def _target_server_username(
     return target_name.strip().lower()
 
 
+def _resolve_empty_adopted_owner(
+    db: Database,
+    rec: ServerRecord,
+    adapter: Any,
+    playlist_id: str,
+    source: dict[str, Any],
+) -> str:
+    """Look up and persist the source playlist owner when ``server_user`` is empty."""
+    list_fn = getattr(adapter, "list_source_playlists", None)
+    source_pid = str(source.get("server_playlist_id") or "").strip()
+    if not callable(list_fn) or not source_pid:
+        return ""
+    try:
+        playlists = list_fn()
+    except MediaServerError:
+        return ""
+    match = next((p for p in playlists if str(p.get("id") or "") == source_pid), None)
+    owner = str(match.get("owner") or "").strip() if isinstance(match, dict) else ""
+    if not owner:
+        return ""
+    db.set_server_playlist_source(playlist_id, rec.id, source_pid, owner)
+    return owner.lower()
+
+
 def _filter_adopted_source_owner(
     db: Database,
     rec: Optional[ServerRecord],
@@ -199,6 +223,8 @@ def _filter_adopted_source_owner(
         return target_usernames, []
 
     owner_key = str(source.get("server_user") or "").strip().lower()
+    if not owner_key:
+        owner_key = _resolve_empty_adopted_owner(db, rec, adapter, playlist.id, source)
     if not owner_key:
         owner_key = str(getattr(adapter, "_user", "") or rec.username or "").strip().lower()
     if not owner_key:
