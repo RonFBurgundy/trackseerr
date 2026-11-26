@@ -348,3 +348,138 @@ def test_sync_result_lists_missing(adapter: str, tmp_path: Path) -> None:
     assert results[0].matched_tracks == 1
     assert results[0].missing_tracks == 1
     assert [t.title for t in results[0].missing] == ["Not In Library"]
+
+
+@pytest.mark.parametrize("adapter", ["subsonic", "jellyfin", "plex"])
+def test_library_missing_skips_server_searches(adapter: str, tmp_path: Path) -> None:
+    """Indexes in ``library_missing`` trigger zero server searches and are counted missing."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from trackseerr.clients.plex import PlexClient
+    from trackseerr.media_servers.plex import PlexMediaServer
+
+    pl = Playlist(
+        id="pl-skip",
+        name="Skip Unowned",
+        tracks=[Track("Unowned Track", "No Artist", "No Album")],
+    )
+    opts = PlaylistSyncOptions(data_dir=str(tmp_path), library_missing={0})
+    if adapter == "plex":
+        admin_server = MagicMock()
+        admin_server.myPlexAccount.return_value = SimpleNamespace(username="admin", id=1, email="", thumb="", users=lambda: [])
+        with patch("trackseerr.clients.plex.PlexServer"):
+            client = PlexClient("http://localhost:32400", "token")
+        client.server = admin_server
+        server: MediaServer = PlexMediaServer(client)
+        results = server.sync_playlist(pl, [], opts)
+        assert admin_server.search.call_count == 0
+    elif adapter == "subsonic":
+        server, fake = _make_server(adapter, [("Unowned Track", "No Artist", "No Album", "", ())])
+        results = server.sync_playlist(pl, ["admin"], opts)
+        assert [ep for ep, _ in fake.state.calls if ep == "search3"] == []
+    else:
+        server, fake = _make_server(adapter, [("Unowned Track", "No Artist", "No Album", "", ())])
+        results = server.sync_playlist(pl, ["admin"], opts)
+        assert [p for _, p, _ in fake.state.calls if p == "/Items"] == []
+
+    assert len(results) == 1
+    assert results[0].matched_tracks == 0
+    assert results[0].missing_tracks == 1
+    assert [t.title for t in results[0].missing] == ["Unowned Track"]
+
+
+@pytest.mark.parametrize("adapter", ["subsonic", "jellyfin", "plex"])
+def test_library_hit_maps_by_path_without_fuzzy_search(adapter: str, tmp_path: Path) -> None:
+    """A ``LibraryHit`` resolves via path tail without fuzzy searching; falls back when path mapping fails."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+    from plexapi.exceptions import NotFound
+    from trackseerr.clients.plex import PlexClient
+    from trackseerr.media_servers.plex import PlexMediaServer
+    from trackseerr.playlist_identity import LibraryHit
+
+    hit = LibraryHit(
+        track_id="trk-1",
+        title="Local Name",
+        artist="Artist 1",
+        album="Album X",
+        file_path="/music/Artist 1/Album X/01 Local Name.flac",
+        via="metadata",
+    )
+    pl = Playlist(
+        id="pl-hit",
+        name="Hit Mix",
+        tracks=[Track("Playlist Name", "Artist 1", "Album X")],
+    )
+    opts = PlaylistSyncOptions(data_dir=str(tmp_path), library_hits={0: hit})
+
+    if adapter == "plex":
+        part = SimpleNamespace(file="/srv/music/Artist 1/Album X/01 Local Name.flac")
+        plex_track = SimpleNamespace(
+            ratingKey="101",
+            title="Local Name",
+            grandparentTitle="Artist 1",
+            parentTitle="Album X",
+            duration=180000,
+            media=[SimpleNamespace(parts=[part])],
+        )
+        admin_server = MagicMock()
+        admin_server.myPlexAccount.return_value = SimpleNamespace(username="admin", id=1, email="", thumb="", users=lambda: [])
+        admin_server.search.side_effect = lambda title, **kwargs: [plex_track] if title == "Local Name" else []
+        admin_server.playlist.side_effect = [NotFound("missing"), MagicMock()]
+        with patch("trackseerr.clients.plex.PlexServer"):
+            client = PlexClient("http://localhost:32400", "token")
+        client.server = admin_server
+        server: MediaServer = PlexMediaServer(client)
+        results = server.sync_playlist(pl, [], opts)
+        searched_titles = [c.args[0] for c in admin_server.search.call_args_list]
+        assert "Playlist Name" not in searched_titles
+    else:
+        server, fake = _make_server(
+            adapter,
+            [("Local Name", "Artist 1", "Album X", "/srv/music/Artist 1/Album X/01 Local Name.flac", ())],
+        )
+        results = server.sync_playlist(pl, ["admin"], opts)
+        if adapter == "subsonic":
+            queries = [dict(p).get("query") for ep, p in fake.state.calls if ep == "search3"]
+        else:
+            queries = [dict(p).get("SearchTerm") for _, pth, p in fake.state.calls if pth == "/Items" and dict(p).get("SearchTerm")]
+        assert "Playlist Name" not in queries
+
+    assert len(results) == 1
+    assert results[0].success is True
+    assert results[0].matched_tracks == 1
+    assert results[0].missing_tracks == 0
+
+
+@pytest.mark.parametrize("adapter", ["subsonic", "jellyfin"])
+def test_search_cache_avoids_duplicate_requests_and_clears_per_sync(adapter: str, tmp_path: Path) -> None:
+    """Repeated identical queries within one sync hit cache; a new ``sync_playlist`` clears it."""
+    server, fake = _make_server(
+        adapter,
+        [("Song A", "Artist 1", "Album X", "/music/Artist 1/Album X/01 Song A.flac", ())],
+    )
+    pl = Playlist(
+        id="pl-cache",
+        name="Cache Mix",
+        tracks=[
+            Track("Song A", "Artist 1", "Album X"),
+            Track("Song A", "Artist 1", "Album X"),
+        ],
+    )
+    opts = PlaylistSyncOptions(data_dir=str(tmp_path))
+
+    def _search_count() -> int:
+        if adapter == "subsonic":
+            return sum(1 for ep, _ in fake.state.calls if ep == "search3")
+        return sum(1 for _, pth, p in fake.state.calls if pth == "/Items" and dict(p).get("IncludeItemTypes") == "Audio")
+
+    res1 = server.sync_playlist(pl, ["admin"], opts)
+    assert res1[0].matched_tracks == 2
+    first_run_searches = _search_count()
+    assert first_run_searches == 1
+
+    res2 = server.sync_playlist(pl, ["admin"], opts)
+    assert res2[0].matched_tracks == 2
+    assert _search_count() == first_run_searches * 2
+

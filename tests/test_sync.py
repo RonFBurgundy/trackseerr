@@ -695,9 +695,9 @@ def test_missing_comes_from_push_not_second_match(monkeypatch: pytest.MonkeyPatc
         match_calls: list[Any] = []
         orig_match = sub_adapter.match_playlist_tracks
 
-        def tracked_match(tracks, threshold=0.9, db=None, enricher=None, budget=None):
+        def tracked_match(tracks, threshold=0.9, db=None, enricher=None, budget=None, **kwargs):
             match_calls.append(enricher)
-            return orig_match(tracks, threshold=threshold, db=db, enricher=enricher, budget=budget)
+            return orig_match(tracks, threshold=threshold, db=db, enricher=enricher, budget=budget, **kwargs)
 
         monkeypatch.setattr(sub_adapter, "match_playlist_tracks", tracked_match)
 
@@ -869,5 +869,134 @@ def test_progress_reports_playlist_and_server(tmp_path, monkeypatch):
     finally:
         registry._reset_for_tests()
         db.close()
+
+
+def test_push_resolves_native_library_once_and_skips_unowned_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sync resolves native library hits once per playlist and passes hits/missing to every server."""
+    from tests.jellyfin_fake import API_KEY as JELLYFIN_KEY
+    from tests.jellyfin_fake import FakeAudio, FakeJellyfin, JellyfinState
+    from tests.jellyfin_fake import FakeUser as JfUser
+    from tests.subsonic_fake import FakeSong, FakeSubsonic, SubsonicState
+    from tests.subsonic_fake import FakeUser as SubUser
+    from trackseerr.media_servers.jellyfin import JellyfinMediaServer
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    jf_adapter: Optional[JellyfinMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "admin", "admin@example.com")
+        db.upsert_library_artist({"id": "art-1", "name": "Artist 1"})
+        db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Album 1"})
+        db.upsert_library_track(
+            {
+                "id": "trk-1",
+                "album_id": "alb-1",
+                "artist_id": "art-1",
+                "title": "Owned Song",
+                "track_number": 1,
+                "disc_number": 1,
+                "duration_seconds": 180.0,
+            }
+        )
+        db.upsert_library_file(
+            {
+                "id": "file-1",
+                "track_id": "trk-1",
+                "file_path": "/music/Artist 1/Album 1/01 Owned Song.flac",
+                "relative_path": "01 Owned Song.flac",
+                "codec": "flac",
+                "quality_name": "FLAC",
+                "size_bytes": 123456,
+            }
+        )
+
+        sub_fake = FakeSubsonic(
+            SubsonicState(
+                songs=[
+                    FakeSong(
+                        id="s1",
+                        title="Owned Song",
+                        artist="Artist 1",
+                        album="Album 1",
+                        path="/srv/Artist 1/Album 1/01 Owned Song.flac",
+                    )
+                ],
+                users={"admin": SubUser("admin", admin=True, password="pw")},
+            )
+        )
+        jf_fake = FakeJellyfin(
+            JellyfinState(
+                songs=[
+                    FakeAudio(
+                        id="j1",
+                        title="Owned Song",
+                        artist="Artist 1",
+                        album="Album 1",
+                        path="/srv/Artist 1/Album 1/01 Owned Song.flac",
+                    )
+                ],
+                users=[JfUser("u-admin", "admin", admin=True)],
+            )
+        )
+        sub_adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=sub_fake.transport(), sleep=lambda _: None)
+        jf_adapter = JellyfinMediaServer("http://jf:8096", JELLYFIN_KEY, "admin", transport=jf_fake.transport(), sleep=lambda _: None)
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+        monkeypatch.setattr("trackseerr.media_servers.jellyfin.get_shared_enricher", lambda _db: None)
+
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "subsonic", "name": "Nav", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True}, sub_adapter),
+                ({"kind": "jellyfin", "name": "JF", "url": "http://jf:8096", "api_key": JELLYFIN_KEY, "sort_order": 1}, jf_adapter),
+            ],
+        )
+
+        db.upsert_playlist("pl_1", "Mixed", service="spotify")
+        db.set_playlist_tracks_json(
+            "pl_1",
+            json.dumps(
+                [
+                    {"title": "Owned Song", "artist": "Artist 1", "album": "Album 1"},
+                    {"title": "Unowned Song", "artist": "Ghost Artist", "album": "Nowhere"},
+                ]
+            ),
+        )
+        db.set_playlist_targets("pl_1", ["u1"])
+
+        import trackseerr.api.routes.sync as sync_mod
+
+        resolve_calls = 0
+        orig_resolve = sync_mod.resolve_playlist_library_hits
+
+        def _spy_resolve(d, tracks):
+            nonlocal resolve_calls
+            resolve_calls += 1
+            return orig_resolve(d, tracks)
+
+        monkeypatch.setattr(sync_mod, "resolve_playlist_library_hits", _spy_resolve)
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert resolve_calls == 1
+        assert out["stats"]["total_matched"] == 1
+        assert out["stats"]["total_missing"] == 1
+
+        sub_queries = [dict(p).get("query") for ep, p in sub_fake.state.calls if ep == "search3"]
+        assert not any("Unowned" in str(q) or "Ghost" in str(q) for q in sub_queries)
+
+        jf_queries = [dict(p).get("SearchTerm") for _, path, p in jf_fake.state.calls if path == "/Items" and dict(p).get("SearchTerm")]
+        assert not any("Unowned" in str(q) or "Ghost" in str(q) for q in jf_queries)
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        if jf_adapter is not None:
+            jf_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
 
 

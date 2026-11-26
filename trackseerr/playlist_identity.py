@@ -46,7 +46,8 @@ class MusicBrainzBudget:
         return True
 
 
-def _hit_from_track(db: Any, track_row: dict[str, Any], via: str) -> LibraryHit | None:
+def hit_from_track(db: Any, track_row: dict[str, Any], via: str) -> LibraryHit | None:
+    """Build a :class:`LibraryHit` for ``track_row`` if it has at least one indexed library file."""
     track_id = str(track_row.get("id") or "")
     if not track_id:
         return None
@@ -68,6 +69,9 @@ def _hit_from_track(db: Any, track_row: dict[str, Any], via: str) -> LibraryHit 
         file_path=file_path,
         via=via,
     )
+
+
+_hit_from_track = hit_from_track
 
 
 def _hit_by_recording_id(db: Any, recording_id: str, via: str) -> LibraryHit | None:
