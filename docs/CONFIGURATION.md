@@ -58,7 +58,6 @@ See [Media servers](MEDIA_SERVERS.md) for what each server supports.
 
 | Variable | Default | Description |
 |---|---|---|
-| `MEDIA_SERVER` | automatic | `plex`, `jellyfin`, `subsonic`, or `none`. If unset: `plex` when `PLEX_URL` and `PLEX_TOKEN` are set, otherwise whatever you choose in **Settings > Media Management > Media Server**. When any media server variable is set, the environment wins and the page is read-only. |
 | `PLEX_URL` | unset | Plex address, for example `http://192.168.1.100:32400`. |
 | `PLEX_TOKEN` | unset | A Plex token from the server owner's own sign-in (see below). Don't use the token stored in the Plex server's own settings file. |
 | `PLEX_TOKEN_CONFIRMED` | unset | Fallback when you can't use **Sign in with Plex** under **Settings > Media Management > Media Server**. Set to `1` (or `true`, `yes`, `on`) if you're sure `PLEX_TOKEN` came from your own sign-in. |
@@ -77,7 +76,7 @@ See [Media servers](MEDIA_SERVERS.md) for what each server supports.
 
 **Signing in for plex.tv features.** For Plex Home users and user playlists, use **Sign in with Plex** under **Settings > Media Management > Media Server** and sign in as the server owner. TrackSeerr saves that sign-in for `plex.tv` and keeps using `PLEX_TOKEN` only for your local server. If you can't use the button and your Plex server won't confirm whether `PLEX_TOKEN` is your own token, set `PLEX_TOKEN_CONFIRMED=1` as a fallback — only if you're sure `PLEX_TOKEN` came from your own sign-in (never `Preferences.xml`). If the server confirms `PLEX_TOKEN` is its own token, `PLEX_TOKEN_CONFIRMED=1` is ignored.
 
-Set both `PLEX_URL` and `PLEX_TOKEN`, or neither. With only one set, TrackSeerr stops at startup and logs which one is missing. The same goes for `JELLYFIN_*` or `SUBSONIC_*` variables without `MEDIA_SERVER`.
+Each complete environment block (`PLEX_*`, `JELLYFIN_*`, or `SUBSONIC_*`) adds a server, and you can set more than one at once. If a block is only partly filled in (for example `PLEX_URL` without `PLEX_TOKEN`), TrackSeerr stops at startup and logs what is missing.
 
 ## Playlist sync
 
@@ -88,7 +87,7 @@ Set both `PLEX_URL` and `PLEX_TOKEN`, or neither. With only one set, TrackSeerr 
 | `SEARCH_SIMILARITY_THRESHOLD` | `0.9` | How close a track must be to count as a match, from `0.0` to `1.0`. |
 | `APPEND_SERVICE_SUFFIX` | `1` | Add ` - Spotify` or ` - Deezer` to playlist names. |
 | `ADD_PLAYLIST_POSTER` | `1` | Copy playlist artwork to the media server. Plex only. |
-| `ADD_PLAYLIST_DESCRIPTION` | `1` | Copy playlist descriptions to the media server. Plex only. |
+| `ADD_PLAYLIST_DESCRIPTION` | `1` | Copy playlist descriptions to the media server. Plex and Subsonic servers. |
 | `APPEND_INSTEAD_OF_SYNC` | `0` | `1` only adds tracks. Tracks removed from the source stay in the playlist. |
 | `WRITE_MISSING_AS_CSV` | `0` | `1` writes a CSV of missing tracks to `/data` after each sync. |
 

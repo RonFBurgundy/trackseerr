@@ -21,6 +21,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/account/media-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Subsonic servers for personal login
+         * @description Return every enabled Subsonic playlist server and whether the signed-in user has a saved login.
+         */
+        get: operations["list_account_media_servers_api_account_media_servers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/account/media-servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Test and save a personal Subsonic login
+         * @description Verify ``username``/``password`` against ``server_id`` and store it encrypted for the signed-in user.
+         */
+        put: operations["save_account_media_server_api_account_media_servers__server_id__put"];
+        post?: never;
+        /**
+         * Remove a personal Subsonic login
+         * @description Delete the signed-in user's saved login for ``server_id``.
+         */
+        delete: operations["delete_account_media_server_api_account_media_servers__server_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/account/mfa/confirm": {
         parameters: {
             query?: never;
@@ -3584,6 +3628,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media-servers/{server_id}/playlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Server Playlists
+         * @description List playlists available on a Subsonic or Jellyfin server alongside any adopted Trackseerr id.
+         */
+        get: operations["list_server_playlists_api_media_servers__server_id__playlists_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media-servers/{server_id}/playlists/{pid}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Adopt Server Playlist
+         * @description Adopt a Subsonic or Jellyfin playlist into Trackseerr as a read-only mirrored snapshot.
+         */
+        post: operations["adopt_server_playlist_api_media_servers__server_id__playlists__pid__adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media-servers/{server_id}/playlists/{pid}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Server Playlist Items
+         * @description Return read-only tracks of a playlist on a Subsonic or Jellyfin server.
+         */
+        get: operations["get_server_playlist_items_api_media_servers__server_id__playlists__pid__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/missing": {
         parameters: {
             query?: never;
@@ -3800,7 +3904,7 @@ export interface paths {
         };
         /**
          * Search Plex Tracks
-         * @description Searches the Plex library for tracks to enable manual matching and correction.
+         * @description Searches a media server library for tracks to enable manual matching and correction.
          */
         get: operations["search_plex_tracks_api_missing_search_get"];
         put?: never;
@@ -7023,6 +7127,31 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccountMediaServerDeletedResponse */
+        AccountMediaServerDeletedResponse: {
+            /** Server Id */
+            server_id: string;
+            /** Status */
+            status: string;
+        };
+        /** AccountMediaServerItem */
+        AccountMediaServerItem: {
+            /** Name */
+            name: string;
+            /** Saved */
+            saved: boolean;
+            /** Server Id */
+            server_id: string;
+            /** Username */
+            username: string;
+        };
+        /** AccountMediaServerPayload */
+        AccountMediaServerPayload: {
+            /** Password */
+            password: string;
+            /** Username */
+            username: string;
+        };
         /** AccountResponse */
         AccountResponse: {
             /** Auth Type */
@@ -10190,6 +10319,8 @@ export interface components {
         /** LibraryHealthMappingResponse */
         LibraryHealthMappingResponse: {
             mapping?: components["schemas"]["LibraryHealthMapping"] | null;
+            /** Mappings */
+            mappings?: components["schemas"]["LibraryHealthServerMapping"][] | null;
         };
         /** LibraryHealthResponse */
         LibraryHealthResponse: {
@@ -10201,6 +10332,11 @@ export interface components {
             groups: components["schemas"]["LibraryHealthGroup"][];
             last_run?: components["schemas"]["LibraryHealthRun"] | null;
             mapping?: components["schemas"]["LibraryHealthMapping"] | null;
+            /**
+             * Mappings
+             * @default []
+             */
+            mappings: components["schemas"]["LibraryHealthServerMapping"][];
             /** Running */
             running: boolean;
             server?: components["schemas"]["LibraryHealthServer"] | null;
@@ -10246,6 +10382,19 @@ export interface components {
             file_paths: boolean;
             /** Kind */
             kind: string;
+        };
+        /** LibraryHealthServerMapping */
+        LibraryHealthServerMapping: {
+            /** Auto */
+            auto: boolean;
+            /** Local Prefix */
+            local_prefix: string;
+            /** Name */
+            name: string;
+            /** Server Id */
+            server_id: string;
+            /** Server Prefix */
+            server_prefix: string;
         };
         /** LibraryHealthShortened */
         LibraryHealthShortened: {
@@ -11067,6 +11216,8 @@ export interface components {
         MappingRequest: {
             /** Local Prefix */
             local_prefix: string;
+            /** Server Id */
+            server_id?: string | null;
             /** Server Prefix */
             server_prefix: string;
         };
@@ -11191,6 +11342,10 @@ export interface components {
             plex_rating_key: string;
             /** Plex Title */
             plex_title: string;
+            /** Server Id */
+            server_id?: string | null;
+            /** Server Name */
+            server_name?: string | null;
             /** Source Artist */
             source_artist: string;
             /** Source Title */
@@ -11200,19 +11355,24 @@ export interface components {
         MatchOverrideRequest: {
             /**
              * Plex Artist
-             * @description Artist of matched track in Plex
+             * @description Artist of matched track in media server
              */
             plex_artist: string;
             /**
              * Plex Rating Key
-             * @description Plex ratingKey of matched library track
+             * @description Library item id or Plex ratingKey of matched track
              */
             plex_rating_key: string;
             /**
              * Plex Title
-             * @description Title of matched track in Plex
+             * @description Title of matched track in media server
              */
             plex_title: string;
+            /**
+             * Server Id
+             * @description Optional media server ID for server-scoped overrides
+             */
+            server_id?: string | null;
             /**
              * Source Artist
              * @description Artist of the track from source playlist
@@ -11890,9 +12050,12 @@ export interface components {
         };
         /** MediaServerStatus */
         MediaServerStatus: {
+            all_capabilities: components["schemas"]["MediaServerCapabilities"];
             capabilities: components["schemas"]["MediaServerCapabilities"];
             /** Connected */
             connected: boolean;
+            /** Kinds */
+            kinds?: string[];
             /** Type */
             type: string;
         };
@@ -14618,6 +14781,40 @@ export interface components {
             /** Plex History Poll Minutes */
             plex_history_poll_minutes?: number | null;
         };
+        /** ServerPlaylistSummary */
+        ServerPlaylistSummary: {
+            /** Adopted Playlist Id */
+            adopted_playlist_id?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Owner
+             * @default
+             */
+            owner: string;
+            /** Title */
+            title: string;
+            /**
+             * Track Count
+             * @default 0
+             */
+            track_count: number;
+        };
+        /** ServerPlaylistTrack */
+        ServerPlaylistTrack: {
+            /**
+             * Album
+             * @default
+             */
+            album: string;
+            /**
+             * Artist
+             * @default
+             */
+            artist: string;
+            /** Title */
+            title: string;
+        };
         /** ServicePingResult */
         ServicePingResult: {
             /** Enabled */
@@ -15914,6 +16111,92 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+        };
+    };
+    list_account_media_servers_api_account_media_servers_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMediaServerItem"][];
+                };
+            };
+        };
+    };
+    save_account_media_server_api_account_media_servers__server_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccountMediaServerPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMediaServerItem"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_account_media_server_api_account_media_servers__server_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountMediaServerDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -19403,7 +19686,9 @@ export interface operations {
     };
     delete_library_health_mapping_api_library_health_mapping_delete: {
         parameters: {
-            query?: never;
+            query?: {
+                server_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -19417,6 +19702,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LibraryHealthMappingResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -22167,6 +22461,107 @@ export interface operations {
             };
         };
     };
+    list_server_playlists_api_media_servers__server_id__playlists_get: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerPlaylistSummary"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    adopt_server_playlist_api_media_servers__server_id__playlists__pid__adopt_post: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                server_id: string;
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaylistRecord"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_server_playlist_items_api_media_servers__server_id__playlists__pid__items_get: {
+        parameters: {
+            query?: {
+                user?: string | null;
+            };
+            header?: never;
+            path: {
+                server_id: string;
+                pid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerPlaylistTrack"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_missing_tracks_api_missing_get: {
         parameters: {
             query?: {
@@ -22423,7 +22818,10 @@ export interface operations {
     };
     delete_match_override_api_missing_match__override_id__delete: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optional media server ID for server-scoped overrides */
+                server_id?: string | null;
+            };
             header?: never;
             path: {
                 override_id: number;
@@ -22508,9 +22906,11 @@ export interface operations {
     search_plex_tracks_api_missing_search_get: {
         parameters: {
             query: {
-                /** @description Query string to search Plex library tracks */
+                /** @description Query string to search library tracks */
                 query: string;
                 limit?: number;
+                /** @description Optional media server ID (defaults to primary server) */
+                server_id?: string | null;
             };
             header?: never;
             path?: never;

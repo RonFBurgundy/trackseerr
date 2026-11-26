@@ -171,13 +171,11 @@ def test_verify_owner_rejects_non_owner() -> None:
 def test_pin_requires_plex_and_admin(env) -> None:
     assert env.tc.post("/api/settings/media-server/plex-account/pin", headers=env.alice).status_code == 403
 
-    env.cfg.media_server = "none"
     env.cfg.plex_url = ""
     env.cfg.plex_token = ""
     res = env.tc.post("/api/settings/media-server/plex-account/pin", headers=env.admin)
     assert res.status_code == 409
 
-    env.cfg.media_server = "plex"
     env.cfg.plex_url = "http://localhost:32400"
     env.cfg.plex_token = "local-tok"
     with patch(
@@ -271,9 +269,8 @@ def test_plex_account_status_route(env) -> None:
 
 
 def test_saving_media_server_page_keeps_plex_account(env, monkeypatch) -> None:
-    for name in ("MEDIA_SERVER", "PLEX_URL", "PLEX_TOKEN"):
+    for name in ("PLEX_URL", "PLEX_TOKEN"):
         monkeypatch.delenv(name, raising=False)
-    env.cfg.media_server = ""
     env.cfg.plex_url = ""
     env.cfg.plex_token = ""
 

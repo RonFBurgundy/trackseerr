@@ -219,9 +219,38 @@ def test_dedup_with_rating_key_within_ten_minutes(db, users):
     assert db.insert_listen("1001", "A", "T", rating_key="9", played_at=t0 + timedelta(minutes=9), source="plex_history") is None
     assert db.insert_listen("1001", "A", "T", rating_key="9", played_at=t0 - timedelta(minutes=9)) is None
     assert db.insert_listen("1001", "A", "T", rating_key="9", played_at=t0 + timedelta(minutes=11)) is not None
-    # other user / other rating key are independent
+    # other user / other song are independent
     assert db.insert_listen("u-bob", "A", "T", rating_key="9", played_at=t0) is not None
-    assert db.insert_listen("1001", "A", "T", rating_key="10", played_at=t0) is not None
+    assert db.insert_listen("1001", "A", "T2", rating_key="10", played_at=t0) is not None
+
+
+def test_same_play_from_two_servers_is_stored_once(db, users):
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    first = db.insert_listen(
+        "1001", "Radiohead", "Nude", rating_key="plex:12345", played_at=t0, source="plex_history"
+    )
+    second = db.insert_listen(
+        "1001",
+        "radiohead",
+        "nude",
+        rating_key="jellyfin:jf-999",
+        played_at=t0 + timedelta(minutes=2),
+        source="jellyfin_history",
+    )
+    assert first is not None
+    assert second is None
+
+
+def test_different_song_same_time_is_kept(db, users):
+    t0 = datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc)
+    first = db.insert_listen(
+        "1001", "Radiohead", "Nude", rating_key="plex:12345", played_at=t0, source="plex_history"
+    )
+    second = db.insert_listen(
+        "1001", "Radiohead", "Reckoner", rating_key="jellyfin:jf-999", played_at=t0, source="jellyfin_history"
+    )
+    assert first is not None
+    assert second is not None
 
 
 def test_dedup_without_rating_key_uses_lowercased_artist_title(db, users):

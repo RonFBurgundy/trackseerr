@@ -22,7 +22,7 @@ from trackseerr.media_servers.subsonic import (
     score_candidate,
 )
 from trackseerr.models import Playlist, Track
-from tests.subsonic_fake import FakeSubsonic, default_state, raw_json
+from tests.subsonic_fake import FakePlaylist, FakeSubsonic, default_state, raw_json
 
 SONGS = [
     ("Song A", "Artist 1", "Album X"),
@@ -109,6 +109,22 @@ class TestAuth:
         server = SubsonicMediaServer("http://srv", api_key="WRONG", transport=fake.transport())
         with pytest.raises(MediaServerAuthError):
             server.refresh_library()
+
+    def test_with_login_uses_password_auth_and_preserves_transport(self) -> None:
+        fake = FakeSubsonic(default_state(SONGS, password="pw"))
+        admin = SubsonicMediaServer("http://srv/rest", api_key="KEY123", transport=fake.transport())
+        try:
+            kid = admin.with_login("kid", "pw")
+            try:
+                assert kid.test_connection().ok
+                (res,) = kid.sync_playlist(pl("Song A"), [""], PlaylistSyncOptions())
+                assert res.success is True
+                assert [p.owner for p in fake.state.playlists.values()] == ["kid"]
+                assert all("apiKey" not in dict(params) for _, params in fake.state.calls)
+            finally:
+                kid.close()
+        finally:
+            admin.close()
 
 
 class TestSecretsNeverLeak:
@@ -259,7 +275,7 @@ class TestMatching:
         s = self.lib(("Totally Different", "Someone", "X"))
 
         class DB:
-            def get_match_override(self, title, artist):
+            def get_match_override(self, title, artist, server_id=None, use_legacy=True):
                 return {"plex_rating_key": "s1"}
 
         ref = s.match_track(Track("Unfindable", "Nobody", ""), db=DB())
@@ -269,7 +285,7 @@ class TestMatching:
         s = self.lib(("Hello", "Adele", "25"))
 
         class DB:
-            def get_match_override(self, title, artist):
+            def get_match_override(self, title, artist, server_id=None, use_legacy=True):
                 return {"plex_rating_key": "gone"}
 
         ref = s.match_track(Track("Hello", "Adele", "25"), db=DB())
@@ -280,6 +296,18 @@ class TestMatching:
         (hit,) = s.search_tracks("hello")
         assert hit["title"] == "Hello" and hit["artist"] == "Adele" and hit["rating_key"] == hit["id"] == "s1"
         assert s.search_tracks("   ") == []
+
+    def test_search_tracks_returns_up_to_limit_past_20(self) -> None:
+        rows = [(f"Track {i:03d}", "Band", "Album") for i in range(35)]
+        s = self.lib(*rows)
+        hits = s.search_tracks("track", limit=35)
+        assert len(hits) == 35
+
+    def test_title_only_search_pages_up_to_100(self) -> None:
+        rows = [("Common", f"Other {i}", "A") for i in range(90)] + [("Common", "Ke$ha", "Animal")]
+        s = self.lib(*rows)
+        ref = s.match_track(Track("Common", "Kesha", "Animal"))
+        assert ref is not None and ref.artist == "Ke$ha"
 
 
 class TestPlanPlaylistUpdate:
@@ -437,7 +465,7 @@ def test_stale_override_lookup_failure_falls_back_to_search(caplog) -> None:
     server, fake, _ = make()
 
     class DB:
-        def get_match_override(self, title, artist):
+        def get_match_override(self, title, artist, server_id=None, use_legacy=True):
             return {"plex_rating_key": "gone"}
 
     fake.state.respond_with = lambda ep, n: raw_json(500, {}) if ep == "getSong" else None
@@ -445,3 +473,44 @@ def test_stale_override_lookup_failure_falls_back_to_search(caplog) -> None:
         ref = server.match_track(Track("Song A", "Artist 1", "Album X"), db=DB())
     assert ref is not None and ref.id == "s1"
     assert any("Pinned match" in r.getMessage() for r in caplog.records)
+
+
+def test_server_override_used() -> None:
+    server, _, _ = make()
+    server.server_id = "sub-2"
+    server.legacy_overrides = False
+    seen_calls: list[tuple[str, str, object, bool]] = []
+
+    class DB:
+        def get_match_override(self, title, artist, server_id=None, use_legacy=True):
+            seen_calls.append((title, artist, server_id, use_legacy))
+            if server_id == "sub-2":
+                return {"plex_rating_key": "s3", "server_id": "sub-2"}
+            return None
+
+    ref = server.match_track(Track("Unfindable", "Nobody", ""), db=DB())
+    assert ref is not None and ref.id == "s3"
+    assert seen_calls == [("Unfindable", "Nobody", "sub-2", False)]
+
+
+def test_list_source_playlists_includes_public() -> None:
+    server, fake, _ = make()
+    fake.state.playlists["p1"] = FakePlaylist("p1", "Admin Mix", "admin", ["s1"])
+    fake.state.playlists["p2"] = FakePlaylist("p2", "Kid Public", "kid", ["s2", "s3"])
+
+    listed = server.list_source_playlists(user="ignored")
+    assert listed == [
+        {"id": "p1", "title": "Admin Mix", "owner": "admin", "track_count": 1},
+        {"id": "p2", "title": "Kid Public", "owner": "kid", "track_count": 2},
+    ]
+
+
+def test_source_playlist_tracks() -> None:
+    server, fake, _ = make()
+    fake.state.playlists["p2"] = FakePlaylist("p2", "Kid Public", "kid", ["s1", "s3"])
+
+    tracks = server.source_playlist_tracks("p2")
+    assert tracks == [
+        {"title": "Song A", "artist": "Artist 1", "album": "Album X"},
+        {"title": "Song C", "artist": "Artist 2", "album": "Album Y"},
+    ]

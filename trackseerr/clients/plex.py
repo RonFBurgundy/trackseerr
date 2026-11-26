@@ -242,6 +242,9 @@ def _set_plexapi_identity() -> None:
 class PlexClient:
     """Manages interactions with the Plex Media Server."""
 
+    server_id: Optional[str] = None
+    legacy_overrides: bool = True
+
     def __init__(
         self,
         base_url: str,
@@ -633,7 +636,12 @@ class PlexClient:
         if db is None:
             return None
         try:
-            override = db.get_match_override(track.title, track.artist)
+            override = db.get_match_override(
+                track.title,
+                track.artist,
+                server_id=self.server_id,
+                use_legacy=self.legacy_overrides,
+            )
             if override and override.get("plex_rating_key"):
                 target_key = int(override["plex_rating_key"])
                 fetched = self.server.fetchItem(target_key)
@@ -948,6 +956,7 @@ class PlexClient:
                 missing_tracks=len(missing),
                 success=False,
                 error="Zero tracks matched in Plex library",
+                missing=list(missing),
             )
 
         try:
@@ -973,6 +982,7 @@ class PlexClient:
                 matched_tracks=len(matched),
                 missing_tracks=len(missing),
                 success=True,
+                missing=list(missing),
             )
         except Exception as e:
             logger.error("Error creating/updating playlist '%s': %s", playlist.name, safe_exc(e))
@@ -984,6 +994,7 @@ class PlexClient:
                 missing_tracks=len(missing),
                 success=False,
                 error=safe_exc(e),
+                missing=list(missing),
             )
 
     def sync_playlist_to_users(
@@ -1042,6 +1053,7 @@ class PlexClient:
                     missing_tracks=len(missing),
                     success=False,
                     error="Zero tracks matched in Plex library",
+                    missing=list(missing),
                 )
                 for _ in target_usernames
             ]
@@ -1082,6 +1094,7 @@ class PlexClient:
                         matched_tracks=len(matched),
                         missing_tracks=len(missing),
                         success=True,
+                        missing=list(missing),
                     )
                 )
             except (PlaylistProtectedError, PlexCloudCallsBlocked) as e:
@@ -1094,6 +1107,7 @@ class PlexClient:
                         missing_tracks=len(missing),
                         success=False,
                         error=redact_text(str(e)),
+                        missing=list(missing),
                     )
                 )
             except Exception as e:
@@ -1107,6 +1121,7 @@ class PlexClient:
                         missing_tracks=len(missing),
                         success=False,
                         error=f"User {username}: {safe_exc(e)}",
+                        missing=list(missing),
                     )
                 )
 

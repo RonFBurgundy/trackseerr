@@ -452,16 +452,19 @@ def _ping_plex(
     config: Config,
     db: Database,
 ) -> PlexStatus:
+    plex_rec = registry.login_plex_record(config)
+    plex_url = plex_rec.url if plex_rec is not None else None
+
     sec = getattr(config, "plex_music_section", None)
     if not isinstance(sec, str):
         client_sec = getattr(plex_client, "music_section", None) if plex_client else None
         sec = client_sec if isinstance(client_sec, str) else "Music"
     music_sec: Optional[str] = sec if isinstance(sec, str) else "Music"
 
-    if plex_client is None:
+    if plex_rec is None or plex_client is None:
         return PlexStatus(
             configured=False,
-            url=config.plex_url,
+            url=plex_url,
             music_section=music_sec,
             online=False,
             latency_ms=None,
@@ -494,7 +497,7 @@ def _ping_plex(
 
     return PlexStatus(
         configured=True,
-        url=config.plex_url,
+        url=plex_url,
         music_section=music_sec,
         online=online,
         latency_ms=latency_ms,

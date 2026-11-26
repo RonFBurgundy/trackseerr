@@ -42,6 +42,8 @@ class MatchOverride(ApiModel):
     plex_rating_key: str
     plex_title: str
     plex_artist: str
+    server_id: Optional[str] = None
+    server_name: Optional[str] = None
     created_by: Optional[str] = None
     created_at: str
 

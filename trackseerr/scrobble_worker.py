@@ -11,6 +11,7 @@ from plexapi.exceptions import PlexApiException
 
 from trackseerr.clients.plex import PlexClient
 from trackseerr.config import Config
+from trackseerr.media_servers.base import MediaServerError
 from trackseerr.scrobbling import PLEX_ADMIN_USERNAME_KEY, forward_listen, resolve_plex_user
 from trackseerr.storage import Database
 from trackseerr.task_manager import TRIGGER_SCHEDULED, record_finished_run
@@ -61,12 +62,17 @@ class ScrobbleWorker:
     # -- single-iteration pieces -------------------------------------------------
 
     def poll_history_once(
-        self, db: Database, plex_client: Any, now: Optional[datetime] = None
+        self,
+        db: Database,
+        plex_client: Any,
+        now: Optional[datetime] = None,
+        cursor_key: str = HISTORY_CURSOR_KEY,
+        owner_is_admin: bool = True,
     ) -> list[int]:
         """Ingest music plays from Plex history since the persisted cursor. Returns inserted listen ids."""
         now = _as_utc(now or datetime.now(timezone.utc))
         minutes = db.get_plex_history_poll_minutes()
-        cursor_raw = db.get_scrobble_state(HISTORY_CURSOR_KEY)
+        cursor_raw = db.get_scrobble_state(cursor_key)
         if cursor_raw:
             cursor = _as_utc(datetime.fromisoformat(cursor_raw))
         else:
@@ -75,11 +81,14 @@ class ScrobbleWorker:
 
         server = plex_client.server
         try:
-            admin_username = plex_client._get_admin_username() or None
-            if admin_username:
-                db.set_scrobble_state(PLEX_ADMIN_USERNAME_KEY, admin_username)
+            if owner_is_admin:
+                admin_username = plex_client._get_admin_username() or None
+                if admin_username:
+                    db.set_scrobble_state(PLEX_ADMIN_USERNAME_KEY, admin_username)
+                else:
+                    admin_username = db.get_scrobble_state(PLEX_ADMIN_USERNAME_KEY)
             else:
-                admin_username = db.get_scrobble_state(PLEX_ADMIN_USERNAME_KEY)
+                admin_username = None
             accounts = {str(a.id): str(a.name) for a in server.systemAccounts()}
             entries = list(server.history(mindate=cursor))
         except (PlexApiException, requests.RequestException) as exc:
@@ -98,7 +107,11 @@ class ScrobbleWorker:
                 continue
             account_id = getattr(entry, "accountID", None)
             user = resolve_plex_user(
-                db, account_id, accounts.get(str(account_id)), admin_username=admin_username
+                db,
+                account_id,
+                accounts.get(str(account_id)),
+                admin_username=admin_username,
+                owner_is_admin=owner_is_admin,
             )
             if user is None:
                 continue
@@ -115,11 +128,120 @@ class ScrobbleWorker:
             if listen_id is not None:
                 inserted.append(listen_id)
 
-        db.set_scrobble_state(HISTORY_CURSOR_KEY, now.isoformat(timespec="seconds"))
+        db.set_scrobble_state(cursor_key, now.isoformat(timespec="seconds"))
         with self._lock:
             self.last_poll_at = now.isoformat(timespec="seconds")
             self.listens_ingested += len(inserted)
         return inserted
+
+    def poll_jellyfin_once(
+        self, db: Database, rec: Any, adapter: Any, now: Optional[datetime] = None
+    ) -> list[int]:
+        """Ingest audio plays from a Jellyfin server since its persisted cursor. Returns inserted listen ids."""
+        now = _as_utc(now or datetime.now(timezone.utc))
+        minutes = db.get_plex_history_poll_minutes()
+        cursor_key = f"jellyfin_history:{rec.id}"
+        cursor_raw = db.get_scrobble_state(cursor_key)
+        if cursor_raw:
+            cursor = _as_utc(datetime.fromisoformat(cursor_raw))
+        else:
+            # First run: only the last poll window, like Plex.
+            cursor = now - timedelta(minutes=max(minutes, 1))
+
+        try:
+            server_users = adapter.list_users()
+            users_by_name = {(u.get("username") or "").lower(): u for u in db.list_users() if u.get("username")}
+            inserted: list[int] = []
+            for server_user in server_users:
+                user = db.get_user(server_user.id) or users_by_name.get(server_user.name.lower())
+                if user is None:
+                    continue
+                for play in adapter.recent_plays(server_user.id, since=cursor):
+                    listen_id = db.insert_listen(
+                        user["id"],
+                        artist=str(play["artist"]),
+                        title=str(play["title"]),
+                        album=play.get("album"),
+                        rating_key=f"jellyfin:{play['item_id']}",
+                        duration_ms=play.get("duration_ms"),
+                        played_at=_as_utc(play["played_at"]),
+                        source="jellyfin_history",
+                    )
+                    if listen_id is not None:
+                        inserted.append(listen_id)
+        except MediaServerError as exc:
+            logger.warning("ScrobbleWorker: Jellyfin history poll failed for %s: %s", rec.name, exc.safe_detail)
+            with self._lock:
+                self.errors += 1
+            return []
+
+        db.set_scrobble_state(cursor_key, now.isoformat(timespec="seconds"))
+        with self._lock:
+            self.last_poll_at = now.isoformat(timespec="seconds")
+            self.listens_ingested += len(inserted)
+        return inserted
+
+    def _poll_plex_servers(
+        self,
+        db: Database,
+        config: Optional[Config],
+        minutes: int,
+        now: datetime,
+        force: bool,
+    ) -> int:
+        if minutes <= 0:
+            return 0
+        from trackseerr.media_servers import registry
+
+        ingested = 0
+        for rec, adapter in registry.media_servers(registry.ROLE_SCROBBLES, config):
+            if rec.kind != "plex":
+                continue
+            cursor_key = HISTORY_CURSOR_KEY if rec.is_login else f"plex_history:{rec.id}"
+            cursor_raw = db.get_scrobble_state(cursor_key)
+            due = force or not cursor_raw or (
+                now - _as_utc(datetime.fromisoformat(cursor_raw)) >= timedelta(minutes=minutes)
+            )
+            if not due:
+                continue
+            try:
+                ingested += len(
+                    self.poll_history_once(
+                        db,
+                        adapter.plex_extras(),
+                        now=now,
+                        cursor_key=cursor_key,
+                        owner_is_admin=rec.is_login,
+                    )
+                )
+            except (PlexApiException, requests.RequestException):
+                with self._lock:
+                    self.errors += 1
+        return ingested
+
+    def _poll_jellyfin_servers(
+        self,
+        db: Database,
+        config: Optional[Config],
+        minutes: int,
+        now: datetime,
+        force: bool,
+    ) -> int:
+        if minutes <= 0:
+            return 0
+        from trackseerr.media_servers import registry
+
+        ingested = 0
+        for rec, adapter in registry.media_servers(registry.ROLE_SCROBBLES, config):
+            if rec.kind != "jellyfin":
+                continue
+            cursor_raw = db.get_scrobble_state(f"jellyfin_history:{rec.id}")
+            due = force or not cursor_raw or (
+                now - _as_utc(datetime.fromisoformat(cursor_raw)) >= timedelta(minutes=minutes)
+            )
+            if due:
+                ingested += len(self.poll_jellyfin_once(db, rec, adapter, now=now))
+        return ingested
 
     def retry_forwards_once(self, db: Database, config: Optional[Config] = None) -> int:
         """Forward every pending/failed listen (<14 days old, <5 attempts). Returns listens processed."""
@@ -146,12 +268,11 @@ class ScrobbleWorker:
 
         from trackseerr.media_servers import registry
 
-        rec = registry.login_plex_record(config) if config is not None else None
-        poll_allowed = not registry.is_installed() or (
-            rec is not None and registry.ROLE_SCROBBLES in rec.roles
-        )
         minutes = db.get_plex_history_poll_minutes()
-        if poll_allowed and minutes > 0 and plex_client is not None:
+        if registry.is_installed():
+            result["ingested"] += self._poll_plex_servers(db, config, minutes, now, force)
+            result["ingested"] += self._poll_jellyfin_servers(db, config, minutes, now, force)
+        elif minutes > 0 and plex_client is not None:
             cursor_raw = db.get_scrobble_state(HISTORY_CURSOR_KEY)
             due = force or not cursor_raw or (
                 now - _as_utc(datetime.fromisoformat(cursor_raw)) >= timedelta(minutes=minutes)

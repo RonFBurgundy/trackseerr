@@ -13,6 +13,10 @@ heading becomes the version and date.
 
 ### Added
 
+- **Your own Navidrome login** (Settings → Account → Media server logins): each user can save their login for a Navidrome or other Subsonic server, so their playlists go to their own account there. Logins are stored encrypted.
+- **Jellyfin play history**: Jellyfin servers with **Read play history** on now send what people play to Last.fm and ListenBrainz. A play reported by two servers is counted once.
+- **Adopt playlists from any server**: the Playlists page has a tab for each Navidrome, Jellyfin or second Plex server that lists its playlists. Adopt one to track its missing songs; the original on the server is never overwritten.
+- **Match fixes per server**: when you fix a song with Match on the Missing tracks list, you pick the server, and each server keeps its own fixes.
 - **Several media servers at once** (Settings → Media Management → Media Server): add Plex, Jellyfin and Subsonic servers such as Navidrome side by side. Each server has its own switches for refreshing after imports, pushing playlists, importing users and reading play history, and you pick which Plex server people sign in with. A server you saved before shows up in the list on its own.
 - Playlists go to every server that has **Push playlists** on. Under **Servers** on a playlist you can keep it off a server and see how many songs each server matched.
 - **Wrong files** in Library tools: checks every file's audio with AcoustID and lists files that hold a different song from the one they're filed as. Move each one to the song it really is, or delete it. The first check listens to every file (about 100 a minute) and can take several hours for a large library; you can close the window while it runs, and later checks only look at new or changed files. It works like Rename Files: the list is split into a different song and a different version (a remix or remaster AcoustID can't always tell apart), Select safe only picks the clear mix-ups, and you can relink or delete many files at once.
@@ -106,6 +110,11 @@ heading becomes the version and date.
 
 ### Changed
 
+- Library health checks every server that refreshes after imports, each with its own path mapping, and shows which servers are missing a file. A server that's offline during a check keeps its earlier findings.
+- Tailored mixes (Daily Blend, Discover Weekly, Artist Radio) go to every server that takes playlists, and the Mixes tab shows whichever media server you use.
+- Navidrome and Jellyfin now find songs as well as Plex does: by ISRC and MusicBrainz first, then across "$"/"s" and "The" spellings, every credited artist, censored titles and common song titles, without picking a remix or live version by mistake.
+- `MEDIA_SERVER` is no longer used. Every complete `PLEX_*`, `SUBSONIC_*` or `JELLYFIN_*` block in your environment adds a server, and you can add more in Settings.
+- A second server of the same kind gets a numbered name ("Plex 2"), and two servers can't share a name.
 - Task names and messages no longer say Plex when they work with any media server: the playlist task is now **Playlist Sync**, and "ready in Plex" notifications now say "ready in your library".
 - Plex can now be added in Settings as well as with `PLEX_URL` and `PLEX_TOKEN`.
 - **Suggested** in Not on MusicBrainz only lists matches that are at least 60% sure, and no longer suggests a Various Artists compilation or DJ mix unless the album's title matches it, so applying suggestions doesn't move songs back under Various Artists. Select sure only and the boxes ticked when the list opens now start at 70%. Find match still shows every option.
@@ -165,6 +174,12 @@ heading becomes the version and date.
 
 ### Fixed
 
+- Songs a playlist sync found through their ISRC or MusicBrainz are no longer listed as missing right after the same sync, and each sync searches your media server half as often.
+- Songs you fixed with Match are no longer listed as missing again right after a playlist sync.
+- Library refreshes after imports, renames and scans now happen even when your main server is offline or isn't Plex.
+- Play history is read from every Plex server with **Read play history** on, not just the one people sign in with, and a second Plex server no longer uses the sign-in owner's Plex account.
+- User refresh, the rename safety check, and one-off (`RUN_ONCE`) syncs now cover every server, and one-off syncs also use servers saved in Settings.
+- With Navidrome or Jellyfin as your main server, the playlist user pickers, the Mixes tab and the play history setting no longer disappear.
 - Find match showed confidence a hundred times too high ("5000% sure").
 - Wrong files and Rename Files' audio check no longer flag a song as wrong when AcoustID's main match agrees with the song title (even if a lower AcoustID result matches another song in your library), and treat spellings like "Thirty Days" vs "30 Days", "B4" vs "Before", censored words and spacing differences as the same song. Relinking a duplicate unlinked track row on an album now removes the emptied row instead of leaving a missing track behind.
 - Library Self-Heal no longer creates empty artist entries for compilation songs that stay under Various Artists, merges duplicate artists with the same name (including names written with `&` like "Blatta&Inesha"), moves single-artist albums stuck under Various Artists to their artist, and fills in compilation series and soundtrack names on Various Artists albums automatically.

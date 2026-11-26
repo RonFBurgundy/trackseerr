@@ -791,8 +791,7 @@ class ImportPipelineMixin(ImportCatalogMixin):
         except Exception as ex:
             logger.warning("Failed to dispatch ITEM_AVAILABLE notification for Lidarr import: %s", ex)
 
-        if plex_client:
-            request_library_refresh(as_media_server(plex_client), reason="Lidarr import")
+        request_library_refresh(as_media_server(plex_client), reason="Lidarr import")
 
     def _import_ready_item(
         self,
@@ -2245,13 +2244,12 @@ class ImportPipelineMixin(ImportCatalogMixin):
         except Exception as ex:
             logger.warning("Failed to dispatch ITEM_AVAILABLE notification for native import: %s", ex)
 
-        # Trigger Plex library refresh ping
-        if ctx.plex_client:
-            request_library_refresh(
-                as_media_server(ctx.plex_client),
-                reason="import",
-                paths=job.imported_paths,
-                db=db,
-            )
+        # Trigger library refresh ping
+        request_library_refresh(
+            as_media_server(ctx.plex_client),
+            reason="import",
+            paths=job.imported_paths,
+            db=db,
+        )
 
 

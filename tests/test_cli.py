@@ -25,9 +25,9 @@ _ENV_PLEX_ROW = {
 }
 
 
-def test_cli_explicit_plex_without_credentials_fails():
-    """No PLEX_* is fine (media server defaults to none); an explicit MEDIA_SERVER=plex without them is not."""
-    with patch.dict(os.environ, {"MEDIA_SERVER": "plex"}, clear=True):
+def test_cli_partial_plex_without_token_fails():
+    """No PLEX_* is fine; a partial PLEX_URL without PLEX_TOKEN is a startup error."""
+    with patch.dict(os.environ, {"PLEX_URL": "http://localhost:32400"}, clear=True):
         code = main()
         assert code == 1
 
@@ -229,10 +229,23 @@ def test_cli_core_role_requires_internal_secret():
         assert code == 1
 
 
-def test_cli_all_in_one_role_with_explicit_plex_requires_plex_vars():
-    env = {"ROLE": "all-in-one", "MEDIA_SERVER": "plex"}
+def test_cli_all_in_one_role_with_partial_plex_requires_both_vars():
+    env = {"ROLE": "all-in-one", "PLEX_URL": "http://localhost:32400"}
     with patch.dict(os.environ, env, clear=True):
         code = main()
         assert code == 1
+
+
+def test_db_base_dir_uses_state_dir(tmp_path, monkeypatch):
+    from trackseerr.cli import _db_base_dir
+    from trackseerr.config import Config
+
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path / "data"), config_dir=str(tmp_path / "config"))
+    monkeypatch.setenv("CONFIG_DIR", cfg.config_dir)
+    assert _db_base_dir(cfg) == cfg.config_dir
+
+    monkeypatch.delenv("CONFIG_DIR", raising=False)
+    monkeypatch.setattr("os.path.isdir", lambda p: False if p == "/config" else os.path.isdir(p))
+    assert _db_base_dir(cfg) == cfg.data_dir
 
 

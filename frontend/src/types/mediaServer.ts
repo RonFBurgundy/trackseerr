@@ -25,3 +25,7 @@ export type MediaServerPayload = Schema<'MediaServerPayload'>;
 export type MediaServerDeletedResponse = Schema<'MediaServerDeletedResponse'>;
 
 export type MediaServerLoginResponse = Schema<'MediaServerLoginResponse'>;
+
+export type ServerPlaylistSummary = Schema<'ServerPlaylistSummary'>;
+
+export type ServerPlaylistTrack = Schema<'ServerPlaylistTrack'>;

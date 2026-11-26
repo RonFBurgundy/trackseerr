@@ -20,18 +20,20 @@ the Subsonic error code/message or the exception type name only, never a URL.
 
 import hashlib
 import logging
-import re
 import secrets
+import sqlite3
 import time
 import weakref
 from datetime import datetime, timezone
 from dataclasses import dataclass
-from difflib import SequenceMatcher
+from itertools import islice
 from typing import Any, Callable, Iterator, Optional, Sequence
 
 import httpx
 
+from trackseerr.censored import censored_pattern, is_censored, search_text
 from trackseerr.lidarr_release import norm_title
+from trackseerr.mb_metadata_store import get_shared_enricher
 from trackseerr.media_servers.base import (
     ConnectionTest,
     MediaServer,
@@ -46,8 +48,23 @@ from trackseerr.media_servers.base import (
     ServerTrackRef,
     ServerUser,
 )
+from trackseerr.media_servers.song_scoring import (
+    DURATION_TOLERANCE_SECONDS as DURATION_TOLERANCE_SECONDS,
+    artist_query_credits,
+    best_scored_match,
+    clean_title,
+    first_artist_query,
+    score_candidate as _score_fields,
+    tail_two_components,
+)
 from trackseerr.missing_csv import delete_missing_csv, write_missing_csv
 from trackseerr.models import Playlist, SyncResult, Track
+from trackseerr.playlist_identity import (
+    LibraryHit,
+    MusicBrainzBudget,
+    find_by_isrc,
+    resolve_with_musicbrainz,
+)
 from trackseerr.redaction import redact_text
 from trackseerr.storage import clean_library_name
 
@@ -76,10 +93,9 @@ SUBSONIC_API_VERSION = "1.16.1"
 CLIENT_NAME = "Trackseerr"
 SUBSONIC_CAPABILITIES = ServerCapabilities(playlists=True, users=False, library_refresh=True, mixes=False, search=True, file_paths=True)
 
-DURATION_TOLERANCE_SECONDS = 3.0
-_DURATION_PENALTY = 0.15
-_W_TITLE, _W_ARTIST, _W_ALBUM = 0.60, 0.35, 0.05
 _SEARCH_PAGE = 20
+_TITLE_SEARCH_MAX = 100
+_ARTIST_SCOPED_MAX = 300
 _FILE_PAGE = 500
 _ID_CHUNK = 100  # song ids per request: keeps every GET URL far below common 8 KB proxy limits
 _MAX_ATTEMPTS = 3
@@ -89,7 +105,6 @@ _RETRY_STATUS = frozenset({429, 502, 503, 504})
 _MUTATING_RETRY_STATUS = frozenset({429})  # a 5xx may follow a change the server already applied
 # Subsonic error codes -> generic hierarchy. 40-44: auth; 50: not authorised for the operation; 70: not found.
 _AUTH_CODES = frozenset({40, 41, 42, 43, 44})
-_ARTIST_SPLIT = re.compile(r"\s*(?:,|;|/|&|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b|\band\b|\bx\b)\s*", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -140,39 +155,18 @@ def _parse_iso_utc(raw: str) -> Optional[datetime]:
     return parsed.replace(tzinfo=timezone.utc) if parsed.tzinfo is None else parsed.astimezone(timezone.utc)
 
 
-def _ratio(a: str, b: str) -> float:
-    if not a or not b:
-        return 0.0
-    return 1.0 if a == b else SequenceMatcher(None, a, b).ratio()
-
-
-def _artist_variants(name: str) -> list[str]:
-    """The full artist string plus its first credited artist ('A feat. B', 'A, B' -> 'A')."""
-    full = clean_library_name(name)
-    first = clean_library_name(_ARTIST_SPLIT.split(name or "", 1)[0])
-    return [v for v in dict.fromkeys([full, first]) if v]
-
-
 def score_candidate(track: Track, song: _Song) -> float:
-    """Similarity of a library song to the wanted track in ``[0, 1]``.
-
-    Weighted normalised title (``norm_title`` ignores remaster / feat. / version noise), artist (best of the credited
-    names on either side) and, when the source has one, album. A source length that is known on both sides and differs
-    by more than ``DURATION_TOLERANCE_SECONDS`` costs a flat penalty (a different edit / live version).
-    """
-    title = _ratio(norm_title(track.title), norm_title(song.title))
-    wanted = _artist_variants(track.artist)
-    have = [v for name in song.artists for v in _artist_variants(name)]
-    artist = max((_ratio(w, h) for w in wanted for h in have), default=0.0)
-    score = _W_TITLE * title + _W_ARTIST * artist
-    weight = _W_TITLE + _W_ARTIST
-    if track.album and song.album:
-        score += _W_ALBUM * _ratio(clean_library_name(track.album), clean_library_name(song.album))
-        weight += _W_ALBUM
-    score /= weight
-    if track.duration_seconds and song.duration and abs(track.duration_seconds - song.duration) > DURATION_TOLERANCE_SECONDS:
-        score -= _DURATION_PENALTY
-    return max(0.0, min(1.0, score))
+    """Similarity of a library song to the wanted track in ``[0, 1]``."""
+    return _score_fields(
+        track.title,
+        track.artist,
+        track.album,
+        track.duration_seconds,
+        song.title,
+        song.artists,
+        song.album,
+        song.duration,
+    )
 
 
 def plan_playlist_update(current: Sequence[str], desired: Sequence[str]) -> tuple[list[int], list[str]]:
@@ -231,12 +225,31 @@ class SubsonicMediaServer(MediaServer):
         self._user = username
         self._password = password
         self._api_key = api_key
+        self._verify_ssl = verify_ssl
+        self._timeout = timeout
+        self._transport = transport
         self._http = httpx.Client(verify=verify_ssl, timeout=timeout, transport=transport, follow_redirects=False)
         # A replaced adapter is simply dropped by the builder: its pooled client is closed once the last in-flight
         # user lets go of it, never while a sync still holds it (the callback holds the client, not the adapter).
         self._finalizer = weakref.finalize(self, self._http.close)
         self._sleep = sleep
         self._api_key_checked = False
+
+    def with_login(self, username: str, password: str) -> "SubsonicMediaServer":
+        """Return a new adapter against the same server authenticated with ``username`` and ``password``."""
+        copy = SubsonicMediaServer(
+            self._base,
+            username,
+            password,
+            api_key="",
+            verify_ssl=self._verify_ssl,
+            timeout=self._timeout,
+            transport=self._transport,
+            sleep=self._sleep,
+        )
+        copy.server_id = self.server_id
+        copy.legacy_overrides = self.legacy_overrides
+        return copy
 
     # ------------------------------------------------------------------ transport
 
@@ -372,15 +385,34 @@ class SubsonicMediaServer(MediaServer):
         server = body.get("type") or "Subsonic"
         return ConnectionTest(True, f"Connected to {server} {version}".strip())
 
-    def _search_songs(self, query: str, limit: int) -> list[_Song]:
-        if not query.strip():
-            return []
-        body = self._request(
-            "search3",
-            [("query", query), ("songCount", limit), ("songOffset", 0), ("artistCount", 0), ("albumCount", 0)],
-        )
-        raw = (body.get("searchResult3") or {}).get("song") or []
-        return [_Song.from_api(s) for s in raw if isinstance(s, dict) and s.get("id")]
+    def _search_songs(self, query: str, limit: int, offset: int = 0) -> Iterator[_Song]:
+        if not query.strip() or limit <= 0:
+            return
+        fetched = 0
+        seen: set[str] = set()
+        while fetched < limit:
+            page = min(_SEARCH_PAGE, limit - fetched)
+            body = self._request(
+                "search3",
+                [
+                    ("query", query),
+                    ("songCount", page),
+                    ("songOffset", offset + fetched),
+                    ("artistCount", 0),
+                    ("albumCount", 0),
+                ],
+            )
+            raw = (body.get("searchResult3") or {}).get("song") or []
+            items = [s for s in raw if isinstance(s, dict) and s.get("id")]
+            fresh = [s for s in items if str(s["id"]) not in seen]
+            if not fresh:
+                return
+            for s in fresh:
+                seen.add(str(s["id"]))
+                yield _Song.from_api(s)
+            fetched += len(items)
+            if len(items) < page:
+                return
 
     def _get_song(self, song_id: str) -> Optional[_Song]:
         try:
@@ -390,52 +422,202 @@ class SubsonicMediaServer(MediaServer):
         song = body.get("song")
         return _Song.from_api(song) if isinstance(song, dict) and song.get("id") else None
 
-    def _best(self, track: Track, threshold: float, db: Optional[Any]) -> Optional[_Song]:
-        if db is not None:
-            try:
-                override = db.get_match_override(track.title, track.artist)
-            except (AttributeError, TypeError, ValueError) as exc:
-                logger.debug("Match override lookup failed for '%s': %s", track.title, type(exc).__name__)
-                override = None
-            if override and override.get("plex_rating_key"):  # the column holds the server's own item id for every server
-                try:
-                    pinned = self._get_song(str(override["plex_rating_key"]))
-                except MediaServerError as exc:  # stale or unreachable pin: fall back to a normal search, never abort the sync
-                    logger.warning(
-                        "Pinned match for '%s' could not be looked up (%s); searching instead", track.title, type(exc).__name__
-                    )
-                    pinned = None
-                if pinned is not None:
-                    return pinned
-        # Servers AND every query word, so the query uses the noise-free title (no "(feat. X)" / "Remastered") and
-        # only the first credited artist; the title alone is the fallback for artists tagged differently.
-        title = norm_title(track.title) or clean_library_name(track.title)
-        first_artist = (_artist_variants(track.artist) or [""])[-1]
-        queries = [" ".join(p for p in (title, first_artist) if p), title]
-        best: Optional[_Song] = None
-        best_score = 0.0
-        for query in dict.fromkeys(q for q in queries if q):
-            for song in self._search_songs(query, _SEARCH_PAGE):
-                score = score_candidate(track, song)
-                if score > best_score:
-                    best, best_score = song, score
-            if best is not None and best_score >= threshold:
-                break
-        if best is not None and best_score + 1e-9 >= threshold:
-            return best
+    def _match_override(self, track: Track, db: Optional[Any]) -> Optional[_Song]:
+        if db is None:
+            return None
+        try:
+            override = db.get_match_override(
+                track.title,
+                track.artist,
+                server_id=self.server_id,
+                use_legacy=self.legacy_overrides,
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            logger.debug("Match override lookup failed for '%s': %s", track.title, type(exc).__name__)
+            return None
+        if not (override and override.get("plex_rating_key")):  # the column holds the server's own item id
+            return None
+        try:
+            return self._get_song(str(override["plex_rating_key"]))
+        except MediaServerError as exc:  # stale or unreachable pin: fall back to a normal search, never abort the sync
+            logger.warning(
+                "Pinned match for '%s' could not be looked up (%s); searching instead", track.title, type(exc).__name__
+            )
+            return None
+
+    def _song_for_hit(self, hit: LibraryHit) -> Optional[_Song]:
+        target_tail = tail_two_components(hit.file_path)
+        if target_tail is None or not hit.title:
+            return None
+        artist = first_artist_query(hit.artist) if hit.artist else ""
+        queries = [q for q in dict.fromkeys([f"{hit.title} {artist}".strip(), hit.title]) if q]
+        for idx, query in enumerate(queries):
+            limit = _SEARCH_PAGE if idx == 0 and artist else _TITLE_SEARCH_MAX
+            for song in self._search_songs(query, limit):
+                song_path = str(song.raw.get("path") or "")
+                if song_path and tail_two_components(song_path) == target_tail:
+                    return song
         return None
 
-    def match_track(self, track: Track, threshold: float = 0.9, db: Optional[Any] = None) -> Optional[ServerTrackRef]:
-        song = self._best(track, threshold, db)
+    def _match_by_isrc(self, track: Track, db: Optional[Any]) -> Optional[_Song]:
+        if db is None or not track.isrc or not hasattr(db, "find_library_track_by_isrc"):
+            return None
+        try:
+            hit = find_by_isrc(db, track.isrc)
+        except (sqlite3.Error, AttributeError) as exc:
+            logger.debug("ISRC lookup failed for '%s': %s", track.title, type(exc).__name__)
+            return None
+        if hit is None:
+            return None
+        return self._song_for_hit(hit)
+
+    def _search_and_pick(
+        self,
+        track: Track,
+        query: str,
+        limit: int,
+        threshold: float,
+        *,
+        offset: int = 0,
+    ) -> tuple[Optional[_Song], int]:
+        songs = list(self._search_songs(query, limit, offset=offset))
+        best, best_score, _ = best_scored_match(track, songs, threshold)
+        if best is not None and best_score + 1e-9 >= threshold:
+            return best, len(songs)
+        return None, len(songs)
+
+    def _search_artist_scoped(
+        self,
+        track: Track,
+        search_title: str,
+        paged_title: str,
+        paged_count: int,
+        threshold: float,
+    ) -> Optional[_Song]:
+        if not search_title:
+            return None
+        first_artist = first_artist_query(track.artist)
+        for credit in artist_query_credits(track.artist):
+            if credit == first_artist:
+                continue
+            match, _ = self._search_and_pick(track, f"{search_title} {credit}", _SEARCH_PAGE, threshold)
+            if match is not None:
+                return match
+        if paged_title and paged_count >= _TITLE_SEARCH_MAX:
+            match, _ = self._search_and_pick(
+                track,
+                paged_title,
+                _ARTIST_SCOPED_MAX - _TITLE_SEARCH_MAX,
+                threshold,
+                offset=_TITLE_SEARCH_MAX,
+            )
+            if match is not None:
+                return match
+        return None
+
+    def _search_fuzzy(self, track: Track, threshold: float) -> Optional[_Song]:
+        # Servers AND every query word, so the query uses the noise-free title (no "(feat. X)" / "Remastered") and
+        # only the first credited artist; the title alone is the fallback for artists tagged differently.
+        title = norm_title(track.title.replace("$", "s")) or (
+            "" if is_censored(track.title) else clean_library_name(track.title)
+        )
+        first_artist = first_artist_query(track.artist)
+        if title and first_artist:
+            match, _ = self._search_and_pick(track, f"{title} {first_artist}", _SEARCH_PAGE, threshold)
+            if match is not None:
+                return match
+        paged_title, paged_count = "", 0
+        if title:
+            match, paged_count = self._search_and_pick(track, title, _TITLE_SEARCH_MAX, threshold)
+            if match is not None:
+                return match
+            paged_title = title
+        cleaned_raw = clean_title(track.title)
+        cleaned = norm_title(cleaned_raw.replace("$", "s")) or (
+            "" if is_censored(track.title) else clean_library_name(cleaned_raw)
+        )
+        if cleaned and cleaned != title:
+            if first_artist:
+                match, _ = self._search_and_pick(track, f"{cleaned} {first_artist}", _SEARCH_PAGE, threshold)
+                if match is not None:
+                    return match
+            match, cleaned_count = self._search_and_pick(track, cleaned, _TITLE_SEARCH_MAX, threshold)
+            if match is not None:
+                return match
+            if cleaned_count >= paged_count:
+                paged_title, paged_count = cleaned, cleaned_count
+        return self._search_artist_scoped(track, cleaned or title, paged_title, paged_count, threshold)
+
+    def _match_censored(self, track: Track, threshold: float) -> Optional[_Song]:
+        pattern = censored_pattern(track.title)
+        query = search_text(track.title)
+        if pattern is None or not query:
+            return None
+        kept = [s for s in self._search_songs(query, _TITLE_SEARCH_MAX) if pattern.fullmatch(clean_library_name(s.title))]
+        best, best_score, _ = best_scored_match(track, kept, threshold, censored=True)
+        return best if best is not None and best_score + 1e-9 >= threshold else None
+
+    def _match_by_musicbrainz(
+        self,
+        track: Track,
+        db: Optional[Any],
+        enricher: Optional[Any],
+        budget: Optional[MusicBrainzBudget],
+    ) -> Optional[_Song]:
+        if db is None or enricher is None or budget is None:
+            return None
+        hit = resolve_with_musicbrainz(db, enricher, track, budget)
+        if hit is None:
+            return None
+        return self._song_for_hit(hit)
+
+    def _best(
+        self,
+        track: Track,
+        threshold: float,
+        db: Optional[Any],
+        enricher: Optional[Any] = None,
+        budget: Optional[MusicBrainzBudget] = None,
+    ) -> Optional[_Song]:
+        override = self._match_override(track, db)
+        if override is not None:
+            return override
+        isrc_match = self._match_by_isrc(track, db)
+        if isrc_match is not None:
+            return isrc_match
+        fuzzy = self._search_fuzzy(track, threshold)
+        if fuzzy is not None:
+            return fuzzy
+        censored = self._match_censored(track, threshold)
+        if censored is not None:
+            return censored
+        return self._match_by_musicbrainz(track, db, enricher, budget)
+
+    def match_track(
+        self,
+        track: Track,
+        threshold: float = 0.9,
+        db: Optional[Any] = None,
+        enricher: Optional[Any] = None,
+        budget: Optional[MusicBrainzBudget] = None,
+    ) -> Optional[ServerTrackRef]:
+        song = self._best(track, threshold, db, enricher=enricher, budget=budget)
         return None if song is None else song.ref()
 
     def match_playlist_tracks(
-        self, tracks: Sequence[Track], threshold: float = 0.9, db: Optional[Any] = None
+        self,
+        tracks: Sequence[Track],
+        threshold: float = 0.9,
+        db: Optional[Any] = None,
+        enricher: Optional[Any] = None,
+        budget: Optional[MusicBrainzBudget] = None,
     ) -> tuple[list[ServerTrackRef], list[Track]]:
+        if enricher is not None and budget is None:
+            budget = MusicBrainzBudget()
         matched: list[ServerTrackRef] = []
         missing: list[Track] = []
         for track in tracks:
-            ref = self.match_track(track, threshold, db)
+            ref = self.match_track(track, threshold, db, enricher=enricher, budget=budget)
             if ref is None:
                 missing.append(track)
             else:
@@ -443,7 +625,8 @@ class SubsonicMediaServer(MediaServer):
         return matched, missing
 
     def search_tracks(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
-        songs = self._search_songs(query.strip(), max(1, limit))
+        capped = max(1, limit)
+        songs = list(islice(self._search_songs(query.strip(), capped), capped))
         return [
             {
                 "id": s.id,
@@ -453,7 +636,7 @@ class SubsonicMediaServer(MediaServer):
                 "album": s.album,
                 "duration": s.duration,
             }
-            for s in songs[:limit]
+            for s in songs
         ]
 
     def iter_library_files(self) -> Iterator[ServerFileRef]:
@@ -539,6 +722,44 @@ class SubsonicMediaServer(MediaServer):
             playlists = [p for p in playlists if not p.get("readonly")]
         return playlists
 
+    def list_source_playlists(self, user: Optional[str] = None) -> list[dict[str, Any]]:
+        """Return every playlist visible on the Subsonic server (own and public); ``user`` is ignored."""
+        del user
+        body = self._request("getPlaylists")
+        playlists = [p for p in (body.get("playlists") or {}).get("playlist") or [] if isinstance(p, dict)]
+        out: list[dict[str, Any]] = []
+        for p in playlists:
+            pid = str(p.get("id") or "")
+            if not pid:
+                continue
+            raw_count = p.get("songCount")
+            track_count = int(raw_count) if isinstance(raw_count, (int, float)) and not isinstance(raw_count, bool) else 0
+            out.append(
+                {
+                    "id": pid,
+                    "title": str(p.get("name") or ""),
+                    "owner": str(p.get("owner") or ""),
+                    "track_count": track_count,
+                }
+            )
+        return out
+
+    def source_playlist_tracks(self, playlist_id: str, user: Optional[str] = None) -> list[dict[str, str]]:
+        """Return ``{title, artist, album}`` dicts for every entry in ``playlist_id``; ``user`` is ignored."""
+        del user
+        body = self._request("getPlaylist", [("id", playlist_id)])
+        playlist = body.get("playlist") or {}
+        entries = playlist.get("entry") or []
+        return [
+            {
+                "title": str(e.get("title") or ""),
+                "artist": str(e.get("artist") or ""),
+                "album": str(e.get("album") or ""),
+            }
+            for e in entries
+            if isinstance(e, dict)
+        ]
+
     def _playlist_entry_ids(self, playlist_id: str) -> tuple[list[str], dict[str, Any]]:
         body = self._request("getPlaylist", [("id", playlist_id)])
         playlist = body.get("playlist") or {}
@@ -596,11 +817,19 @@ class SubsonicMediaServer(MediaServer):
         self, playlist: Playlist, targets: Sequence[str], options: PlaylistSyncOptions
     ) -> list[SyncResult]:
         names = list(targets) or [""]
-        matched, missing = self.match_playlist_tracks(playlist.tracks, threshold=options.threshold, db=options.db)
+        enricher = (
+            get_shared_enricher(options.db)
+            if options.db is not None and hasattr(options.db, "get_media_management_settings")
+            else None
+        )
+        budget = MusicBrainzBudget() if enricher is not None else None
+        matched, missing = self.match_playlist_tracks(
+            playlist.tracks, threshold=options.threshold, db=options.db, enricher=enricher, budget=budget
+        )
         total = len(playlist.tracks)
 
         def result(success: bool, error: str = "") -> SyncResult:
-            return SyncResult(playlist.name, total, len(matched), len(missing), success, error)
+            return SyncResult(playlist.name, total, len(matched), len(missing), success, error, missing=list(missing))
 
         if options.write_missing_as_csv:
             if missing:
@@ -621,7 +850,15 @@ class SubsonicMediaServer(MediaServer):
                 continue
             if not matched:
                 logger.warning("No tracks in playlist '%s' could be matched on the Subsonic server", playlist.name)
-                pushed = SyncResult(playlist.name, total, 0, len(missing), False, "Zero tracks matched on the Subsonic server")
+                pushed = SyncResult(
+                    playlist.name,
+                    total,
+                    0,
+                    len(missing),
+                    False,
+                    "Zero tracks matched on the Subsonic server",
+                    missing=list(missing),
+                )
             else:
                 self._push(playlist, [m.id for m in matched], options)
                 pushed = result(True)

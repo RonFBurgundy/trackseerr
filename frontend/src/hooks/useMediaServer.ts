@@ -23,13 +23,21 @@ export interface UseMediaServerReturn {
   isLoaded: boolean;
   status: MediaServerStatus | null;
   type: MediaServerType;
+  /** Distinct enabled server kinds across all configured servers. */
+  kinds: string[];
   /** True when a media server is configured, so playlist push makes sense. */
   hasMediaServer: boolean;
   /** True only for Plex: Plex sign-in and Plex-only features (Plex playlists, home users) depend on it. */
   isPlex: boolean;
+  /** True when any enabled server is Plex. */
+  hasPlex: boolean;
+  /** True when any enabled server supports play history polling (Plex or Jellyfin). */
+  hasPlayHistory: boolean;
   /** Human name for generic copy ("Plex", "Subsonic server", "Jellyfin server", "media server"). */
   label: string;
   capabilities: MediaServerCapabilities;
+  /** Union of capabilities across all enabled servers. */
+  allCapabilities: MediaServerCapabilities;
 }
 
 /** Loads the active media server once; features hide themselves when none is connected. */
@@ -50,13 +58,19 @@ export function useMediaServer(): UseMediaServerReturn {
   }, []);
 
   const type: MediaServerType = status?.type ?? 'plex';
+  const kinds: string[] = status?.kinds ?? (type === 'none' ? [] : [type]);
+  const capabilities = status?.capabilities ?? LEGACY_CAPABILITIES;
   return {
     isLoaded,
     status,
     type,
+    kinds,
     hasMediaServer: type !== 'none',
     isPlex: type === 'plex',
+    hasPlex: kinds.includes('plex'),
+    hasPlayHistory: kinds.includes('plex') || kinds.includes('jellyfin'),
     label: MEDIA_SERVER_LABELS[type],
-    capabilities: status?.capabilities ?? LEGACY_CAPABILITIES,
+    capabilities,
+    allCapabilities: status?.all_capabilities ?? capabilities,
   };
 }

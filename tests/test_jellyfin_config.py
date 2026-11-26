@@ -1,4 +1,4 @@
-"""Jellyfin media-server configuration: env validation, Settings overlay, admin API (masking, SSRF, secret reuse), status, wiring."""
+"""Jellyfin media-server configuration: env validation, admin API (masking, SSRF, secret reuse), status, wiring."""
 
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -11,7 +11,7 @@ from trackseerr.api.app import create_app
 from trackseerr.api.dependencies import get_config, get_db, get_media_client, get_plex_client
 from trackseerr.auth import create_session_token, get_or_create_secret_key
 from trackseerr.config import Config, ConfigError
-from trackseerr.media_servers import JellyfinMediaServer, build_jellyfin, build_media_server, capabilities_for
+from trackseerr.media_servers import JellyfinMediaServer, capabilities_for, registry
 from trackseerr.role_guard import GATEWAY_FORBIDDEN_ENV, check_role_environment
 from trackseerr.storage import Database
 from tests.jellyfin_fake import API_KEY, FakeJellyfin, default_state
@@ -20,7 +20,7 @@ URL = "http://jellyfin:8096"
 
 
 def jf(**kw) -> Config:
-    base = dict(plex_url="", plex_token="", media_server="jellyfin", jellyfin_url=URL, jellyfin_api_key="k")
+    base = dict(plex_url="", plex_token="", jellyfin_url=URL, jellyfin_api_key="k")
     base.update(kw)
     return Config(**base)
 
@@ -31,7 +31,7 @@ def jf(**kw) -> Config:
 def test_explicit_jellyfin_is_valid_and_user_is_optional():
     cfg = jf()
     cfg.validate_media_server()
-    assert cfg.media_server_type == "jellyfin" and cfg.jellyfin_configured and not cfg.plex_enabled and not cfg.subsonic_configured
+    assert [r.kind for r in registry.env_records(cfg)] == ["jellyfin"]
 
 
 @pytest.mark.parametrize(
@@ -42,17 +42,12 @@ def test_incomplete_jellyfin_fails_loudly(kw, needle):
         jf(**kw).validate_media_server()
 
 
-def test_jellyfin_variables_without_media_server_choice_fail_loudly():
-    with pytest.raises(ConfigError, match="MEDIA_SERVER=jellyfin"):
-        Config(plex_url="", plex_token="", jellyfin_url=URL).validate_media_server()
-
-
 def test_from_env_reads_jellyfin_variables(monkeypatch):
-    for name, value in {"MEDIA_SERVER": "jellyfin", "JELLYFIN_URL": f" {URL} ", "JELLYFIN_API_KEY": " key ", "JELLYFIN_USER": " bob "}.items():
+    for name, value in {"JELLYFIN_URL": f" {URL} ", "JELLYFIN_API_KEY": " key ", "JELLYFIN_USER": " bob "}.items():
         monkeypatch.setenv(name, value)
     cfg = Config.from_env()
     assert (cfg.jellyfin_url, cfg.jellyfin_api_key, cfg.jellyfin_user) == (URL, "key", "bob")
-    assert cfg.media_server_env_controlled and cfg.media_server_source == "env"
+    assert [r.kind for r in registry.env_records(cfg)] == ["jellyfin"]
 
 
 def test_jellyfin_key_is_forbidden_on_the_gateway():
@@ -62,15 +57,6 @@ def test_jellyfin_key_is_forbidden_on_the_gateway():
 
 
 # ----------------------------------------------------------------------------- factory & dependency
-
-
-def test_build_jellyfin_shares_one_adapter_per_configuration():
-    a = build_jellyfin(jf())
-    assert isinstance(a, JellyfinMediaServer) and build_jellyfin(jf()) is a
-    assert build_jellyfin(jf(jellyfin_api_key="other")) is not a
-    assert build_jellyfin(jf(jellyfin_api_key="")) is None
-    assert isinstance(build_media_server(jf()), JellyfinMediaServer)
-    assert build_media_server(Config(plex_url="", plex_token="")) is None
 
 
 def test_capabilities_for_jellyfin_enable_users():
@@ -107,7 +93,7 @@ def env(tmp_path):
 
 
 def test_status_endpoint_reports_jellyfin_capabilities(env):
-    env.cfg.media_server, env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = "jellyfin", URL, API_KEY
+    env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = URL, API_KEY
     fake = FakeJellyfin(default_state([]))
     adapter = JellyfinMediaServer(URL, API_KEY, transport=fake.transport(), sleep=lambda _s: None)
     with patch("trackseerr.media_servers.registry.build_adapter", return_value=adapter):
@@ -116,18 +102,26 @@ def test_status_endpoint_reports_jellyfin_capabilities(env):
         "type": "jellyfin",
         "connected": True,
         "capabilities": {"playlists": True, "users": True, "mixes": False, "library_refresh": True, "file_paths": True},
+        "kinds": ["jellyfin"],
+        "all_capabilities": {
+            "playlists": True,
+            "users": True,
+            "mixes": False,
+            "library_refresh": True,
+            "file_paths": True,
+        },
     }
 
 
 def test_status_endpoint_unreachable(env):
-    env.cfg.media_server, env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = "jellyfin", URL, "k"
+    env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = URL, "k"
     with patch("trackseerr.media_servers.registry.build_adapter", return_value=None):
         body = env.tc.get("/api/system/media-server").json()
     assert body["type"] == "jellyfin" and body["connected"] is False
 
 
 def test_user_refresh_discovers_jellyfin_users(env):
-    env.cfg.media_server, env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = "jellyfin", URL, API_KEY
+    env.cfg.jellyfin_url, env.cfg.jellyfin_api_key = URL, API_KEY
     fake = FakeJellyfin(default_state([]))
     adapter = JellyfinMediaServer(URL, API_KEY, transport=fake.transport(), sleep=lambda _s: None)
     env.app.dependency_overrides[get_media_client] = lambda: adapter

@@ -303,11 +303,10 @@ def test_records_fall_back_to_config_before_install() -> None:
     assert registry.records(config) == ()
 
 
-def test_fallback_prefers_plex_then_subsonic_then_jellyfin() -> None:
+def test_fallback_returns_all_env_blocks_with_plex_as_login() -> None:
     sub_base = dict(
         plex_url="",
         plex_token="",
-        media_server="subsonic",
         subsonic_url=URL,
         subsonic_user="u",
         subsonic_password="p",
@@ -319,7 +318,8 @@ def test_fallback_prefers_plex_then_subsonic_then_jellyfin() -> None:
         subsonic_user="u",
         subsonic_password="p",
     )
-    assert [r.id for r in registry.fallback_records(both_plex_sub)] == ["env-plex"]
+    both_recs = registry.fallback_records(both_plex_sub)
+    assert [(r.id, r.is_login) for r in both_recs] == [("env-plex", True), ("env-subsonic", False)]
 
     only_sub = Config(**sub_base)
     sub_recs = registry.fallback_records(only_sub)
@@ -328,11 +328,11 @@ def test_fallback_prefers_plex_then_subsonic_then_jellyfin() -> None:
     assert sub_recs[0].source == "env"
     assert sub_recs[0].username == "u"
     assert sub_recs[0].password == "p"
+    assert sub_recs[0].is_login is False
 
     only_jf = Config(
         plex_url="",
         plex_token="",
-        media_server="jellyfin",
         jellyfin_url="http://jellyfin.example.com:8096",
         jellyfin_user="admin",
         jellyfin_api_key="jf-key",
@@ -343,6 +343,7 @@ def test_fallback_prefers_plex_then_subsonic_then_jellyfin() -> None:
     assert jf_recs[0].source == "env"
     assert jf_recs[0].username == "admin"
     assert jf_recs[0].api_key == "jf-key"
+    assert jf_recs[0].is_login is False
 
     assert registry.fallback_records(cfg()) == []
 
@@ -664,3 +665,58 @@ def test_is_installed() -> None:
     assert registry.is_installed() is True
     registry._reset_for_tests()
     assert registry.is_installed() is False
+
+
+def test_non_login_plex_gets_no_account_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict[str, Any]] = []
+
+    class _FakePlexClient:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            calls.append({"args": args, "kwargs": kwargs})
+
+    monkeypatch.setattr("trackseerr.clients.plex.PlexClient", _FakePlexClient)
+    monkeypatch.setattr("trackseerr.media_servers.registry.PlexMediaServer", _FakeAdapter)
+    registry._reset_for_tests()
+
+    login_rec = registry.ServerRecord(
+        id="p-login",
+        kind="plex",
+        name="LoginPlex",
+        source="settings",
+        url=PLEX_URL,
+        api_key="tok1",
+        enabled=True,
+        is_login=True,
+    )
+    other_rec = registry.ServerRecord(
+        id="p-other",
+        kind="plex",
+        name="OtherPlex",
+        source="settings",
+        url="http://plex2.example.com:32400",
+        api_key="tok2",
+        enabled=True,
+        is_login=False,
+    )
+
+    a1 = registry.build_adapter(login_rec)
+    a2 = registry.build_adapter(other_rec)
+    assert a1 is not None and a2 is not None
+    assert calls[0]["kwargs"]["account_token"] is None
+    assert calls[1]["kwargs"]["account_token"] == ""
+
+    # Toggling is_login must bust the adapter cache key.
+    other_as_login = registry.ServerRecord(
+        id="p-other",
+        kind="plex",
+        name="OtherPlex",
+        source="settings",
+        url="http://plex2.example.com:32400",
+        api_key="tok2",
+        enabled=True,
+        is_login=True,
+    )
+    a3 = registry.build_adapter(other_as_login)
+    assert a3 is not a2
+    assert calls[2]["kwargs"]["account_token"] is None
+    registry._reset_for_tests()

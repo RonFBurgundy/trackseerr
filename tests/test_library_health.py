@@ -522,7 +522,7 @@ def test_get_shape_and_count(client, db, config, music, server_box):
     h = _headers(db, config, admin=True)
     empty = client.get("/api/library-health", headers=h).json()
     assert empty == {"findings": [], "groups": [], "last_run": None, "running": False, "mapping": None,
-                     "server": None, "count": 0, "weekly": True}
+                     "mappings": [], "server": None, "count": 0, "weekly": True}
     _, refs = base_library(db, music)
     touch(music / "Art/Alb1/3.flac")
     touch(music / "Art/Alb1/4.flac")
@@ -699,4 +699,34 @@ def test_dismissed_long_name_not_reported(db, music):
     assert str(long_dir) not in found
     assert str(long_file) not in found
     assert len(found) == 0
+
+
+def test_mapping_save_reloads_registry(client, db, config, music):
+    from trackseerr.media_servers import registry
+
+    h = _headers(db, config, admin=True)
+    registry.reload(config, db)
+    try:
+        recs = registry.records(config)
+        assert len(recs) == 1
+        assert recs[0].path_mapping is None
+
+        res_put = client.put(
+            "/api/library-health/mapping",
+            json={"server_prefix": "/srv", "local_prefix": str(music)},
+            headers=h,
+        )
+        assert res_put.status_code == 200
+        assert registry.records(config)[0].path_mapping == {
+            "server_prefix": "/srv",
+            "local_prefix": str(music),
+            "auto": False,
+            "server_kind": "plex",
+        }
+
+        res_del = client.delete("/api/library-health/mapping", headers=h)
+        assert res_del.status_code == 200
+        assert registry.records(config)[0].path_mapping is None
+    finally:
+        registry._reset_for_tests()
 

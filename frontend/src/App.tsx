@@ -163,7 +163,7 @@ const MainApp: React.FC = () => {
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [isPlaylistsLoading, setIsPlaylistsLoading] = useState<boolean>(false);
-  const { playlistServers } = usePlaylistServers(auth.canUseAdminUi);
+  const { playlistServers, enabledServers } = usePlaylistServers(auth.canUseAdminUi);
 
   // Set of requested IDs to update UI state
   const [requestedIds, setRequestedIds] = useState<Set<string>>(new Set());
@@ -553,7 +553,7 @@ const MainApp: React.FC = () => {
                   requestedIds={requestedIds}
                   users={users}
                   currentUserId={auth.user?.id}
-                  canTargetUsers={mediaServer.capabilities.users}
+                  canTargetUsers={mediaServer.allCapabilities.users || mediaServer.kinds.includes('subsonic')}
                   serverLabel={mediaServer.label}
                 />
               )}
@@ -563,6 +563,7 @@ const MainApp: React.FC = () => {
                   playlists={playlists}
                   users={users}
                   playlistServers={playlistServers}
+                  enabledServers={enabledServers}
                   currentUserId={auth.user?.id}
                   onSync={handleSyncPlaylists}
                   onToggleTarget={handleToggleTarget}
@@ -578,8 +579,8 @@ const MainApp: React.FC = () => {
                   hasMediaServer={mediaServer.hasMediaServer}
                   serverType={mediaServer.type}
                   serverLabel={mediaServer.label}
-                  canTargetUsers={mediaServer.capabilities.users}
-                  mixesEnabled={mediaServer.capabilities.mixes}
+                  canTargetUsers={mediaServer.allCapabilities.users || mediaServer.kinds.includes('subsonic')}
+                  mixesEnabled={mediaServer.hasMediaServer}
                   onRequestItem={handleRequestItem}
                 />
               )}
@@ -611,7 +612,8 @@ const MainApp: React.FC = () => {
                   accountHook={accountHook}
                   currentUserId={auth.user?.id}
                   mfaEnrollmentRequired={mfaEnrollmentRequired}
-                  hasMediaServer={mediaServer.isPlex}
+                  hasMediaServer={mediaServer.hasPlayHistory}
+                  hasPlex={mediaServer.hasPlex}
                   updateCheck={updateCheck}
                 />
               )}

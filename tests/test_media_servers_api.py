@@ -306,7 +306,6 @@ def test_env_row_test_uses_env_credentials(env, monkeypatch):
     sub_cfg = Config(
         plex_url="",
         plex_token="",
-        media_server="subsonic",
         subsonic_url=SUBSONIC_URL,
         subsonic_user="env-user",
         subsonic_password="env-password",
@@ -330,3 +329,41 @@ def test_env_row_test_uses_env_credentials(env, monkeypatch):
     assert resp.status_code == 200
     assert resp.json() == {"ok": True, "message": "Env Subsonic ok"}
     assert seen == [(SUBSONIC_URL, "env-user", "env-password", "", True)]
+
+
+def test_second_plex_gets_numbered_name(env):
+    r1 = env.tc.post(
+        "/api/settings/media-servers",
+        json={"kind": "plex", "url": "https://plex1.example.com", "api_key": "tok1"},
+        headers=env.admin,
+    )
+    r2 = env.tc.post(
+        "/api/settings/media-servers",
+        json={"kind": "plex", "url": "https://plex2.example.com", "api_key": "tok2"},
+        headers=env.admin,
+    )
+    r3 = env.tc.post(
+        "/api/settings/media-servers",
+        json={"kind": "plex", "url": "https://plex3.example.com", "api_key": "tok3"},
+        headers=env.admin,
+    )
+    assert r1.status_code == 200 and r1.json()["name"] == "Plex"
+    assert r2.status_code == 200 and r2.json()["name"] == "Plex 2"
+    assert r3.status_code == 200 and r3.json()["name"] == "Plex 3"
+
+
+def test_duplicate_name_rejected(env):
+    first = env.tc.post(
+        "/api/settings/media-servers",
+        json={"kind": "plex", "name": "Living Room", "url": "https://plex1.example.com", "api_key": "tok1"},
+        headers=env.admin,
+    )
+    assert first.status_code == 200
+
+    dup = env.tc.post(
+        "/api/settings/media-servers",
+        json={"kind": "jellyfin", "name": "living room", "url": "https://jf.example.com", "api_key": "tok2"},
+        headers=env.admin,
+    )
+    assert dup.status_code == 422
+    assert "Another server already uses that name" in dup.json()["detail"]

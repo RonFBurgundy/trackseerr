@@ -29,15 +29,16 @@ from trackseerr.clients.plex import PlexClient
 from trackseerr.media_servers import MediaServerError, PlaylistSyncOptions, as_media_server, describe_error, registry
 from trackseerr.media_servers.plex import read_playlist_items, refresh_mix_snapshots
 from trackseerr.media_servers.registry import ServerRecord
+from trackseerr.media_servers.user_logins import sync_subsonic_for_users
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.youtube_music import get_shared_youtube_music_client
-from trackseerr.config import Config
+from trackseerr.config import MEDIA_SERVER_SUBSONIC, Config
 from trackseerr.job_tracker import tracked
 from trackseerr.list_monitoring import apply_playlist_missing_safely
 from trackseerr.listening_playlists import fetch_listening_tracks
 from trackseerr.playlist_policy import is_listening_playlist, is_smart_collection
 from trackseerr.smart_collections import SmartCollectionError, refresh_tracks
-from trackseerr.models import Playlist, RequestStatus, Track
+from trackseerr.models import Playlist, RequestStatus, SyncResult, Track
 from trackseerr.native_match import match_playlist_tracks_native
 from trackseerr.storage import Database
 from trackseerr.track_aliases import apply_track_aliases, restore_missing
@@ -134,6 +135,16 @@ def _playlist_servers(
     return [(None, fallback_server)] if fallback_server else []
 
 
+def _push_results_outcome(results: Sequence[SyncResult], total_tracks: int) -> tuple[bool, int, list[Track]]:
+    """Derive ``(success, matched_count, missing)`` from per-target push results."""
+    if not results:
+        return False, 0, []
+    chosen = next((r for r in results if r.success), results[0])
+    missing = list(getattr(chosen, "missing", None) or [])
+    matched_count = max(0, total_tracks - len(missing))
+    return any(r.success for r in results), matched_count, missing
+
+
 def _push_to_extra_server(
     db: Database,
     config: Config,
@@ -141,25 +152,30 @@ def _push_to_extra_server(
     adapter: Any,
     model_playlist: Playlist,
     target_usernames: list[str],
+    skip_item_ids: Optional[set[str]] = None,
 ) -> None:
     """Push ``model_playlist`` to an additional playlist server and record only its per-server state."""
     try:
-        results = adapter.sync_playlist(
-            model_playlist,
-            target_usernames,
-            PlaylistSyncOptions.from_config(config, db=db),
-        )
-        matched, missing = adapter.match_playlist_tracks(
-            model_playlist.tracks,
-            threshold=config.search_similarity_threshold,
-        )
-        success = any(r.success for r in results) if results else False
+        options = PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_item_ids)
+        if rec.kind == MEDIA_SERVER_SUBSONIC:
+            results = sync_subsonic_for_users(
+                db, config, rec, adapter, model_playlist, target_usernames, options
+            )
+        else:
+            results = adapter.sync_playlist(
+                model_playlist,
+                target_usernames,
+                options,
+            )
+        success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
+        error_msg = "" if success else next((r.error for r in results if not r.success and r.error), "")
         db.record_playlist_server_state(
             model_playlist.id,
             rec.id,
             "success" if success else "failed",
-            matched=len(matched),
+            matched=matched_count,
             missing=len(missing),
+            error=error_msg,
         )
     except MediaServerError as e:
         logger.error("Error syncing playlist '%s' to %s: %s", model_playlist.name, rec.name, e.safe_detail)
@@ -235,6 +251,37 @@ class SyncState:
         db.set_playlist_tracks_json(pl["id"], payload)
         pl["tracks_json"] = payload
         return skip
+
+    @staticmethod
+    def _refresh_server_adopted(db: Database, pl: dict[str, Any], source: dict[str, Any]) -> None:
+        """Refresh ``tracks_json`` of a Subsonic/Jellyfin adopted playlist from its originating server.
+
+        Falls back to the stored snapshot when the source server is missing, unreachable, or returns an error.
+        """
+        pair = registry.server_by_id(source["server_id"])
+        if pair is None:
+            logger.warning(
+                "Source server '%s' for adopted playlist '%s' is unavailable; using stored snapshot",
+                source["server_id"],
+                pl["name"],
+            )
+            return
+        _, adapter = pair
+        try:
+            tracks = adapter.source_playlist_tracks(
+                source["server_playlist_id"],
+                user=source.get("server_user") or None,
+            )
+        except MediaServerError as e:
+            logger.warning(
+                "Source playlist for adopted '%s' unavailable (%s); using stored snapshot",
+                pl["name"],
+                e.safe_detail,
+            )
+            return
+        payload = json.dumps(tracks)
+        db.set_playlist_tracks_json(pl["id"], payload)
+        pl["tracks_json"] = payload
 
     @staticmethod
     def _tracks_to_json(tracks: list[Track]) -> str:
@@ -357,20 +404,24 @@ class SyncState:
         stats: dict[str, int],
         fingerprint: str,
         server_name: str = "Plex",
+        rec: Optional[ServerRecord] = None,
     ) -> tuple[bool, int, int]:
         """Pushes a playlist to the primary media server for its target users and records the outcome."""
         pl_id = pl["id"]
         try:
-            results = server.sync_playlist(
-                model_playlist,
-                target_usernames,
-                PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys),
-            )
-            matched, missing = server.match_playlist_tracks(
-                model_playlist.tracks, threshold=config.search_similarity_threshold
-            )
+            options = PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys)
+            if rec is not None and rec.kind == MEDIA_SERVER_SUBSONIC:
+                results = sync_subsonic_for_users(
+                    db, config, rec, server, model_playlist, target_usernames, options
+                )
+            else:
+                results = server.sync_playlist(
+                    model_playlist,
+                    target_usernames,
+                    options,
+                )
+            success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
             missing = restore_missing(missing, original_by_effective, ignored_ids)
-            success = any(r.success for r in results) if results else False
             db.record_sync_result(
                 playlist_id=pl_id,
                 status="success" if success else "failed",
@@ -380,9 +431,9 @@ class SyncState:
             apply_playlist_missing_safely(db, config, pl_id)
             if success:
                 stats["success_count"] += 1
-            stats["total_matched"] += len(matched)
+            stats["total_matched"] += matched_count
             stats["total_missing"] += len(missing)
-            return success, len(matched), len(missing)
+            return success, matched_count, len(missing)
         except Exception as e:
             logger.error("Error syncing playlist '%s' to %s: %s", pl["name"], server_name, describe_error(e))
             logger.debug("Playlist sync traceback", exc_info=True)
@@ -420,6 +471,7 @@ class SyncState:
             stats,
             fingerprint,
             server_name=server_name,
+            rec=first_rec,
         )
         if first_rec is not None:
             db.record_playlist_server_state(
@@ -431,7 +483,10 @@ class SyncState:
             )
         for rec, adapter in servers[1:]:
             if rec is not None:
-                _push_to_extra_server(db, config, rec, adapter, model_playlist, target_usernames)
+                extra_skip = skip_rating_keys if rec.is_login else None
+                _push_to_extra_server(
+                    db, config, rec, adapter, model_playlist, target_usernames, skip_item_ids=extra_skip
+                )
 
     @staticmethod
     def _unchanged_since_last_sync(
@@ -484,7 +539,9 @@ class SyncState:
         push = bool(target_usernames)
 
         skip_rating_keys: Optional[set[str]] = None
-        if pl.get("service", "spotify") == "plex":
+        if (source := db.get_server_playlist_source(pl_id)) is not None:
+            self._refresh_server_adopted(db, pl, source)
+        elif pl.get("service", "spotify") == "plex":
             skip_rating_keys = self._refresh_adopted_playlist(db, plex_client, pl)
         try:
             tracks = self._load_source_tracks(db, config, pl, spotify_client, deezer_client)

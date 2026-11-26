@@ -148,7 +148,8 @@ class TestWebhookAndSelfHealingSync:
         # 2. First sync: Plex has Song A, but Song B is missing
         mock_plex = MagicMock()
         mock_plex.sync_playlist_to_users.return_value = [
-            SyncResult(playlist_name="Imported Test Mix", total_tracks=2, matched_tracks=1, missing_tracks=1, success=True)
+            SyncResult(playlist_name="Imported Test Mix", total_tracks=2, matched_tracks=1, missing_tracks=1, success=True,
+                       missing=[Track(title="Song B", artist="Artist B", album="Album B")])
         ]
         mock_plex.match_playlist_tracks.return_value = (
             [MagicMock(title="Song A")],
@@ -173,6 +174,10 @@ class TestWebhookAndSelfHealingSync:
             [MagicMock(title="Song A"), MagicMock(title="Song B")],
             [],  # No more missing tracks!
         )
+
+        mock_plex.sync_playlist_to_users.return_value = [
+            SyncResult(playlist_name="Imported Test Mix", total_tracks=2, matched_tracks=2, missing_tracks=0, success=True, missing=[])
+        ]
 
         # Library DB is not touched in this test so the rematch must be forced.
         res2 = sync_state.execute_sync(

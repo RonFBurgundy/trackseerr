@@ -6,15 +6,17 @@ import type { LibraryHealthMapping } from '@/types/libraryHealth';
 
 export interface ReviewMappingCardProps {
   mapping: LibraryHealthMapping | null;
+  serverId?: string;
+  serverName?: string;
   busy: boolean;
-  onSave: (serverPrefix: string, localPrefix: string) => Promise<void>;
-  onRemove: () => Promise<void>;
+  onSave: (serverPrefix: string, localPrefix: string, serverId?: string) => Promise<void>;
+  onRemove: (serverId?: string) => Promise<void>;
 }
 
 /** Shows how the media server's file paths map onto Trackseerr's, with confirm / edit / remove. */
-export const ReviewMappingCard: React.FC<ReviewMappingCardProps> = React.memo(({ mapping, busy, onSave, onRemove }) => {
-  const serverId = useId();
-  const localId = useId();
+export const ReviewMappingCard: React.FC<ReviewMappingCardProps> = React.memo(({ mapping, serverId, serverName, busy, onSave, onRemove }) => {
+  const serverInputId = useId();
+  const localInputId = useId();
   const [editing, setEditing] = useState<boolean>(false);
   const [serverPrefix, setServerPrefix] = useState<string>('');
   const [localPrefix, setLocalPrefix] = useState<string>('');
@@ -26,14 +28,17 @@ export const ReviewMappingCard: React.FC<ReviewMappingCardProps> = React.memo(({
   };
 
   const save = async (): Promise<void> => {
-    await onSave(serverPrefix, localPrefix);
+    await onSave(serverPrefix, localPrefix, serverId);
     setEditing(false);
   };
 
   const canSave = serverPrefix.trim() !== '' && localPrefix.trim() !== '' && !busy;
 
   return (
-    <MachinedCard className="p-3 space-y-2" aria-label="Path mapping">
+    <MachinedCard className="p-3 space-y-2" aria-label={serverName ? `Path mapping (${serverName})` : 'Path mapping'}>
+      {serverName && (
+        <p className="text-[11px] font-bold uppercase tracking-widest font-mono text-[var(--text-secondary)]">{serverName}</p>
+      )}
       {editing ? (
         <form
           className="space-y-2"
@@ -44,11 +49,11 @@ export const ReviewMappingCard: React.FC<ReviewMappingCardProps> = React.memo(({
         >
           <div className="grid gap-2 sm:grid-cols-2">
             <div>
-              <label htmlFor={serverId} className={labelClass}>
+              <label htmlFor={serverInputId} className={labelClass}>
                 Path the media server sees
               </label>
               <input
-                id={serverId}
+                id={serverInputId}
                 name="library-health-server-prefix"
                 type="text"
                 value={serverPrefix}
@@ -59,11 +64,11 @@ export const ReviewMappingCard: React.FC<ReviewMappingCardProps> = React.memo(({
               />
             </div>
             <div>
-              <label htmlFor={localId} className={labelClass}>
+              <label htmlFor={localInputId} className={labelClass}>
                 Same folder in Trackseerr
               </label>
               <input
-                id={localId}
+                id={localInputId}
                 name="library-health-local-prefix"
                 type="text"
                 value={localPrefix}
@@ -104,7 +109,7 @@ export const ReviewMappingCard: React.FC<ReviewMappingCardProps> = React.memo(({
                 size="sm"
                 variant="amber"
                 disabled={busy}
-                onClick={() => void onSave(mapping.server_prefix, mapping.local_prefix)}
+                onClick={() => void onSave(mapping.server_prefix, mapping.local_prefix, serverId)}
                 icon={<Check className="h-3.5 w-3.5" />}
               >
                 Confirm
@@ -120,7 +125,7 @@ export const ReviewMappingCard: React.FC<ReviewMappingCardProps> = React.memo(({
                 ariaLabel="Remove path mapping"
                 confirmLabel="Remove"
                 disabled={busy}
-                onConfirm={() => void onRemove()}
+                onConfirm={() => void onRemove(serverId)}
               />
             )}
           </div>

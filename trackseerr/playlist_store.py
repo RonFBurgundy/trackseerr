@@ -274,6 +274,60 @@ class PlaylistStoreMixin:
             return [dict(row) for row in cur.fetchall()]
 
     # -------------------------------------------------------------------------
+    # Subsonic / Jellyfin Playlist Adoption: server_playlist_sources
+    # -------------------------------------------------------------------------
+
+    def set_server_playlist_source(
+        self,
+        playlist_id: str,
+        server_id: str,
+        server_playlist_id: str,
+        server_user: str = "",
+    ) -> None:
+        """Record or update the originating media-server playlist for an adopted Trackseerr playlist."""
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO server_playlist_sources (playlist_id, server_id, server_playlist_id, server_user)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(playlist_id) DO UPDATE SET
+                    server_id = excluded.server_id,
+                    server_playlist_id = excluded.server_playlist_id,
+                    server_user = excluded.server_user
+                """,
+                (str(playlist_id), str(server_id), str(server_playlist_id), str(server_user or "")),
+            )
+            self.conn.commit()
+
+    def get_server_playlist_source(self, playlist_id: str) -> Optional[dict[str, Any]]:
+        """Return the ``server_playlist_sources`` row for ``playlist_id``, or None."""
+        with self.reader() as conn:
+            cur = conn.execute(
+                """
+                SELECT playlist_id, server_id, server_playlist_id, server_user
+                FROM server_playlist_sources
+                WHERE playlist_id = ?
+                """,
+                (str(playlist_id),),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def list_server_playlist_sources(self, server_id: str) -> list[dict[str, Any]]:
+        """Return all ``server_playlist_sources`` rows belonging to ``server_id``."""
+        with self.reader() as conn:
+            cur = conn.execute(
+                """
+                SELECT playlist_id, server_id, server_playlist_id, server_user
+                FROM server_playlist_sources
+                WHERE server_id = ?
+                ORDER BY playlist_id ASC
+                """,
+                (str(server_id),),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    # -------------------------------------------------------------------------
     # Plex Playlist Control: registry + mix snapshots
     # -------------------------------------------------------------------------
 
@@ -768,38 +822,128 @@ class PlaylistStoreMixin:
             )
             self.conn.commit()
             cur = self.conn.execute(
-                "SELECT id, source_title, source_artist, plex_rating_key, plex_title, plex_artist, created_by, created_at FROM match_overrides WHERE source_title = ? AND source_artist = ?",
+                "SELECT id, NULL AS server_id, source_title, source_artist, plex_rating_key, plex_title, plex_artist, created_by, created_at "
+                "FROM match_overrides WHERE source_title = ? AND source_artist = ?",
                 (s_title, s_artist),
             )
             row = cur.fetchone()
             return dict(row) if row else {}
 
+    def add_server_match_override(
+        self,
+        server_id: str,
+        source_title: str,
+        source_artist: str,
+        item_id: str,
+        item_title: str,
+        item_artist: str,
+        created_by: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Insert or update a manual match override scoped to one media server."""
+        srv_id = str(server_id).strip()
+        s_title = str(source_title).strip()
+        s_artist = str(source_artist).strip()
+        i_id = str(item_id).strip()
+        i_title = str(item_title).strip()
+        i_artist = str(item_artist).strip()
+        c_by = str(created_by) if created_by else None
+
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO server_match_overrides
+                    (server_id, source_title, source_artist, item_id, item_title, item_artist, created_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(server_id, source_title, source_artist) DO UPDATE SET
+                    item_id = excluded.item_id,
+                    item_title = excluded.item_title,
+                    item_artist = excluded.item_artist,
+                    created_by = excluded.created_by,
+                    created_at = CURRENT_TIMESTAMP
+                """,
+                (srv_id, s_title, s_artist, i_id, i_title, i_artist, c_by),
+            )
+            self.conn.commit()
+            cur = self.conn.execute(
+                """
+                SELECT id, server_id, source_title, source_artist,
+                       item_id AS plex_rating_key, item_title AS plex_title, item_artist AS plex_artist,
+                       created_by, created_at
+                FROM server_match_overrides
+                WHERE server_id = ? AND source_title = ? AND source_artist = ?
+                """,
+                (srv_id, s_title, s_artist),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else {}
+
     def get_match_override(
-        self, source_title: str, source_artist: str
+        self,
+        source_title: str,
+        source_artist: str,
+        server_id: Optional[str] = None,
+        use_legacy: bool = True,
     ) -> Optional[dict[str, Any]]:
         s_title = str(source_title).strip()
         s_artist = str(source_artist).strip()
+        srv_id = str(server_id).strip() if server_id else None
         with self.reader() as conn:
-            cur = conn.execute(
-                "SELECT id, source_title, source_artist, plex_rating_key, plex_title, plex_artist, created_by, created_at FROM match_overrides WHERE LOWER(source_title) = LOWER(?) AND LOWER(source_artist) = LOWER(?)",
-                (s_title, s_artist),
-            )
-            row = cur.fetchone()
-            return dict(row) if row else None
+            if srv_id:
+                cur = conn.execute(
+                    """
+                    SELECT id, server_id, source_title, source_artist,
+                           item_id AS plex_rating_key, item_title AS plex_title, item_artist AS plex_artist,
+                           created_by, created_at
+                    FROM server_match_overrides
+                    WHERE server_id = ? AND LOWER(source_title) = LOWER(?) AND LOWER(source_artist) = LOWER(?)
+                    """,
+                    (srv_id, s_title, s_artist),
+                )
+                row = cur.fetchone()
+                if row:
+                    return dict(row)
+            if use_legacy:
+                cur = conn.execute(
+                    "SELECT id, NULL AS server_id, source_title, source_artist, plex_rating_key, plex_title, plex_artist, created_by, created_at "
+                    "FROM match_overrides WHERE LOWER(source_title) = LOWER(?) AND LOWER(source_artist) = LOWER(?)",
+                    (s_title, s_artist),
+                )
+                row = cur.fetchone()
+                if row:
+                    return dict(row)
+            return None
 
     def list_match_overrides(self) -> list[dict[str, Any]]:
         with self.reader() as conn:
             cur = conn.execute(
-                "SELECT id, source_title, source_artist, plex_rating_key, plex_title, plex_artist, created_by, created_at FROM match_overrides ORDER BY created_at DESC"
+                """
+                SELECT id, server_id, source_title, source_artist,
+                       item_id AS plex_rating_key, item_title AS plex_title, item_artist AS plex_artist,
+                       created_by, created_at
+                FROM server_match_overrides
+                UNION ALL
+                SELECT id, NULL AS server_id, source_title, source_artist,
+                       plex_rating_key, plex_title, plex_artist,
+                       created_by, created_at
+                FROM match_overrides
+                ORDER BY created_at DESC, id DESC
+                """
             )
             return [dict(r) for r in cur.fetchall()]
 
-    def delete_match_override(self, override_id: int) -> bool:
+    def delete_match_override(self, override_id: int, server_id: Optional[str] = None) -> bool:
+        srv_id = str(server_id).strip() if server_id else None
         with self._lock:
-            cur = self.conn.execute(
-                "DELETE FROM match_overrides WHERE id = ?",
-                (int(override_id),),
-            )
+            if srv_id:
+                cur = self.conn.execute(
+                    "DELETE FROM server_match_overrides WHERE id = ? AND server_id = ?",
+                    (int(override_id), srv_id),
+                )
+            else:
+                cur = self.conn.execute(
+                    "DELETE FROM match_overrides WHERE id = ?",
+                    (int(override_id),),
+                )
             self.conn.commit()
             return cur.rowcount > 0
 

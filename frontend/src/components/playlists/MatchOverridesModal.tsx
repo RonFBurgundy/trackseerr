@@ -9,7 +9,7 @@ export interface MatchOverridesModalProps {
   onClose: () => void;
   overrides: MatchOverride[];
   loading: boolean;
-  onDelete: (id: number) => Promise<void>;
+  onDelete: (id: number, serverId?: string | null) => Promise<void>;
   onReload: () => Promise<void>;
 }
 
@@ -21,18 +21,19 @@ export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
   onDelete,
   onReload,
 }) => {
-  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [deletingKey, setDeletingKey] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const handleDelete = async (id: number) => {
-    setDeletingId(id);
+  const handleDelete = async (override: MatchOverride) => {
+    const key = `${override.server_id ?? 'legacy'}-${override.id}`;
+    setDeletingKey(key);
     setActionError(null);
     try {
-      await onDelete(id);
+      await onDelete(override.id, override.server_id);
     } catch (err: unknown) {
       setActionError(errorMessage(err, 'Failed to undo match override'));
     } finally {
-      setDeletingId(null);
+      setDeletingKey(null);
     }
   };
 
@@ -87,11 +88,12 @@ export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
               className="virtual-scroll overflow-y-auto border border-[#222222] rounded-[4px] bg-[#0d0d0d] divide-y divide-[#1c1c1c] max-h-[60vh]"
             >
               {overrides.map((override) => {
-                const isDeleting = deletingId === override.id;
+                const rowKey = `${override.server_id ?? 'legacy'}-${override.id}`;
+                const isDeleting = deletingKey === rowKey;
 
                 return (
                   <div
-                    key={override.id}
+                    key={rowKey}
                     className="p-3 flex items-center justify-between gap-3 hover:bg-[#141414] transition-colors"
                   >
                     <div className="min-w-0 flex-1 space-y-1 font-mono text-xs">
@@ -108,9 +110,10 @@ export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
                           {override.plex_artist} - {override.plex_title}
                         </span>
                       </div>
-                      {override.created_at && (
+                      {(override.server_name || override.created_at) && (
                         <div className="text-[10px] text-neutral-500">
-                          Matched on {new Date(override.created_at).toLocaleString()}
+                          {override.server_name ? `${override.server_name}${override.created_at ? ' · ' : ''}` : ''}
+                          {override.created_at ? `Matched on ${new Date(override.created_at).toLocaleString()}` : ''}
                         </div>
                       )}
                     </div>
@@ -120,7 +123,7 @@ export const MatchOverridesModal: React.FC<MatchOverridesModalProps> = ({
                         size="sm"
                         variant="danger"
                         disabled={isDeleting}
-                        onClick={() => void handleDelete(override.id)}
+                        onClick={() => void handleDelete(override)}
                         icon={isDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
                         title="Undo match override"
                         aria-label={`Undo match override for ${override.source_title}`}

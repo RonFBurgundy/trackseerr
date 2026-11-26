@@ -273,6 +273,40 @@ def _extract_webhook_payload(content_type: str, body: bytes) -> dict[str, Any]:
     return payload
 
 
+def _match_plex_webhook_record(
+    plex_records: list[Any], payload: dict[str, Any]
+) -> Optional[Any]:
+    """Match ``payload['Server']['uuid']`` to an already-built Plex adapter's record without connecting."""
+    from trackseerr.media_servers import registry
+
+    server_info = payload.get("Server") if isinstance(payload.get("Server"), dict) else {}
+    server_uuid = str(server_info.get("uuid") or "").strip()
+    if not server_uuid:
+        return None
+    for rec in plex_records:
+        adapter = registry.cached_adapter(rec)
+        plex_extras = getattr(adapter, "plex_extras", None) if adapter is not None else None
+        if callable(plex_extras) and plex_extras().machine_identifier == server_uuid:
+            return rec
+    return None
+
+
+def _resolve_owner_is_admin(
+    matched_rec: Any,
+    plex_records: list[Any],
+    installed: bool,
+) -> bool:
+    """Determines whether account id 1 on a Plex webhook maps to the Trackseerr admin."""
+    if matched_rec is not None:
+        return matched_rec.is_login
+    if installed:
+        from trackseerr.media_servers import registry
+
+        scrobble_plex = [r for r in plex_records if registry.ROLE_SCROBBLES in r.roles]
+        return len(scrobble_plex) == 1 and scrobble_plex[0].is_login
+    return True
+
+
 @router.post("/plex", response_model=WebhookStatus, response_model_exclude_unset=True, summary="Plex webhook receiver (token auth only)")
 async def plex_webhook(
     request: Request,
@@ -287,10 +321,14 @@ async def plex_webhook(
 
     from trackseerr.media_servers import registry
 
-    if registry.is_installed():
-        rec = registry.login_plex_record(config)
-        if rec is None or registry.ROLE_SCROBBLES not in rec.roles:
-            return {"status": "ignored"}
+    installed = registry.is_installed()
+    plex_records = (
+        [rec for rec in registry.records(config) if rec.enabled and rec.kind == "plex"]
+        if installed
+        else []
+    )
+    if installed and not any(registry.ROLE_SCROBBLES in rec.roles for rec in plex_records):
+        return {"status": "ignored"}
 
     too_large = HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="Payload too large")
     declared = request.headers.get("content-length")
@@ -314,6 +352,10 @@ async def plex_webhook(
         logger.warning("Rejected malformed Plex webhook: %s", exc)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Malformed webhook payload") from exc
 
+    matched_rec = _match_plex_webhook_record(plex_records, payload) if installed else None
+    if matched_rec is not None and registry.ROLE_SCROBBLES not in matched_rec.roles:
+        return {"status": "ignored"}
+
     event = payload.get("event")
     meta = payload.get("Metadata") if isinstance(payload.get("Metadata"), dict) else {}
     if event not in ("media.scrobble", "media.play", "media.resume") or meta.get("type") != "track":
@@ -325,8 +367,13 @@ async def plex_webhook(
         return {"status": "ignored"}
 
     account = payload.get("Account") if isinstance(payload.get("Account"), dict) else {}
+    owner_is_admin = _resolve_owner_is_admin(matched_rec, plex_records, installed)
     user = resolve_plex_user(
-        db, account.get("id"), account.get("title"), admin_username=get_cached_admin_username(db)
+        db,
+        account.get("id"),
+        account.get("title"),
+        admin_username=get_cached_admin_username(db) if owner_is_admin else None,
+        owner_is_admin=owner_is_admin,
     )
     if user is None:
         return {"status": "ignored"}

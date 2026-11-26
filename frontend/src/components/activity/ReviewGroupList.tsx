@@ -14,6 +14,21 @@ export interface ReviewGroupListProps {
 
 const groupId = (g: LibraryHealthGroup): string => `${g.kind}|${g.cause}|${g.group_key}`;
 
+function findingServersSuffix(detail: Record<string, unknown> | null | undefined): string {
+  const raw = detail?.servers;
+  if (!Array.isArray(raw)) return '';
+  const names = raw
+    .map((s) => {
+      if (typeof s === 'string') return s;
+      if (s && typeof s === 'object' && typeof (s as { name?: unknown }).name === 'string') {
+        return (s as { name: string }).name;
+      }
+      return '';
+    })
+    .filter((name) => name.length > 0);
+  return names.length > 1 ? ` · ${names.join(', ')}` : '';
+}
+
 /** Groups bucketed under a heading per cause; each row expands to its findings with dismiss actions. */
 export const ReviewGroupList: React.FC<ReviewGroupListProps> = React.memo(({ groups, findings, busy, onDismiss, onShorten }) => {
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
@@ -82,7 +97,7 @@ export const ReviewGroupList: React.FC<ReviewGroupListProps> = React.memo(({ gro
                     {items.map((f) => (
                       <li key={f.id} className="flex items-center gap-2">
                         <span className="min-w-0 flex-1 truncate text-[11px] font-mono text-[var(--text-secondary)]" title={f.path}>
-                          {f.path}
+                          {f.path}{findingServersSuffix(f.detail)}
                         </span>
                         {f.kind === 'long_name' && onShorten && (
                           <TapeDeckButton

@@ -101,19 +101,15 @@ def _download_client_connection_ok(monkeypatch, request):
 
 @pytest.fixture(autouse=True)
 def _reset_media_server_process_state():
-    """The Settings-page media-server overlay, its change listeners and the shared Subsonic adapter are process-wide:
-    never let one test's saved settings reach the next."""
-    from trackseerr import media_servers
-    from trackseerr.config import set_media_server_overlay, set_plex_account_token
+    """The Plex owner account token, media-server change listeners, registry and refresh scheduler are process-wide:
+    never let one test's state reach the next."""
+    from trackseerr.config import set_plex_account_token
     from trackseerr.media_servers import refresh_scheduler, registry
     from trackseerr.media_servers import settings as media_server_settings
 
     def _reset() -> None:
-        set_media_server_overlay(None)
         set_plex_account_token("")
         media_server_settings.clear_listeners()
-        with media_servers._subsonic_lock:
-            media_servers._subsonic_cached = None
         registry._reset_for_tests()
         refresh_scheduler.reset_for_tests()
 

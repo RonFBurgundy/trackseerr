@@ -32,14 +32,19 @@ never sent twice.
 """
 
 import logging
+import sqlite3
 import time
 import weakref
-from datetime import datetime
+from datetime import datetime, timezone
+from itertools import islice
 from typing import Any, Callable, Iterator, Optional, Sequence
 
 import httpx
 
+from trackseerr.censored import censored_pattern, is_censored, search_text
 from trackseerr.lidarr_release import norm_title
+from trackseerr.mb_metadata_store import get_shared_enricher
+from trackseerr.media_match import artist_matches
 from trackseerr.media_servers.base import (
     ConnectionTest,
     MediaServer,
@@ -54,16 +59,26 @@ from trackseerr.media_servers.base import (
     ServerTrackRef,
     ServerUser,
 )
+from trackseerr.media_servers.song_scoring import (
+    artist_query_credits,
+    best_scored_match,
+    clean_title,
+    tail_two_components,
+)
 from trackseerr.media_servers.subsonic import (
     _parse_iso_utc,
-    _artist_variants,
     _chunks,
     _RedactHttpxUrls,
     _Song,
-    score_candidate,
 )
 from trackseerr.missing_csv import delete_missing_csv, write_missing_csv
 from trackseerr.models import Playlist, SyncResult, Track
+from trackseerr.playlist_identity import (
+    LibraryHit,
+    MusicBrainzBudget,
+    find_by_isrc,
+    resolve_with_musicbrainz,
+)
 from trackseerr.redaction import redact_text
 from trackseerr.storage import clean_library_name
 
@@ -282,24 +297,23 @@ class JellyfinMediaServer(MediaServer):
         name = info.get("ServerName") or "Jellyfin"
         return ConnectionTest(True, f"Connected to {name} {info.get('Version') or ''}".strip())
 
-    def _search_songs(self, query: str, limit: int) -> Iterator[_Song]:
-        """Songs whose name contains ``query``, newest page last; stops after ``limit`` candidates."""
-        if not query.strip():
+    def _search_songs(self, query: str, limit: int, *, artist_ids: Sequence[str] = ()) -> Iterator[_Song]:
+        """Songs whose name contains ``query`` (and/or belonging to ``artist_ids``); stops after ``limit`` candidates."""
+        if not query.strip() and not artist_ids:
             return
+        base_params: list[tuple[str, Any]] = [
+            ("IncludeItemTypes", "Audio"),
+            ("Recursive", "true"),
+            ("Fields", "Path"),
+        ]
+        if query.strip():
+            base_params.append(("SearchTerm", query.strip()))
+        if artist_ids:
+            base_params.append(("ArtistIds", ",".join(artist_ids)))
         start = 0
         while start < limit:
             page = min(_SEARCH_PAGE, limit - start)
-            body = self._request(
-                "GET",
-                "/Items",
-                [
-                    ("IncludeItemTypes", "Audio"),
-                    ("Recursive", "true"),
-                    ("SearchTerm", query),
-                    ("StartIndex", start),
-                    ("Limit", page),
-                ],
-            )
+            body = self._request("GET", "/Items", [*base_params, ("StartIndex", start), ("Limit", page)])
             items = [i for i in (body or {}).get("Items") or [] if isinstance(i, dict) and i.get("Id")]
             for item in items:
                 yield _song_from_item(item)
@@ -308,70 +322,241 @@ class JellyfinMediaServer(MediaServer):
             if not items or (start >= total if isinstance(total, int) else len(items) < page):
                 return
 
+    def _search_artists(self, query: str, limit: int = 10) -> list[tuple[str, str]]:
+        """Return ``(id, name)`` pairs for Jellyfin MusicArtist items matching ``query``."""
+        if not query.strip():
+            return []
+        body = self._request(
+            "GET",
+            "/Items",
+            [
+                ("IncludeItemTypes", "MusicArtist"),
+                ("Recursive", "true"),
+                ("SearchTerm", query.strip()),
+                ("Limit", limit),
+            ],
+        )
+        items = [i for i in (body or {}).get("Items") or [] if isinstance(i, dict) and i.get("Id")]
+        return [(str(i["Id"]), str(i.get("Name") or "")) for i in items]
+
+    def _resolve_artist_ids(self, artist_query: str) -> list[str]:
+        """Resolve ``artist_query`` (possibly multi-artist) to matching Jellyfin MusicArtist IDs."""
+        ids: list[str] = []
+        for credit in artist_query_credits(artist_query):
+            for aid, name in self._search_artists(credit):
+                if artist_matches(name, artist_query, threshold=0.8) or artist_matches(name, credit, threshold=0.8):
+                    if aid not in ids:
+                        ids.append(aid)
+            if len(ids) >= 5:
+                break
+        return ids[:5]
+
     def _get_song(self, item_id: str) -> Optional[_Song]:
-        body = self._request("GET", "/Items", [("Ids", item_id), ("IncludeItemTypes", "Audio"), ("Recursive", "true")])
+        body = self._request(
+            "GET",
+            "/Items",
+            [("Ids", item_id), ("IncludeItemTypes", "Audio"), ("Recursive", "true"), ("Fields", "Path")],
+        )
         items = [i for i in (body or {}).get("Items") or [] if isinstance(i, dict) and i.get("Id")]
         return _song_from_item(items[0]) if items else None
 
-    def _best(self, track: Track, threshold: float, db: Optional[Any]) -> Optional[_Song]:
-        if db is not None:
-            try:
-                override = db.get_match_override(track.title, track.artist)
-            except (AttributeError, TypeError, ValueError) as exc:
-                logger.debug("Match override lookup failed for '%s': %s", track.title, type(exc).__name__)
-                override = None
-            if override and override.get("plex_rating_key"):  # the column holds the server's own item id for every server
-                try:
-                    pinned = self._get_song(str(override["plex_rating_key"]))
-                except MediaServerError as exc:  # stale or unreachable pin: fall back to a normal search, never abort the sync
-                    logger.warning(
-                        "Pinned match for '%s' could not be looked up (%s); searching instead", track.title, type(exc).__name__
-                    )
-                    pinned = None
-                if pinned is not None:
-                    return pinned
-        # SearchTerm matches the item name, so the query is the noise-free title; the first credited artist and the
-        # album only take part in scoring.
-        title = norm_title(track.title) or clean_library_name(track.title)
-        queries = [title, clean_library_name(track.title)]
-        best: Optional[_Song] = None
-        best_score = 0.0
-        for query in dict.fromkeys(q for q in queries if q):
-            for song in self._search_songs(query, _SEARCH_MAX):
-                score = score_candidate(track, song)
-                if score > best_score:
-                    best, best_score = song, score
-            if best is not None and best_score >= threshold:
-                break
-        if best is not None and best_score + 1e-9 >= threshold:
-            return best
+    def _match_override(self, track: Track, db: Optional[Any]) -> Optional[_Song]:
+        if db is None:
+            return None
+        try:
+            override = db.get_match_override(
+                track.title,
+                track.artist,
+                server_id=self.server_id,
+                use_legacy=self.legacy_overrides,
+            )
+        except (AttributeError, TypeError, ValueError) as exc:
+            logger.debug("Match override lookup failed for '%s': %s", track.title, type(exc).__name__)
+            return None
+        if not (override and override.get("plex_rating_key")):  # the column holds the server's own item id
+            return None
+        try:
+            return self._get_song(str(override["plex_rating_key"]))
+        except MediaServerError as exc:  # stale or unreachable pin: fall back to a normal search, never abort the sync
+            logger.warning(
+                "Pinned match for '%s' could not be looked up (%s); searching instead", track.title, type(exc).__name__
+            )
+            return None
+
+    def _song_for_hit(self, hit: LibraryHit) -> Optional[_Song]:
+        target_tail = tail_two_components(hit.file_path)
+        if target_tail is None or not hit.title:
+            return None
+        for song in self._search_songs(hit.title, _SEARCH_MAX):
+            song_path = str(song.raw.get("Path") or "")
+            if song_path and tail_two_components(song_path) == target_tail:
+                return song
+        if hit.artist:
+            artist_ids = self._resolve_artist_ids(hit.artist)
+            if artist_ids:
+                for q in (hit.title, ""):
+                    for song in self._search_songs(q, _SEARCH_MAX, artist_ids=artist_ids):
+                        song_path = str(song.raw.get("Path") or "")
+                        if song_path and tail_two_components(song_path) == target_tail:
+                            return song
         return None
 
-    def match_track(self, track: Track, threshold: float = 0.9, db: Optional[Any] = None) -> Optional[ServerTrackRef]:
-        song = self._best(track, threshold, db)
+    def _match_by_isrc(self, track: Track, db: Optional[Any]) -> Optional[_Song]:
+        if db is None or not track.isrc or not hasattr(db, "find_library_track_by_isrc"):
+            return None
+        try:
+            hit = find_by_isrc(db, track.isrc)
+        except (sqlite3.Error, AttributeError) as exc:
+            logger.debug("ISRC lookup failed for '%s': %s", track.title, type(exc).__name__)
+            return None
+        if hit is None:
+            return None
+        return self._song_for_hit(hit)
+
+    def _search_and_pick(
+        self,
+        track: Track,
+        query: str,
+        threshold: float,
+        *,
+        artist_ids: Sequence[str] = (),
+    ) -> Optional[_Song]:
+        songs = list(self._search_songs(query, _SEARCH_MAX, artist_ids=artist_ids))
+        best, best_score, _ = best_scored_match(track, songs, threshold)
+        return best if best is not None and best_score + 1e-9 >= threshold else None
+
+    def _search_fuzzy(self, track: Track, threshold: float) -> Optional[_Song]:
+        # SearchTerm matches the item name, so the query is the noise-free title; artist/album participate in scoring.
+        title = norm_title(track.title.replace("$", "s")) or (
+            "" if is_censored(track.title) else clean_library_name(track.title)
+        )
+        cleaned_raw = clean_title(track.title)
+        cleaned = norm_title(cleaned_raw.replace("$", "s")) or (
+            "" if is_censored(track.title) else clean_library_name(cleaned_raw)
+        )
+        queries = [title, cleaned]
+        if not is_censored(track.title):
+            queries.append(clean_library_name(track.title))
+        for query in dict.fromkeys(q for q in queries if q):
+            match = self._search_and_pick(track, query, threshold)
+            if match is not None:
+                return match
+        artist_ids = self._resolve_artist_ids(track.artist)
+        if artist_ids:
+            for query in dict.fromkeys([cleaned or title, ""]):
+                match = self._search_and_pick(track, query, threshold, artist_ids=artist_ids)
+                if match is not None:
+                    return match
+        return None
+
+    def _match_censored(self, track: Track, threshold: float) -> Optional[_Song]:
+        pattern = censored_pattern(track.title)
+        query = search_text(track.title)
+        if pattern is None or not query:
+            return None
+        kept = [s for s in self._search_songs(query, _SEARCH_MAX) if pattern.fullmatch(clean_library_name(s.title))]
+        best, best_score, _ = best_scored_match(track, kept, threshold, censored=True)
+        return best if best is not None and best_score + 1e-9 >= threshold else None
+
+    def _match_by_musicbrainz(
+        self,
+        track: Track,
+        db: Optional[Any],
+        enricher: Optional[Any],
+        budget: Optional[MusicBrainzBudget],
+    ) -> Optional[_Song]:
+        if db is None or enricher is None or budget is None:
+            return None
+        hit = resolve_with_musicbrainz(db, enricher, track, budget)
+        if hit is None:
+            return None
+        return self._song_for_hit(hit)
+
+    def _best(
+        self,
+        track: Track,
+        threshold: float,
+        db: Optional[Any],
+        enricher: Optional[Any] = None,
+        budget: Optional[MusicBrainzBudget] = None,
+    ) -> Optional[_Song]:
+        override = self._match_override(track, db)
+        if override is not None:
+            return override
+        isrc_match = self._match_by_isrc(track, db)
+        if isrc_match is not None:
+            return isrc_match
+        fuzzy = self._search_fuzzy(track, threshold)
+        if fuzzy is not None:
+            return fuzzy
+        censored = self._match_censored(track, threshold)
+        if censored is not None:
+            return censored
+        return self._match_by_musicbrainz(track, db, enricher, budget)
+
+    def match_track(
+        self,
+        track: Track,
+        threshold: float = 0.9,
+        db: Optional[Any] = None,
+        enricher: Optional[Any] = None,
+        budget: Optional[MusicBrainzBudget] = None,
+    ) -> Optional[ServerTrackRef]:
+        song = self._best(track, threshold, db, enricher=enricher, budget=budget)
         return None if song is None else song.ref()
 
     def match_playlist_tracks(
-        self, tracks: Sequence[Track], threshold: float = 0.9, db: Optional[Any] = None
+        self,
+        tracks: Sequence[Track],
+        threshold: float = 0.9,
+        db: Optional[Any] = None,
+        enricher: Optional[Any] = None,
+        budget: Optional[MusicBrainzBudget] = None,
     ) -> tuple[list[ServerTrackRef], list[Track]]:
+        if enricher is not None and budget is None:
+            budget = MusicBrainzBudget()
         matched: list[ServerTrackRef] = []
         missing: list[Track] = []
         for track in tracks:
-            ref = self.match_track(track, threshold, db)
+            ref = self.match_track(track, threshold, db, enricher=enricher, budget=budget)
             if ref is None:
                 missing.append(track)
             else:
                 matched.append(ref)
         return matched, missing
 
+    def _search_tracks_by_artist(self, terms: str, limit: int) -> list[_Song]:
+        words = terms.split()
+        for i in range(1, min(len(words), 5)):
+            artist_prefix = " ".join(words[:i])
+            title_words = [w for w in clean_library_name(" ".join(words[i:])).split() if w]
+            if not title_words:
+                continue
+            artist_ids = [aid for aid, _ in self._search_artists(artist_prefix, limit=5)]
+            if not artist_ids:
+                continue
+            matched: list[_Song] = []
+            for song in self._search_songs("", max(limit, _SEARCH_MAX), artist_ids=artist_ids):
+                normed_title = clean_library_name(song.title)
+                if all(w in normed_title for w in title_words):
+                    matched.append(song)
+                    if len(matched) >= limit:
+                        return matched
+            if matched:
+                return matched
+        artist_ids = [aid for aid, _ in self._search_artists(terms, limit=5)]
+        if artist_ids:
+            return list(islice(self._search_songs("", limit, artist_ids=artist_ids), limit))
+        return []
+
     def search_tracks(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         limit = max(1, limit)
         terms = " ".join(query.split())
-        songs: list[_Song] = []
-        for song in self._search_songs(terms, limit):
-            songs.append(song)
-            if len(songs) >= limit:
-                break
+        if not terms:
+            return []
+        songs = list(islice(self._search_songs(terms, limit), limit))
+        if not songs:
+            songs = self._search_tracks_by_artist(terms, limit)
         return [
             {
                 "id": s.id,
@@ -381,7 +566,7 @@ class JellyfinMediaServer(MediaServer):
                 "album": s.album,
                 "duration": s.duration,
             }
-            for s in songs
+            for s in songs[:limit]
         ]
 
     def iter_library_files(self) -> Iterator[ServerFileRef]:
@@ -491,6 +676,53 @@ class JellyfinMediaServer(MediaServer):
             and not (u.get("Policy") or {}).get("IsDisabled", False)
         ]
 
+    def recent_plays(self, user_id: str, since: datetime, limit: int = 200) -> list[dict[str, Any]]:
+        """Audio items played by ``user_id`` strictly after ``since``, newest first.
+
+        Note: Jellyfin only keeps each song's LAST play (``UserData.LastPlayedDate``), so a song replayed
+        between two polls counts once.
+        """
+        since_utc = since.replace(tzinfo=timezone.utc) if since.tzinfo is None else since.astimezone(timezone.utc)
+        params = (
+            ("IncludeItemTypes", "Audio"),
+            ("Recursive", "true"),
+            ("Filters", "IsPlayed"),
+            ("SortBy", "DatePlayed"),
+            ("SortOrder", "Descending"),
+            ("Fields", "UserData"),
+        )
+        plays: list[dict[str, Any]] = []
+        page_size = max(1, min(limit, _PAGE))
+        for item in self._paged(f"/Users/{user_id}/Items", params, page=page_size):
+            user_data = item.get("UserData")
+            raw_date = str(user_data.get("LastPlayedDate") or "") if isinstance(user_data, dict) else ""
+            played_at = _parse_iso_utc(raw_date) if raw_date else None
+            if played_at is None:
+                continue
+            if played_at <= since_utc:
+                break
+            item_id = str(item.get("Id") or "").strip()
+            artists = item.get("Artists") or []
+            artist = str(artists[0] if artists else item.get("AlbumArtist") or "").strip()
+            title = str(item.get("Name") or "").strip()
+            if not item_id or not artist or not title:
+                continue
+            ticks = item.get("RunTimeTicks")
+            duration_ms = int(ticks // 10_000) if isinstance(ticks, (int, float)) and ticks > 0 else None
+            plays.append(
+                {
+                    "item_id": item_id,
+                    "artist": artist,
+                    "title": title,
+                    "album": str(item.get("Album") or "").strip() or None,
+                    "duration_ms": duration_ms,
+                    "played_at": played_at,
+                }
+            )
+            if len(plays) >= limit:
+                break
+        return plays
+
     # ------------------------------------------------------------------ playlists
 
     def _resolve_user(self, name: str, users: list[ServerUser]) -> Optional[ServerUser]:
@@ -530,6 +762,53 @@ class JellyfinMediaServer(MediaServer):
         if len(owned) > 1:
             logger.warning("Jellyfin has %d playlists named '%s' for this user; updating the first", len(owned), name)
         return owned[0] if owned else None
+
+    def _resolve_source_user(self, user: Optional[str]) -> ServerUser:
+        """Resolve a Jellyfin user name/id, or fall back to the adapter's default account."""
+        resolved = self._resolve_user(user or "", self.list_users())
+        if resolved is None:
+            who = f"'{user}'" if user else "the default account"
+            raise MediaServerNotFound(f"Jellyfin user {who} not found", safe_detail=f"Jellyfin user {who} not found")
+        return resolved
+
+    def list_source_playlists(self, user: Optional[str] = None) -> list[dict[str, Any]]:
+        """Return audio playlists visible to ``user`` (or the default Jellyfin account)."""
+        resolved = self._resolve_source_user(user)
+        out: list[dict[str, Any]] = []
+        for p in self._paged(
+            "/Items",
+            [("IncludeItemTypes", "Playlist"), ("Recursive", "true"), ("MediaTypes", "Audio"), ("UserId", resolved.id)],
+        ):
+            pid = str(p.get("Id") or "")
+            if not pid:
+                continue
+            raw_count = p.get("ChildCount") if p.get("ChildCount") is not None else p.get("RecursiveItemCount")
+            track_count = int(raw_count) if isinstance(raw_count, (int, float)) and not isinstance(raw_count, bool) else 0
+            out.append(
+                {
+                    "id": pid,
+                    "title": str(p.get("Name") or ""),
+                    "owner": str(p.get("Owner") or ""),
+                    "track_count": track_count,
+                }
+            )
+        return out
+
+    def source_playlist_tracks(self, playlist_id: str, user: Optional[str] = None) -> list[dict[str, str]]:
+        """Return ``{title, artist, album}`` dicts for every track in Jellyfin playlist ``playlist_id``."""
+        resolved = self._resolve_source_user(user)
+        tracks: list[dict[str, str]] = []
+        for item in self._paged(f"/Playlists/{playlist_id}/Items", [("UserId", resolved.id)]):
+            artists = [str(a) for a in item.get("Artists") or [] if a]
+            artist = artists[0] if artists else str(item.get("AlbumArtist") or "")
+            tracks.append(
+                {
+                    "title": str(item.get("Name") or ""),
+                    "artist": artist,
+                    "album": str(item.get("Album") or ""),
+                }
+            )
+        return tracks
 
     def _entries(self, playlist_id: str, user_id: str) -> list[tuple[str, str]]:
         return [
@@ -571,7 +850,15 @@ class JellyfinMediaServer(MediaServer):
         self, playlist: Playlist, targets: Sequence[str], options: PlaylistSyncOptions
     ) -> list[SyncResult]:
         names = list(targets) or [""]
-        matched, missing = self.match_playlist_tracks(playlist.tracks, threshold=options.threshold, db=options.db)
+        enricher = (
+            get_shared_enricher(options.db)
+            if options.db is not None and hasattr(options.db, "get_media_management_settings")
+            else None
+        )
+        budget = MusicBrainzBudget() if enricher is not None else None
+        matched, missing = self.match_playlist_tracks(
+            playlist.tracks, threshold=options.threshold, db=options.db, enricher=enricher, budget=budget
+        )
         total = len(playlist.tracks)
 
         if options.write_missing_as_csv:
@@ -590,14 +877,32 @@ class JellyfinMediaServer(MediaServer):
             user = self._resolve_user(name, users)
             if user is None:
                 who = f"'{name}'" if name else "the default account (set JELLYFIN_USER)"
-                results.append(SyncResult(playlist.name, total, len(matched), len(missing), False, f"Jellyfin user {who} not found"))
+                results.append(
+                    SyncResult(
+                        playlist.name,
+                        total,
+                        len(matched),
+                        len(missing),
+                        False,
+                        f"Jellyfin user {who} not found",
+                        missing=list(missing),
+                    )
+                )
                 continue
             if user.id in done:
                 results.append(done[user.id])
                 continue
             if not matched:
                 logger.warning("No tracks in playlist '%s' could be matched on the Jellyfin server", playlist.name)
-                outcome = SyncResult(playlist.name, total, 0, len(missing), False, "Zero tracks matched on the Jellyfin server")
+                outcome = SyncResult(
+                    playlist.name,
+                    total,
+                    0,
+                    len(missing),
+                    False,
+                    "Zero tracks matched on the Jellyfin server",
+                    missing=list(missing),
+                )
             else:
                 try:
                     self._push(playlist, user, ids, options)
@@ -605,9 +910,13 @@ class JellyfinMediaServer(MediaServer):
                     raise  # the key or the server is the problem: it applies to every target
                 except MediaServerError as exc:  # e.g. this user cannot see the library: the other targets still sync
                     logger.warning("Jellyfin sync of '%s' failed for one target: %s", playlist.name, exc.safe_detail)
-                    outcome = SyncResult(playlist.name, total, len(matched), len(missing), False, exc.safe_detail)
+                    outcome = SyncResult(
+                        playlist.name, total, len(matched), len(missing), False, exc.safe_detail, missing=list(missing)
+                    )
                 else:
-                    outcome = SyncResult(playlist.name, total, len(matched), len(missing), True)
+                    outcome = SyncResult(
+                        playlist.name, total, len(matched), len(missing), True, missing=list(missing)
+                    )
             done[user.id] = outcome
             results.append(outcome)
         return results

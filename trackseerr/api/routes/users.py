@@ -20,7 +20,7 @@ from trackseerr.api.dependencies import (
 from trackseerr.api.routes.admin_users import MAX_QUOTA, MAX_WINDOW_DAYS, apply_user_changes
 from trackseerr.api.schemas.users import CurrentUserProfile, UserRecord
 from trackseerr.clients.plex import PlexClient
-from trackseerr.media_servers import MediaServer, as_media_server, describe_error, import_server_users
+from trackseerr.media_servers import MediaServer, as_media_server, describe_error, import_server_users, registry
 from trackseerr.config import Config
 from trackseerr.models import UserPermission
 from trackseerr.redaction import safe_exc
@@ -158,6 +158,40 @@ def refresh_users(
     plex_client: Optional[Union[PlexClient, MediaServer]] = Depends(get_media_client),
 ) -> list[dict[str, Any]]:
     """Discovers users from the media server and upserts them to DB (admin only)."""
+    if registry.is_installed():
+        capable = [
+            (rec, adapter)
+            for rec, adapter in registry.media_servers(registry.ROLE_USERS)
+            if adapter.capabilities.users
+        ]
+        if not capable:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="No media server can import users",
+            )
+        imported_total = 0
+        skipped_total = 0
+        succeeded = 0
+        last_error: Optional[Exception] = None
+        for rec, adapter in capable:
+            try:
+                discovered_users = adapter.list_users()
+            except Exception as e:
+                logger.error("Failed to discover users from %s: %s", rec.name, describe_error(e))
+                last_error = e
+                continue
+            imported, skipped = import_server_users(db, adapter.kind, discovered_users)
+            imported_total += imported
+            skipped_total += skipped
+            succeeded += 1
+        if succeeded == 0 and last_error is not None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to query media server users: {describe_error(last_error)}",
+            )
+        logger.info("User refresh: %d imported, %d skipped", imported_total, skipped_total)
+        return db.list_users()
+
     server = as_media_server(plex_client)
     if not server:
         raise HTTPException(

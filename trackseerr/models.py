@@ -199,6 +199,7 @@ class SyncResult:
     missing_tracks: int
     success: bool
     error: str = ""
+    missing: list[Track] = field(default_factory=list)
 
 
 class DownloadDriverType(str, Enum):

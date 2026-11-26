@@ -306,40 +306,73 @@ def _check_download_clients(
     return checked, errors, warnings
 
 
+def _probe_server(target: Any) -> tuple[bool, str]:
+    try:
+        server = target() if callable(target) else target
+        if server is None:
+            return False, "cannot be reached"
+        conn_test = server.test_connection()
+        ok = bool(conn_test.ok)
+        msg = conn_test.message or ("Connected" if ok else "cannot be reached")
+        return ok, msg
+    except (httpx.HTTPError, OSError, ValueError, TypeError, sqlite3.Error) as exc:
+        logger.warning("Media server probe exception: %s", safe_exc(exc))
+        return False, redact_text(str(exc)) or type(exc).__name__
+    except Exception as exc:  # a third-party driver error must not stop the other checks
+        logger.warning("Media server probe failed: %s", safe_exc(exc))
+        return False, redact_text(str(exc)) or type(exc).__name__
+
+
+def _prune_media_server_checks(db: Any, seen_keys: list[str]) -> None:
+    try:
+        db.delete_health_checks_except("media_server", seen_keys)
+    except sqlite3.Error as exc:
+        logger.warning("Failed to prune media_server health checks: %s", safe_exc(exc))
+
+
 def _check_media_server(
     db: Any, config: Any, now: datetime, settings: dict[str, Any]
 ) -> tuple[int, int, int]:
     from trackseerr.media_servers import registry
 
+    threshold_minutes = int(settings.get("media_server_fail_minutes", 10))
+    if registry.is_installed():
+        enabled = [rec for rec in registry.records(config) if rec.enabled]
+        if not enabled:
+            _prune_media_server_checks(db, [])
+            return 0, 0, 0
+        checked = errors = warnings = 0
+        seen_keys: list[str] = []
+        for rec in enabled:
+            key = f"media_server:{rec.id}"
+            seen_keys.append(key)
+            ok, msg = _probe_server(lambda r=rec: registry.build_adapter(r))
+            state = observe(
+                db,
+                key=key,
+                kind="media_server",
+                label=rec.name,
+                ok=ok,
+                message=msg,
+                threshold_minutes=threshold_minutes,
+                now=now,
+                settings=settings,
+            )
+            checked += 1
+            if state == "error":
+                errors += 1
+            elif state == "warning":
+                warnings += 1
+        _prune_media_server_checks(db, seen_keys)
+        return checked, errors, warnings
+
     if not registry.has_servers(config):
-        try:
-            db.delete_health_checks_except("media_server", [])
-        except sqlite3.Error as exc:
-            logger.warning("Failed to delete media_server health checks: %s", safe_exc(exc))
+        _prune_media_server_checks(db, [])
         return 0, 0, 0
 
-    threshold_minutes = int(settings.get("media_server_fail_minutes", 10))
     key = "media_server"
     label = "Media server"
-
-    try:
-        server = get_media_server(config)
-        if server is None:
-            ok = False
-            msg = "cannot be reached"
-        else:
-            conn_test = server.test_connection()
-            ok = bool(conn_test.ok)
-            msg = conn_test.message or ("Connected" if ok else "cannot be reached")
-    except (httpx.HTTPError, OSError, ValueError, TypeError, sqlite3.Error) as exc:
-        logger.warning("Media server probe exception: %s", safe_exc(exc))
-        ok = False
-        msg = redact_text(str(exc)) or type(exc).__name__
-    except Exception as exc:  # a third-party driver error must not stop the other checks
-        logger.warning("Media server probe failed: %s", safe_exc(exc))
-        ok = False
-        msg = redact_text(str(exc)) or type(exc).__name__
-
+    ok, msg = _probe_server(lambda: get_media_server(config))
     state = observe(
         db,
         key=key,
@@ -351,10 +384,7 @@ def _check_media_server(
         now=now,
         settings=settings,
     )
-    try:
-        db.delete_health_checks_except("media_server", [key])
-    except sqlite3.Error as exc:
-        logger.warning("Failed to prune media_server health checks: %s", safe_exc(exc))
+    _prune_media_server_checks(db, [key])
 
     checked = 1
     errors = 1 if state == "error" else 0

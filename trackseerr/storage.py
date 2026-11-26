@@ -28,6 +28,7 @@ from trackseerr.import_list_store import ImportListStoreMixin
 from trackseerr.request_store import RequestStoreMixin
 from trackseerr.settings_store import SettingsStoreMixin
 from trackseerr.media_server_store import MediaServerStoreMixin
+from trackseerr.server_account_store import ServerAccountStoreMixin
 from trackseerr.issue_store import IssueStoreMixin
 from trackseerr.download_store import DownloadStoreMixin
 from trackseerr.activity_store import ActivityStoreMixin
@@ -92,6 +93,7 @@ class Database(
     RequestStoreMixin,
     SettingsStoreMixin,
     MediaServerStoreMixin,
+    ServerAccountStoreMixin,
     IssueStoreMixin,
     DownloadStoreMixin,
     ActivityStoreMixin,
