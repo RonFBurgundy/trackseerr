@@ -1121,7 +1121,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
   // Plex playlists and mixes only exist with a media server; never leave a hidden section selected.
   const serverType = props.serverType ?? 'plex';
   const showPlexSection =
-    enabledServers.length > 0 ? enabledServers.some((s) => s.kind === 'plex') : serverType === 'plex';
+    enabledServers.length > 0 ? enabledServers.some((s) => s.kind === 'plex' && s.is_login) : serverType === 'plex';
   const showMixes = props.mixesEnabled ?? true;
   const adoptableServers = isAdmin
     ? enabledServers.filter(

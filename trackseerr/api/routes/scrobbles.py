@@ -291,6 +291,22 @@ def _match_plex_webhook_record(
     return None
 
 
+def _resolve_owner_is_admin(
+    matched_rec: Any,
+    plex_records: list[Any],
+    installed: bool,
+) -> bool:
+    """Determines whether account id 1 on a Plex webhook maps to the Trackseerr admin."""
+    if matched_rec is not None:
+        return matched_rec.is_login
+    if installed:
+        from trackseerr.media_servers import registry
+
+        scrobble_plex = [r for r in plex_records if registry.ROLE_SCROBBLES in r.roles]
+        return len(scrobble_plex) == 1 and scrobble_plex[0].is_login
+    return True
+
+
 @router.post("/plex", response_model=WebhookStatus, response_model_exclude_unset=True, summary="Plex webhook receiver (token auth only)")
 async def plex_webhook(
     request: Request,
@@ -351,7 +367,7 @@ async def plex_webhook(
         return {"status": "ignored"}
 
     account = payload.get("Account") if isinstance(payload.get("Account"), dict) else {}
-    owner_is_admin = matched_rec.is_login if matched_rec is not None else True
+    owner_is_admin = _resolve_owner_is_admin(matched_rec, plex_records, installed)
     user = resolve_plex_user(
         db,
         account.get("id"),

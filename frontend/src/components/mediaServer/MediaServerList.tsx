@@ -78,7 +78,7 @@ export const MediaServerList: React.FC<MediaServerListProps> = ({ onToast, onSer
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (editing && !name.trim()) return;
     setIsSaving(true);
     try {
       await saveMediaServer(draft.toPayload(editing));
@@ -264,10 +264,10 @@ export const MediaServerList: React.FC<MediaServerListProps> = ({ onToast, onSer
               id="ms-name"
               name="name"
               type="text"
-              required
+              required={Boolean(editing)}
               value={name}
               onChange={(e) => draft.setName(e.target.value)}
-              placeholder="e.g. Home Plex"
+              placeholder="Leave empty for an automatic name"
               className={compactInputClass}
               autoComplete="off"
             />

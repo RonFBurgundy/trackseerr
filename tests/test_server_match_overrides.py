@@ -222,7 +222,7 @@ def test_api_search_match_list_and_delete_per_server(db: Database, tmp_path: Pat
     srv_override = srv_resp.json()["override"]
     assert srv_override["server_id"] == srv2["id"]
     assert srv_override["server_name"] == "Navidrome"
-    assert db.get_missing_tracks() == []
+    assert len(db.get_missing_tracks()) == 1
 
     # List includes both with server_id and server_name
     listed = client.get("/api/missing/matches", headers=headers).json()
@@ -236,3 +236,67 @@ def test_api_search_match_list_and_delete_per_server(db: Database, tmp_path: Pat
     assert del_srv.status_code == 200
     remaining = client.get("/api/missing/matches", headers=headers).json()
     assert len(remaining) == 1 and remaining[0]["source_title"] == "Legacy Song"
+
+
+def test_secondary_server_pin_keeps_missing_track(db: Database, tmp_path: Path) -> None:
+    client, headers = _admin_client(db, tmp_path)
+    srv1 = db.insert_media_server_row({"kind": "plex", "name": "Home Plex", "url": "http://plex:32400", "is_login": True})
+    srv2 = db.insert_media_server_row({"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533"})
+    db.upsert_playlist("pl-1", name="Mix", service="spotify", creator_id="admin-1")
+    db.record_sync_result(
+        "pl-1",
+        "partial",
+        missing_tracks=[{"title": "Airbag", "artist": "Radiohead", "album": "OK Computer"}],
+    )
+
+    rec1 = ServerRecord(id=srv1["id"], kind="plex", name="Home Plex", source="env", url="http://plex:32400", api_key="t", is_login=True)
+    rec2 = ServerRecord(id=srv2["id"], kind="subsonic", name="Navidrome", source="env", url="http://nav:4533", username="u", password="p")
+    registry.install([rec1, rec2])
+
+    resp = client.post(
+        "/api/missing/match",
+        json={
+            "source_title": "Airbag",
+            "source_artist": "Radiohead",
+            "plex_rating_key": "nav-42",
+            "plex_title": "Airbag (Nav)",
+            "plex_artist": "Radiohead",
+            "server_id": srv2["id"],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    missing = db.get_missing_tracks()
+    assert len(missing) == 1
+    assert missing[0]["title"] == "Airbag"
+
+
+def test_primary_pin_clears_missing_track(db: Database, tmp_path: Path) -> None:
+    client, headers = _admin_client(db, tmp_path)
+    srv1 = db.insert_media_server_row({"kind": "plex", "name": "Home Plex", "url": "http://plex:32400", "is_login": True})
+    srv2 = db.insert_media_server_row({"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533"})
+    db.upsert_playlist("pl-1", name="Mix", service="spotify", creator_id="admin-1")
+    db.record_sync_result(
+        "pl-1",
+        "partial",
+        missing_tracks=[{"title": "Airbag", "artist": "Radiohead", "album": "OK Computer"}],
+    )
+
+    rec1 = ServerRecord(id=srv1["id"], kind="plex", name="Home Plex", source="env", url="http://plex:32400", api_key="t", is_login=True)
+    rec2 = ServerRecord(id=srv2["id"], kind="subsonic", name="Navidrome", source="env", url="http://nav:4533", username="u", password="p")
+    registry.install([rec1, rec2])
+
+    resp = client.post(
+        "/api/missing/match",
+        json={
+            "source_title": "Airbag",
+            "source_artist": "Radiohead",
+            "plex_rating_key": "plex-42",
+            "plex_title": "Airbag",
+            "plex_artist": "Radiohead",
+            "server_id": srv1["id"],
+        },
+        headers=headers,
+    )
+    assert resp.status_code == 201
+    assert db.get_missing_tracks() == []

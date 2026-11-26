@@ -360,3 +360,64 @@ def test_webhook_accepted_when_any_plex_has_switch(monkeypatch, tmp_path):
     assert resp_off.status_code == 200
     assert resp_off.json() == {"status": "ignored"}
     db.close()
+
+
+def test_unidentified_webhook_owner_not_admin_with_two_plex(tmp_path):
+    db = Database(str(tmp_path / "test.db"))
+    db.upsert_user("u-admin", "trackseerr_admin", is_admin=True)
+    secret = db.get_plex_webhook_secret()
+    config = Config(plex_url="http://localhost:32400", plex_token="tok")
+
+    rec1 = _make_record("plex-login", kind="plex", roles=frozenset({registry.ROLE_SCROBBLES}), is_login=True)
+    rec2 = _make_record("plex-two", kind="plex", roles=frozenset({registry.ROLE_SCROBBLES}), is_login=False)
+    registry.install([rec1, rec2])
+
+    app = FastAPI()
+    app.include_router(scrobbles_routes.router, prefix="/api/scrobbles")
+    app.dependency_overrides[scrobbles_routes.get_db] = lambda: db
+    app.dependency_overrides[scrobbles_routes.get_config] = lambda: config
+
+    client = TestClient(app)
+    payload = {
+        "event": "media.scrobble",
+        "Account": {"id": 1, "title": "other_owner"},
+        "Metadata": {"type": "track", "grandparentTitle": "Artist", "title": "Track"},
+    }
+    resp = client.post(
+        f"/api/scrobbles/plex?token={secret}",
+        content=json.dumps(payload),
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ignored"}
+    db.close()
+
+
+def test_unidentified_webhook_single_login_plex_keeps_owner_rule(tmp_path):
+    db = Database(str(tmp_path / "test.db"))
+    db.upsert_user("u-admin", "trackseerr_admin", is_admin=True)
+    secret = db.get_plex_webhook_secret()
+    config = Config(plex_url="http://localhost:32400", plex_token="tok")
+
+    rec = _make_record("plex-login", kind="plex", roles=frozenset({registry.ROLE_SCROBBLES}), is_login=True)
+    registry.install([rec])
+
+    app = FastAPI()
+    app.include_router(scrobbles_routes.router, prefix="/api/scrobbles")
+    app.dependency_overrides[scrobbles_routes.get_db] = lambda: db
+    app.dependency_overrides[scrobbles_routes.get_config] = lambda: config
+
+    client = TestClient(app)
+    payload = {
+        "event": "media.scrobble",
+        "Account": {"id": 1, "title": "plex_owner"},
+        "Metadata": {"type": "track", "grandparentTitle": "Artist", "title": "Track"},
+    }
+    resp = client.post(
+        f"/api/scrobbles/plex?token={secret}",
+        content=json.dumps(payload),
+        headers={"content-type": "application/json"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"status": "ok"}
+    db.close()

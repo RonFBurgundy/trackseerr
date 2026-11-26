@@ -287,6 +287,7 @@ def create_match_override(
     req: MatchOverrideRequest,
     current_user: dict[str, Any] = Depends(require_admin),
     db: Database = Depends(get_db),
+    config: Config = Depends(get_config),
 ) -> dict[str, Any]:
     """Records a manual match override (Match Memory) and removes corresponding missing tracks."""
     sid = req.server_id.strip() if req.server_id and req.server_id.strip() else None
@@ -313,13 +314,14 @@ def create_match_override(
             plex_artist=req.plex_artist,
             created_by=str(current_user["id"]),
         )
-    # Remove from missing_tracks where title and artist match
-    with db._lock:
-        db.conn.execute(
-            "DELETE FROM missing_tracks WHERE LOWER(title) = LOWER(?) AND LOWER(artist) = LOWER(?)",
-            (req.source_title.strip(), req.source_artist.strip()),
-        )
-        db.conn.commit()
+    # Remove from missing_tracks only for legacy or primary server overrides
+    if sid is None or sid == registry.primary_record(config).id:
+        with db._lock:
+            db.conn.execute(
+                "DELETE FROM missing_tracks WHERE LOWER(title) = LOWER(?) AND LOWER(artist) = LOWER(?)",
+                (req.source_title.strip(), req.source_artist.strip()),
+            )
+            db.conn.commit()
 
     return {"status": "matched", "override": override}
 
