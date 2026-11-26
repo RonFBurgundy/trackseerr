@@ -6,6 +6,7 @@ import {
   getServerPlaylistItems,
   listServerPlaylists,
 } from '@/services/serverPlaylistService';
+import { toggleUserTarget } from '@/services/playlistService';
 
 export interface UseServerPlaylistsReturn {
   selectedUser: string | undefined;
@@ -22,6 +23,7 @@ export interface UseServerPlaylistsReturn {
   isMutating: boolean;
   selectPlaylist: (playlist: ServerPlaylistSummary | null) => Promise<void>;
   adopt: (playlist: ServerPlaylistSummary) => Promise<Schema<'PlaylistRecord'> | null>;
+  setTargets: (playlistId: string, userIds: string[]) => Promise<boolean>;
 }
 
 function errMsg(err: unknown, fallback: string): string {
@@ -124,6 +126,20 @@ export function useServerPlaylists(
     [serverId, effectiveUser, refresh]
   );
 
+  const setTargets = useCallback(async (playlistId: string, userIds: string[]): Promise<boolean> => {
+    setIsMutating(true);
+    try {
+      await toggleUserTarget(playlistId, userIds);
+      setError(null);
+      return true;
+    } catch (err: unknown) {
+      setError(errMsg(err, 'Failed to update playlist targets'));
+      return false;
+    } finally {
+      setIsMutating(false);
+    }
+  }, []);
+
   return {
     selectedUser,
     setSelectedUser,
@@ -138,5 +154,6 @@ export function useServerPlaylists(
     isMutating,
     selectPlaylist,
     adopt,
+    setTargets,
   };
 }

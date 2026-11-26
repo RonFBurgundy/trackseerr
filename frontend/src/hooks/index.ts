@@ -8,6 +8,7 @@ export * from './useLibrary';
 export * from './useLibrarySearch';
 export * from './usePlexPlaylists';
 export * from './useServerPlaylists';
+export * from './useServerUserLinks';
 export * from './useScrobbling';
 export * from './useTailoredMixes';
 export * from './useIssues';

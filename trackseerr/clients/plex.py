@@ -44,9 +44,9 @@ def clean_title(title: str) -> str:
         title,
         flags=re.IGNORECASE,
     )
-    # Remove trailing ' - Remastered...' or ' - Live...'
+    # Remove trailing ' - Remastered...' or ' - 2011 Remaster' or ' - Live...'
     cleaned = re.sub(
-        r"\s*-\s*(remastered|remaster|live|deluxe|radio edit|mono|stereo).*$",
+        r"\s*-\s*(?:\d{4}\s+)?(remastered|remaster|live|deluxe|radio edit|mono|stereo).*$",
         "",
         cleaned,
         flags=re.IGNORECASE,
@@ -652,37 +652,37 @@ class PlexClient:
             logger.debug("Failed match override fetch for '%s': %s", track.title, safe_exc(e))
         return None
 
-    def match_track(
-        self,
-        track: Track,
-        threshold: float = 0.9,
-        db: Optional[Any] = None,
-        enricher: Optional[Any] = None,
-        budget: Optional["MusicBrainzBudget"] = None,
-    ) -> Optional[object]:
-        """Search Plex library for a matching track using overrides, ISRC, fuzzy match, or MusicBrainz identity."""
-        # 1. Match Memory override check
-        override_match = self._match_override(track, db)
-        if override_match is not None:
-            return override_match
+    def _match_library_pin(self, track: Track, db: Optional[Any]) -> Optional[object]:
+        if db is None or not hasattr(db, "get_library_pin"):
+            return None
+        try:
+            hit = db.get_library_pin(track.title, track.artist)
+        except (sqlite3.Error, AttributeError, TypeError, ValueError) as e:
+            logger.debug("Library pin lookup failed for '%s': %s", track.title, safe_exc(e))
+            return None
+        if hit is None:
+            return None
+        try:
+            item = self._plex_item_for_file(hit)
+        except (PlexApiException, requests.RequestException) as e:
+            logger.warning("Library pin resolution failed for '%s': %s", track.title, safe_exc(e))
+            return None
+        if item is not None:
+            logger.debug("Applied library match pin for '%s - %s'", track.artist, track.title)
+        return item
 
-        # 2. Local library ISRC lookup before fuzzy search
-        isrc_match = self._match_by_isrc(track, db)
-        if isrc_match is not None:
-            return isrc_match
-
+    def _search_plex_track(self, track: Track, threshold: float) -> Optional[object]:
+        """Search Plex by title, cleaned title, artist-scoped title, and censored pattern."""
         candidates = []
         try:
             candidates = self.server.search(track.title, mediatype="track", limit=10)
         except BadRequest as e:
             logger.debug("BadRequest searching for %s: %s", track.title, safe_exc(e))
 
-        # Check initial search results
         matched = self._eval_candidates(candidates, track, threshold)
         if matched:
             return matched
 
-        # Fallback: clean title if it contained qualifiers/remaster text
         stripped_title = clean_title(track.title)
         if stripped_title and stripped_title.lower() != track.title.lower():
             logger.debug("Retrying search with sanitized title: '%s' -> '%s'", track.title, stripped_title)
@@ -699,9 +699,57 @@ class PlexClient:
         if matched:
             return matched
 
-        censored_match = self._match_censored(track, threshold)
-        if censored_match is not None:
-            return censored_match
+        return self._match_censored(track, threshold)
+
+    def match_track(
+        self,
+        track: Track,
+        threshold: float = 0.9,
+        db: Optional[Any] = None,
+        enricher: Optional[Any] = None,
+        budget: Optional["MusicBrainzBudget"] = None,
+        library_hit: Optional["LibraryHit"] = None,
+        skip_search: bool = False,
+    ) -> Optional[object]:
+        """Search Plex library for a matching track using overrides, library hits, ISRC, fuzzy match, or MusicBrainz."""
+        # 1. Match Memory override check
+        override_match = self._match_override(track, db)
+        if override_match is not None:
+            return override_match
+
+        # 2. Cross-server library pin check
+        pin_match = self._match_library_pin(track, db)
+        if pin_match is not None:
+            return pin_match
+
+        # 3. Pre-resolved native library hit: map file path directly before falling back to search
+        if library_hit is not None:
+            item = self._plex_item_for_file(library_hit)
+            if item is not None:
+                return item
+
+        # 3. Local library ISRC lookup before fuzzy search
+        isrc_match = self._match_by_isrc(track, db)
+        if isrc_match is not None:
+            return isrc_match
+
+        if skip_search:
+            cleaned = clean_title(track.title)
+            queries = [q for q in dict.fromkeys([cleaned, track.title]) if q]
+            for query in queries:
+                try:
+                    candidates = self.server.search(query, mediatype="track", limit=10)
+                except BadRequest as e:
+                    logger.debug("BadRequest searching for %s: %s", query, safe_exc(e))
+                    continue
+                match = self._eval_candidates(candidates, track, threshold)
+                if match is not None:
+                    return match
+            return None
+
+        searched = self._search_plex_track(track, threshold)
+        if searched is not None:
+            return searched
 
         if db is not None and enricher is not None and budget is not None:
             from ..playlist_identity import resolve_with_musicbrainz
@@ -777,6 +825,8 @@ class PlexClient:
         threshold: float = 0.9,
         db: Optional[Any] = None,
         enricher: Optional[Any] = None,
+        library_hits: Optional[dict[int, "LibraryHit"]] = None,
+        library_missing: Optional[set[int]] = None,
     ) -> Tuple[List[object], List[Track]]:
         """Match a list of tracks against the Plex library."""
         from ..playlist_identity import DEFAULT_SYNC_MB_LOOKUPS, MusicBrainzBudget
@@ -785,8 +835,18 @@ class PlexClient:
         available_tracks = []
         missing_tracks = []
 
-        for track in tracks:
-            match = self.match_track(track, threshold=threshold, db=db, enricher=enricher, budget=budget)
+        for idx, track in enumerate(tracks):
+            hit = library_hits.get(idx) if library_hits else None
+            skip_search = bool(library_missing and idx in library_missing)
+            match = self.match_track(
+                track,
+                threshold=threshold,
+                db=db,
+                enricher=enricher,
+                budget=budget,
+                library_hit=hit,
+                skip_search=skip_search,
+            )
             if match is not None:
                 available_tracks.append(match)
             else:
@@ -938,11 +998,18 @@ class PlexClient:
         threshold: float = 0.9,
         db: Optional[Any] = None,
         enricher: Optional[Any] = None,
+        library_hits: Optional[dict[int, "LibraryHit"]] = None,
+        library_missing: Optional[set[int]] = None,
     ) -> SyncResult:
         """Execute full match and sync for a single playlist."""
         logger.info("Syncing playlist '%s' (%d tracks)", playlist.name, len(playlist.tracks))
         matched, missing = self.match_playlist_tracks(
-            playlist.tracks, threshold=threshold, db=db, enricher=enricher
+            playlist.tracks,
+            threshold=threshold,
+            db=db,
+            enricher=enricher,
+            library_hits=library_hits,
+            library_missing=library_missing,
         )
 
         if not matched:
@@ -1010,6 +1077,8 @@ class PlexClient:
         db: Optional[Any] = None,
         skip_rating_keys: Optional[set] = None,
         enricher: Optional[Any] = None,
+        library_hits: Optional[dict[int, "LibraryHit"]] = None,
+        library_missing: Optional[set[int]] = None,
     ) -> List[SyncResult]:
         """Synchronize a playlist across multiple Plex user profiles.
 
@@ -1034,7 +1103,12 @@ class PlexClient:
         )
 
         matched, missing = self.match_playlist_tracks(
-            playlist.tracks, threshold=threshold, db=db, enricher=enricher
+            playlist.tracks,
+            threshold=threshold,
+            db=db,
+            enricher=enricher,
+            library_hits=library_hits,
+            library_missing=library_missing,
         )
 
         if not matched:
@@ -1069,7 +1143,25 @@ class PlexClient:
         results: List[SyncResult] = []
         for username in target_usernames:
             try:
-                user_server = self.get_user_server(username, admin_username=admin_username)
+                try:
+                    user_server = self.get_user_server(username, admin_username=admin_username)
+                except NotFound:
+                    logger.info("Skipping Plex target '%s' for playlist '%s': no Plex account", username, playlist.name)
+                    reason = f"No Plex account for {username}"
+                    results.append(
+                        SyncResult(
+                            playlist_name=playlist.name,
+                            total_tracks=len(playlist.tracks),
+                            matched_tracks=len(matched),
+                            missing_tracks=len(missing),
+                            success=False,
+                            error=reason,
+                            missing=list(missing),
+                            skipped=True,
+                            skip_reason=reason,
+                        )
+                    )
+                    continue
                 if db is not None:
                     self.refresh_playlist_registry(user_server, username, db)
 

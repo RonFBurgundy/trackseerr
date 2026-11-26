@@ -26,6 +26,7 @@ from trackseerr.media_servers.base import (
     as_media_server,
 )
 from trackseerr.media_servers.jellyfin import JELLYFIN_CAPABILITIES, JellyfinMediaServer
+from trackseerr.media_servers.navidrome import NavidromeAdmin
 from trackseerr.media_servers.plex import PLEX_CAPABILITIES, PlexMediaServer, plex_extras
 from trackseerr.media_servers.subsonic import SUBSONIC_CAPABILITIES, SubsonicMediaServer
 from trackseerr.media_servers.user_import import import_server_users
@@ -75,6 +76,7 @@ __all__ = [
     "MediaServerNotFound",
     "MediaServerUnavailable",
     "MediaServerUnsupported",
+    "NavidromeAdmin",
     "PlaylistSyncOptions",
     "PlexMediaServer",
     "SUBSONIC_CAPABILITIES",

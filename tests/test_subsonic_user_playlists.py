@@ -255,3 +255,294 @@ def test_per_user_missing_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     finally:
         adapter.close()
         db.close()
+
+
+def test_saved_login_wins_over_name_match_with_server_account(tmp_path: Path) -> None:
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    state = default_state(SONGS, password="pw")
+    state.users["rontube"] = FakeUser("rontube", admin=True, password="pw")
+    state.users["wdj"] = FakeUser("wdj", admin=False, password="wdj-pw")
+    fake = FakeSubsonic(state)
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "rontube", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="rontube",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "rontube", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-ron", "rontube", "ron@x")
+        db.set_server_account("u-ron", rec.id, "wdj", seal("wdj-pw", data_dir=cfg.data_dir))
+        playlist = Playlist(
+            id="pl-ron",
+            name="Ron Mix",
+            tracks=[Track("Song A", "Artist 1", "Album X")],
+        )
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        results = sync_subsonic_for_users(db, cfg, rec, adapter, playlist, ["rontube"], options)
+        assert len(results) == 1
+        assert results[0].success is True
+        assert [(p.owner, p.name, p.entries) for p in fake.state.playlists.values()] == [
+            ("wdj", "Ron Mix", ["s1"])
+        ]
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_navidrome_owner_transfer_creates_and_updates_mapped_copies(tmp_path: Path) -> None:
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    fake.add_user("nd-alice", "alice", admin=False)
+    fake.add_user("nd-bob", "bob", admin=False)
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-alice", "alice", "alice@x")
+        db.upsert_user("u-bob", "bob", "bob@x")
+        db.link_server_user("u-alice", rec.id, "nd-alice", "alice", source="imported")
+        db.link_server_user("u-bob", rec.id, "nd-bob", "bob", source="imported")
+
+        pl = Playlist(
+            id="pl-shared",
+            name="Road Trip",
+            tracks=[Track("Song A", "Artist 1", "Album X")],
+        )
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        results = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice", "bob"], options)
+        assert [r.success for r in results] == [True, True]
+        owners = sorted((p.owner, p.name, tuple(p.entries)) for p in fake.state.playlists.values())
+        assert owners == [("alice", "Road Trip", ("s1",)), ("bob", "Road Trip", ("s1",))]
+
+        alice_pl_id = db.get_server_playlist_id("pl-shared", rec.id, "u-alice")
+        bob_pl_id = db.get_server_playlist_id("pl-shared", rec.id, "u-bob")
+        assert alice_pl_id and bob_pl_id and alice_pl_id != bob_pl_id
+
+        # Second sync updates the mapped playlists in place without creating duplicates
+        pl_updated = Playlist(
+            id="pl-shared",
+            name="Road Trip",
+            tracks=[Track("Song A", "Artist 1", "Album X"), Track("Song B", "Artist 1", "Album X")],
+        )
+        results2 = sync_subsonic_for_users(db, cfg, rec, adapter, pl_updated, ["alice", "bob"], options)
+        assert [r.success for r in results2] == [True, True]
+        assert len(fake.state.playlists) == 2
+        assert fake.state.playlists[alice_pl_id].entries == ["s1", "s2"]
+        assert fake.state.playlists[bob_pl_id].entries == ["s1", "s2"]
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_navidrome_owner_transfer_ignored_logs_once_and_saved_login_still_works(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    from trackseerr.media_servers import user_logins
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    user_logins._WARNED_TRANSFER_SERVERS.clear()
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw", ignore_owner_change=True)
+    fake.add_user("nd-alice", "alice", admin=False, password="alice-pw")
+    fake.add_user("nd-bob", "bob", admin=False, password="bob-pw")
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-alice", "alice", "alice@x")
+        db.upsert_user("u-bob", "bob", "bob@x")
+        db.link_server_user("u-alice", rec.id, "nd-alice", "alice", source="imported")
+        db.link_server_user("u-bob", rec.id, "nd-bob", "bob", source="imported")
+        # Alice has a saved login (wins directly); Bob only has a link and transfer is ignored
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+
+        pl = Playlist(
+            id="pl-ign",
+            name="Ignored Mix",
+            tracks=[Track("Song A", "Artist 1", "Album X")],
+        )
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        with caplog.at_level(logging.WARNING, logger="trackseerr.media_servers.user_logins"):
+            res1 = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice", "bob"], options)
+            res2 = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["bob"], options)
+        assert [r.success for r in res1] == [True, False]
+        assert res1[1].skipped is False
+        assert res2[0].success is False
+        # Orphaned admin playlist copy was cleaned up and mapping removed
+        assert db.get_server_playlist_id("pl-ign", rec.id, "u-bob") is None
+        assert [(p.owner, p.name) for p in fake.state.playlists.values()] == [("alice", "Ignored Mix")]
+        warn_msgs = [r.getMessage() for r in caplog.records if "ignored playlist owner transfer" in r.getMessage()]
+        assert len(warn_msgs) == 1
+    finally:
+        user_logins._WARNED_TRANSFER_SERVERS.clear()
+        adapter.close()
+        db.close()
+
+
+def test_no_account_targets_record_skipped_server_state(tmp_path: Path) -> None:
+    from trackseerr.api.routes.playlists import _push_stored_to_first_server
+    from trackseerr.api.routes.sync import _push_to_extra_server
+
+    db, cfg, rec, adapter, fake, playlist, options = _setup(tmp_path)
+    try:
+        db.upsert_playlist(playlist.id, playlist.name, service="manual")
+        db.upsert_user("u-ken", "kenhanson853", "ken@x")
+
+        # Only target without an account -> skipped, not failed
+        results = sync_subsonic_for_users(db, cfg, rec, adapter, playlist, ["kenhanson853"], options)
+        assert len(results) == 1
+        assert results[0].success is False
+        assert results[0].skipped is True
+
+        _push_to_extra_server(db, cfg, rec, adapter, playlist, ["kenhanson853"])
+        state = db.list_playlist_server_state(playlist.id)[0]
+        assert state["status"] == "skipped"
+        assert state["error"] == "No Navidrome login saved for kenhanson853"
+
+        matched_count, missing_count = _push_stored_to_first_server(db, cfg, rec, adapter, playlist, ["kenhanson853"])
+        assert (matched_count, missing_count) == (0, 0)
+        assert db.get_playlist(playlist.id)["sync_status"] == "skipped"
+        first_state = db.list_playlist_server_state(playlist.id)[0]
+        assert first_state["status"] == "skipped"
+        assert first_state["error"] == "No Navidrome login saved for kenhanson853"
+
+        # One valid account + one skipped target -> overall server status is success
+        db.set_server_account("u-alice", rec.id, "alice", seal("alice-pw", data_dir=cfg.data_dir))
+        _push_to_extra_server(db, cfg, rec, adapter, playlist, ["kenhanson853", "alice"])
+        state2 = db.list_playlist_server_state(playlist.id)[0]
+        assert state2["status"] == "success"
+        assert state2["matched"] == 2
+        assert state2["missing"] == 0
+        assert fake.state.playlists
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_navidrome_manual_link_with_username_reresolves_user_id_once(tmp_path: Path) -> None:
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    fake.add_user("nd-alice", "alice", admin=False)
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-alice", "alice", "alice@x")
+        db.upsert_user("u-ghost", "ghost", "ghost@x")
+        # Simulate a legacy manual link where server_user_id was stored as the username.
+        db.link_server_user("u-alice", rec.id, "alice", "alice", source="manual")
+        db.link_server_user("u-ghost", rec.id, "ghost", "ghost", source="manual")
+
+        pl = Playlist(
+            id="pl-reresolve",
+            name="Reresolve Mix",
+            tracks=[Track("Song A", "Artist 1", "Album X")],
+        )
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        results = sync_subsonic_for_users(db, cfg, rec, adapter, pl, ["alice", "ghost"], options)
+        assert [r.success for r in results] == [True, False]
+        assert results[1].skipped is False
+        # Alice's link was healed to her Navidrome id and ownership transferred.
+        healed = db.get_server_user_link("u-alice", rec.id)
+        assert healed is not None and healed["server_user_id"] == "nd-alice"
+        assert [(p.owner, p.name) for p in fake.state.playlists.values()] == [("alice", "Reresolve Mix")]
+        # Ghost was never passed to PUT /api/playlist/...
+        assert not [c for c in fake.native_calls if c[0] == "PUT" and "ghost" in str(fake.put_bodies)]
+    finally:
+        adapter.close()
+        db.close()
+
+
+def test_navidrome_admin_with_imported_link_updates_in_place_never_duplicates(tmp_path: Path) -> None:
+    from tests.test_navidrome_admin import FakeNavidrome
+
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    fake = FakeNavidrome(SONGS, password="pw")
+    srv_row = db.insert_media_server_row(
+        {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw"}
+    )
+    rec = ServerRecord(
+        id=srv_row["id"],
+        kind="subsonic",
+        name="Navidrome",
+        source="settings",
+        url="http://nav:4533",
+        username="admin",
+        password="pw",
+    )
+    adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _s: None)
+    try:
+        db.upsert_user("u-admin", "admin", "admin@x")
+        db.link_server_user("u-admin", rec.id, "nd-admin", "Admin", source="imported")
+
+        pl1 = Playlist(id="pl-own", name="Admin Mix", tracks=[Track("Song A", "Artist 1", "Album X")])
+        pl2 = Playlist(
+            id="pl-own",
+            name="Admin Mix",
+            tracks=[Track("Song A", "Artist 1", "Album X"), Track("Song B", "Artist 1", "Album X")],
+        )
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        res1 = sync_subsonic_for_users(db, cfg, rec, adapter, pl1, ["admin"], options)
+        res2 = sync_subsonic_for_users(db, cfg, rec, adapter, pl2, ["admin"], options)
+        assert [r.success for r in res1] == [True]
+        assert [r.success for r in res2] == [True]
+        # Updated in place via own-account path; never duplicated and never used owner transfer.
+        assert [(p.owner, p.name, tuple(p.entries)) for p in fake.state.playlists.values()] == [
+            ("admin", "Admin Mix", ("s1", "s2"))
+        ]
+        assert not [c for c in fake.native_calls if c[0] == "PUT" and c[1].startswith("/api/playlist/")]
+    finally:
+        adapter.close()
+        db.close()

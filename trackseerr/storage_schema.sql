@@ -464,6 +464,15 @@ CREATE TABLE IF NOT EXISTS server_match_overrides (
                 created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 UNIQUE (server_id, source_title, source_artist)
             );
+CREATE TABLE IF NOT EXISTS library_match_pins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_title TEXT NOT NULL,
+                source_artist TEXT NOT NULL,
+                track_id TEXT NOT NULL REFERENCES library_tracks(id) ON DELETE CASCADE,
+                created_by TEXT REFERENCES users(id),
+                created_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
+                UNIQUE (source_title, source_artist)
+            );
 CREATE TABLE track_aliases (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 source_title TEXT NOT NULL,
@@ -658,6 +667,22 @@ CREATE TABLE user_server_accounts (
                 secret_sealed TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP),
                 PRIMARY KEY (user_id, server_id)
+            );
+CREATE TABLE server_user_links (
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                server_user_id TEXT NOT NULL,
+                server_username TEXT NOT NULL,
+                source TEXT NOT NULL CHECK (source IN ('imported', 'manual')),
+                PRIMARY KEY (user_id, server_id)
+            );
+CREATE INDEX idx_server_user_links_server ON server_user_links(server_id, server_user_id);
+CREATE TABLE server_playlist_ids (
+                playlist_id TEXT NOT NULL,
+                server_id TEXT NOT NULL REFERENCES media_servers(id) ON DELETE CASCADE,
+                user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                server_playlist_id TEXT NOT NULL,
+                PRIMARY KEY (playlist_id, server_id, user_id)
             );
 CREATE TABLE server_playlist_sources (
                 playlist_id TEXT PRIMARY KEY REFERENCES playlists(id) ON DELETE CASCADE,

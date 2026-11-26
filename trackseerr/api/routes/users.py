@@ -180,7 +180,7 @@ def refresh_users(
                 logger.error("Failed to discover users from %s: %s", rec.name, describe_error(e))
                 last_error = e
                 continue
-            imported, skipped = import_server_users(db, adapter.kind, discovered_users)
+            imported, skipped = import_server_users(db, adapter.kind, discovered_users, server_id=rec.id)
             imported_total += imported
             skipped_total += skipped
             succeeded += 1

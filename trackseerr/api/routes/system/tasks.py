@@ -209,6 +209,14 @@ def _task_progress(task_id: str, running: bool) -> Optional[TaskProgress]:
             total=total or None,
             message=redact_text(msg) if msg else None,
         )
+    if task_id == "playlist_sync":
+        from trackseerr.api.routes.sync import sync_state
+
+        prog = sync_state.progress
+        if prog is not None:
+            current, total, pl_name, server_name = prog
+            msg = f"Syncing '{pl_name}' to {server_name}" if server_name else f"Matching '{pl_name}'"
+            return TaskProgress(current=current, total=total, message=msg)
     snap = task_manager.manual_run_progress(task_id)
     if snap:
         current, total, stage = snap

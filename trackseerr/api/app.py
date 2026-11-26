@@ -281,6 +281,7 @@ def _build_api_router(app: FastAPI) -> APIRouter:
     )
     api_router.include_router(indexers.router, prefix="/settings/indexers", tags=["indexers"])
     api_router.include_router(media_servers.router, prefix="/settings/media-servers", tags=["media_servers"])
+    api_router.include_router(media_servers.links_router, prefix="/media-servers", tags=["media_servers"])
     api_router.include_router(server_playlists.router, prefix="/media-servers", tags=["server_playlists"])
     api_router.include_router(
         quality_profiles.router, prefix="/settings/quality-profiles", tags=["quality_profiles"]
@@ -332,13 +333,14 @@ def _build_api_router(app: FastAPI) -> APIRouter:
 
 
 def _spa_index(dist_dir: Path, headers: Optional[dict[str, str]] = None) -> Response:
+    resolved_headers = {"Cache-Control": "no-cache"} if headers is None else headers
     dist_index = dist_dir / "index.html"
     if dist_index.is_file():
-        return FileResponse(str(dist_index), media_type="text/html", headers=headers)
+        return FileResponse(str(dist_index), media_type="text/html", headers=resolved_headers)
     return HTMLResponse(
         content="<!doctype html><title>TrackSeerr</title><p>The TrackSeerr web UI is not built. Run <code>npm run build</code> in <code>frontend/</code>.</p>",
         status_code=200,
-        headers=headers,
+        headers=resolved_headers,
     )
 
 

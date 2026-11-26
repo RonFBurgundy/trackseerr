@@ -138,8 +138,8 @@ def test_list_jellyfin_playlists_for_named_user(env) -> None:
     resp = env.tc.get(f"/api/media-servers/{env.jf_id}/playlists?user=kid", headers=env.admin)
     assert resp.status_code == 200
     assert resp.json() == [
-        {"id": "jf-kid-priv", "title": "Kid Mix", "owner": "", "track_count": 2, "adopted_playlist_id": None},
-        {"id": "jf-shared", "title": "Shared Vibes", "owner": "", "track_count": 1, "adopted_playlist_id": None},
+        {"id": "jf-kid-priv", "title": "Kid Mix", "owner": "kid", "track_count": 2, "adopted_playlist_id": None},
+        {"id": "jf-shared", "title": "Shared Vibes", "owner": "kid", "track_count": 1, "adopted_playlist_id": None},
     ]
 
     missing_user = env.tc.get(f"/api/media-servers/{env.jf_id}/playlists?user=nobody", headers=env.admin)
@@ -165,9 +165,9 @@ def test_get_playlist_items(env) -> None:
     assert missing_item.status_code == 404
 
 
-def test_adopt_creates_playlist_source_row_and_excludes_server(env) -> None:
+def test_adopt_creates_playlist_source_row_without_excluding_server(env) -> None:
     expected_id = f"subsonic_{env.sub_id[:8]}_sub-2"
-    # Pre-seed an existing exclude to verify adopt preserves existing excludes
+    # Pre-seed an existing exclude to verify adopt preserves existing excludes without adding the source server
     env.db.upsert_playlist(expected_id, name="Old", service="subsonic")
     env.db.set_playlist_server_excludes(expected_id, [env.jf_id])
 
@@ -185,9 +185,9 @@ def test_adopt_creates_playlist_source_row_and_excludes_server(env) -> None:
         "playlist_id": expected_id,
         "server_id": env.sub_id,
         "server_playlist_id": "sub-2",
-        "server_user": "",
+        "server_user": "kid",
     }
-    assert env.db.get_playlist_server_excludes(expected_id) == {env.jf_id, env.sub_id}
+    assert env.db.get_playlist_server_excludes(expected_id) == {env.jf_id}
 
     listed = env.tc.get(f"/api/media-servers/{env.sub_id}/playlists", headers=env.admin).json()
     kid_row = next(r for r in listed if r["id"] == "sub-2")
@@ -207,7 +207,7 @@ def test_adopting_twice_keeps_one_playlist(env) -> None:
     assert len(playlists) == 1
     assert len(json.loads(playlists[0]["tracks_json"])) == 3
     assert env.db.get_server_playlist_source(expected_id)["server_user"] == "kid"
-    assert env.jf_id in env.db.get_playlist_server_excludes(expected_id)
+    assert env.jf_id not in env.db.get_playlist_server_excludes(expected_id)
 
 
 def test_non_admin_returns_403(env) -> None:

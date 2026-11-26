@@ -66,3 +66,33 @@ class MediaServerDeletedResponse(ApiModel):
 class MediaServerLoginResponse(ApiModel):
     status: str
     server_id: Optional[str] = None
+
+
+class ServerLinkedUser(ApiModel):
+    user_id: str
+    server_username: str
+    synthetic: bool = False
+
+
+class MediaServerLinksGroup(ApiModel):
+    server_id: str
+    server_name: str
+    kind: Literal["plex", "subsonic", "jellyfin"]
+    users: list[ServerLinkedUser]
+
+
+class ServerUserLinkPayload(BaseModel):
+    server_username: str
+
+
+class ServerUserLinkResponse(ApiModel):
+    user_id: str
+    server_id: str
+    server_username: str
+    source: str
+
+
+class ServerUserLinkDeletedResponse(ApiModel):
+    status: str
+    server_id: str
+    user_id: str

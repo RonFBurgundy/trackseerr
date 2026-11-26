@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any, Iterator, Optional, Sequence
 
 from trackseerr.models import Playlist, SyncResult, Track
+from trackseerr.playlist_identity import LibraryHit
 
 
 class MediaServerError(Exception):
@@ -131,10 +132,17 @@ class PlaylistSyncOptions:
     threshold: float = 0.9
     db: Optional[Any] = None
     skip_item_ids: Optional[set[str]] = None
+    library_hits: dict[int, LibraryHit] = field(default_factory=dict)
+    library_missing: set[int] = field(default_factory=set)
 
     @classmethod
     def from_config(
-        cls, config: Any, db: Optional[Any] = None, skip_item_ids: Optional[set[str]] = None
+        cls,
+        config: Any,
+        db: Optional[Any] = None,
+        skip_item_ids: Optional[set[str]] = None,
+        library_hits: Optional[dict[int, LibraryHit]] = None,
+        library_missing: Optional[set[int]] = None,
     ) -> "PlaylistSyncOptions":
         return cls(
             append=config.append_instead_of_sync,
@@ -145,6 +153,8 @@ class PlaylistSyncOptions:
             threshold=config.search_similarity_threshold,
             db=db,
             skip_item_ids=skip_item_ids,
+            library_hits=library_hits if library_hits is not None else {},
+            library_missing=library_missing if library_missing is not None else set(),
         )
 
 

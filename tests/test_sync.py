@@ -256,10 +256,9 @@ def test_primary_result_drives_missing_tracks(monkeypatch: pytest.MonkeyPatch) -
 
         by_server = {s["server_id"]: s for s in db.list_playlist_server_state("imp_pl1")}
         assert (by_server[ids["Plex"]]["matched"], by_server[ids["Plex"]]["missing"]) == (1, 1)
-        # Navidrome push is per-user and no login is saved for the target, so the push itself
-        # reports every track missing (recorded from the push, not from a second match pass).
-        assert by_server[ids["Navidrome"]]["status"] == "failed"
-        assert (by_server[ids["Navidrome"]]["matched"], by_server[ids["Navidrome"]]["missing"]) == (0, 2)
+        # Navidrome push is per-user and no account is saved/linked for the target, so it is skipped.
+        assert by_server[ids["Navidrome"]]["status"] == "skipped"
+        assert (by_server[ids["Navidrome"]]["matched"], by_server[ids["Navidrome"]]["missing"]) == (0, 0)
     finally:
         db.close()
 
@@ -692,13 +691,17 @@ def test_missing_comes_from_push_not_second_match(monkeypatch: pytest.MonkeyPatc
             }
         ]
         monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: enricher)
+        monkeypatch.setattr(
+            "trackseerr.api.routes.sync.resolve_playlist_library_hits",
+            lambda _db, _tracks: ({}, set()),
+        )
 
         match_calls: list[Any] = []
         orig_match = sub_adapter.match_playlist_tracks
 
-        def tracked_match(tracks, threshold=0.9, db=None, enricher=None, budget=None):
+        def tracked_match(tracks, threshold=0.9, db=None, enricher=None, budget=None, **kwargs):
             match_calls.append(enricher)
-            return orig_match(tracks, threshold=threshold, db=db, enricher=enricher, budget=budget)
+            return orig_match(tracks, threshold=threshold, db=db, enricher=enricher, budget=budget, **kwargs)
 
         monkeypatch.setattr(sub_adapter, "match_playlist_tracks", tracked_match)
 
@@ -805,5 +808,826 @@ def test_second_plex_adopted_playlist_refreshes(monkeypatch: pytest.MonkeyPatch)
     finally:
         registry._reset_for_tests()
         db.close()
+
+
+def test_sync_now_records_task_run(tmp_path, monkeypatch):
+    """POST /api/sync wraps execute_sync in record_task_run('playlist_sync', TRIGGER_MANUAL)."""
+    from fastapi.testclient import TestClient
+    from trackseerr.api.app import create_app
+    from trackseerr.api.dependencies import get_config, get_db, require_admin
+
+    db = Database(str(tmp_path / "sync_run.db"))
+    cfg = Config(plex_url="http://plex:32400", plex_token="tok")
+    app = create_app(db=db, config=cfg)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[get_config] = lambda: cfg
+    app.dependency_overrides[require_admin] = lambda: {"username": "admin", "role": "admin"}
+
+    try:
+        with TestClient(app) as client:
+            resp = client.post("/api/sync")
+            assert resp.status_code == 200
+            assert resp.json()["status"] == "started"
+
+        runs = db.list_task_runs("playlist_sync", since="1970-01-01T00:00:00Z", limit=5)
+        assert len(runs) >= 1
+        assert runs[0]["task_id"] == "playlist_sync"
+        assert runs[0]["trigger"] == "manual"
+        assert runs[0]["status"] in ("running", "success")
+    finally:
+        db.close()
+
+
+def test_progress_reports_playlist_and_server(tmp_path, monkeypatch):
+    """SyncState.progress reports (index, total, playlist_name, server_name) during sync and clears on exit."""
+    db = Database(str(tmp_path / "sync_prog.db"))
+    cfg = Config(plex_url="http://plex:32400", plex_token="tok")
+    registry._reset_for_tests()
+    try:
+        adapter = _FakePlaylistAdapter(matched=[Track(title="S1", artist="A1", album="Al1")], missing=[])
+        rec = db.insert_media_server_row(
+            {"kind": "plex", "name": "Home Plex", "url": "http://plex:32400", "sort_order": 0}
+        )
+        registry.reload(cfg, db)
+        monkeypatch.setattr("trackseerr.media_servers.registry.build_adapter", lambda r: adapter if r.id == rec["id"] else None)
+
+        pl_id = "sp_1"
+        db.upsert_user("u1", "alice", "alice@example.com")
+        db.upsert_playlist(pl_id, "Road Trip", service="spotify")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "S1", "artist": "A1", "album": "Al1"}]))
+        db.set_playlist_targets(pl_id, ["u1"])
+
+        state = SyncState()
+        seen: list[Any] = []
+        orig_push = state._push_playlist
+
+        def _spy_push(*args, **kwargs):
+            seen.append(state.progress)
+            return orig_push(*args, **kwargs)
+
+        monkeypatch.setattr(state, "_push_playlist", _spy_push)
+        out = state.execute_sync(db, cfg, None, None, None, force=True)
+        assert out["status"] == "success"
+        assert seen == [(1, 1, "Road Trip", "Home Plex")]
+        assert state.progress is None
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_push_resolves_native_library_once_and_skips_unowned_searches(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sync resolves native library hits once per playlist and passes hits/missing to every server."""
+    from tests.jellyfin_fake import API_KEY as JELLYFIN_KEY
+    from tests.jellyfin_fake import FakeAudio, FakeJellyfin, JellyfinState
+    from tests.jellyfin_fake import FakeUser as JfUser
+    from tests.subsonic_fake import FakeSong, FakeSubsonic, SubsonicState
+    from tests.subsonic_fake import FakeUser as SubUser
+    from trackseerr.media_servers.jellyfin import JellyfinMediaServer
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    jf_adapter: Optional[JellyfinMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "admin", "admin@example.com")
+        db.upsert_library_artist({"id": "art-1", "name": "Artist 1"})
+        db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Album 1"})
+        db.upsert_library_track(
+            {
+                "id": "trk-1",
+                "album_id": "alb-1",
+                "artist_id": "art-1",
+                "title": "Owned Song",
+                "track_number": 1,
+                "disc_number": 1,
+                "duration_seconds": 180.0,
+            }
+        )
+        db.upsert_library_file(
+            {
+                "id": "file-1",
+                "track_id": "trk-1",
+                "file_path": "/music/Artist 1/Album 1/01 Owned Song.flac",
+                "relative_path": "01 Owned Song.flac",
+                "codec": "flac",
+                "quality_name": "FLAC",
+                "size_bytes": 123456,
+            }
+        )
+
+        sub_fake = FakeSubsonic(
+            SubsonicState(
+                songs=[
+                    FakeSong(
+                        id="s1",
+                        title="Owned Song",
+                        artist="Artist 1",
+                        album="Album 1",
+                        path="/srv/Artist 1/Album 1/01 Owned Song.flac",
+                    )
+                ],
+                users={"admin": SubUser("admin", admin=True, password="pw")},
+            )
+        )
+        jf_fake = FakeJellyfin(
+            JellyfinState(
+                songs=[
+                    FakeAudio(
+                        id="j1",
+                        title="Owned Song",
+                        artist="Artist 1",
+                        album="Album 1",
+                        path="/srv/Artist 1/Album 1/01 Owned Song.flac",
+                    )
+                ],
+                users=[JfUser("u-admin", "admin", admin=True)],
+            )
+        )
+        sub_adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=sub_fake.transport(), sleep=lambda _: None)
+        jf_adapter = JellyfinMediaServer("http://jf:8096", JELLYFIN_KEY, "admin", transport=jf_fake.transport(), sleep=lambda _: None)
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+        monkeypatch.setattr("trackseerr.media_servers.jellyfin.get_shared_enricher", lambda _db: None)
+
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "subsonic", "name": "Nav", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True}, sub_adapter),
+                ({"kind": "jellyfin", "name": "JF", "url": "http://jf:8096", "api_key": JELLYFIN_KEY, "sort_order": 1}, jf_adapter),
+            ],
+        )
+
+        db.upsert_playlist("pl_1", "Mixed", service="spotify")
+        db.set_playlist_tracks_json(
+            "pl_1",
+            json.dumps(
+                [
+                    {"title": "Owned Song", "artist": "Artist 1", "album": "Album 1"},
+                    {"title": "Unowned Song", "artist": "Ghost Artist", "album": "Nowhere"},
+                ]
+            ),
+        )
+        db.set_playlist_targets("pl_1", ["u1"])
+
+        import trackseerr.api.routes.sync as sync_mod
+
+        resolve_calls = 0
+        orig_resolve = sync_mod.resolve_playlist_library_hits
+
+        def _spy_resolve(d, tracks):
+            nonlocal resolve_calls
+            resolve_calls += 1
+            return orig_resolve(d, tracks)
+
+        monkeypatch.setattr(sync_mod, "resolve_playlist_library_hits", _spy_resolve)
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert resolve_calls == 1
+        assert out["stats"]["total_matched"] == 1
+        assert out["stats"]["total_missing"] == 1
+
+        sub_queries = [dict(p).get("query") for ep, p in sub_fake.state.calls if ep == "search3"]
+        assert not any("Unowned" in str(q) or "Ghost" in str(q) for q in sub_queries)
+
+        jf_queries = [dict(p).get("SearchTerm") for _, path, p in jf_fake.state.calls if path == "/Items" and dict(p).get("SearchTerm")]
+        assert not any("Unowned" in str(q) or "Ghost" in str(q) for q in jf_queries)
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        if jf_adapter is not None:
+            jf_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_adopted_navidrome_playlist_shares_to_other_user_but_skips_owner(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_ken", "ken_ts", "ken@x")
+        db.upsert_user("u_alice", "alice_ts", "alice@x")
+        db.upsert_library_artist({"id": "art-1", "name": "Artist 1"})
+        db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Album 1"})
+        db.upsert_library_track(
+            {
+                "id": "trk-1",
+                "album_id": "alb-1",
+                "artist_id": "art-1",
+                "title": "Song 1",
+                "track_number": 1,
+                "disc_number": 1,
+                "duration_seconds": 180.0,
+            }
+        )
+        db.upsert_library_file(
+            {
+                "id": "file-1",
+                "track_id": "trk-1",
+                "file_path": "/music/Artist 1/Album 1/01 Song 1.flac",
+                "relative_path": "01 Song 1.flac",
+                "codec": "flac",
+                "quality_name": "FLAC",
+                "size_bytes": 123456,
+            }
+        )
+
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={
+                    "sub-ken": FakePlaylist("sub-ken", "Ken Mix", "ken", ["s1"]),
+                },
+                users={"admin": FakeUser("admin", admin=True, password="pw")},
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        transferred_to: list[tuple[str, str]] = []
+        fake_nav_admin = SimpleNamespace(
+            set_owner=lambda pid, uid: transferred_to.append((pid, uid)) or True,
+        )
+        monkeypatch.setattr(sub_adapter, "navidrome_admin", lambda: fake_nav_admin)
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        db.link_server_user("u_ken", nav_id, "nd-ken", "ken", source="imported")
+        db.link_server_user("u_alice", nav_id, "nd-alice", "alice", source="imported")
+
+        pl_id = f"subsonic_{nav_id[:8]}_sub-ken"
+        db.upsert_playlist(pl_id, "Ken Mix", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-ken", "ken")
+        db.set_playlist_targets(pl_id, ["u_ken", "u_alice"])
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        # Alice got a copy transferred to nd-alice; Ken (nd-ken) was never pushed to and sub-ken was untouched.
+        assert [uid for _, uid in transferred_to] == ["nd-alice"]
+        assert fake.state.playlists["sub-ken"].entries == ["s1"]
+        assert fake.state.playlists["sub-ken"].owner == "ken"
+
+        # Now target ONLY the source owner Ken: sync must skip the push and record the reason.
+        db.set_playlist_targets(pl_id, ["u_ken"])
+        transferred_to.clear()
+        fake.state.calls.clear()
+        out_only_owner = SyncState().execute_sync(db, cfg, None, None, None, force=True)
+        assert out_only_owner["status"] == "success"
+        assert transferred_to == []
+        assert [ep for ep, _ in fake.state.calls if ep in ("createPlaylist", "updatePlaylist")] == []
+        by_server = {s["server_id"]: s for s in db.list_playlist_server_state(pl_id)}
+        assert by_server[nav_id]["status"] == "skipped"
+        assert by_server[nav_id]["error"] == "This is the original playlist"
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_adopted_playlist_empty_server_user_backfills_owner_on_push(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_admin", "admin", "a@x")
+        db.upsert_user("u_ken", "ken", "k@x")
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={"sub-2": FakePlaylist("sub-2", "Ken Mix", "ken", ["s1"])},
+                users={
+                    "admin": FakeUser("admin", admin=True, password="pw"),
+                    "ken": FakeUser("ken", admin=False, password="pw2"),
+                },
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        pl_id = f"subsonic_{nav_id[:8]}_sub-2"
+        db.upsert_playlist(pl_id, "Ken Mix", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-2", "")
+        db.set_playlist_targets(pl_id, ["u_admin", "u_ken"])
+
+        SyncState().execute_sync(db, cfg, None, None, None)
+
+        source = db.get_server_playlist_source(pl_id)
+        assert source is not None
+        assert source["server_user"] == "ken"
+
+        created_names = [
+            dict(params).get("name")
+            for ep, params in fake.state.calls
+            if ep == "createPlaylist"
+        ]
+        assert created_names == ["Ken Mix"]
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_adopted_playlist_empty_server_user_mediaserver_error_keeps_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers import MediaServerError
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_admin", "admin", "a@x")
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={"sub-1": FakePlaylist("sub-1", "Server Own", "admin", ["s1"])},
+                users={"admin": FakeUser("admin", admin=True, password="pw")},
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+        monkeypatch.setattr(sub_adapter, "list_source_playlists", lambda user=None: (_ for _ in ()).throw(MediaServerError("boom")))
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        pl_id = f"subsonic_{nav_id[:8]}_sub-1"
+        db.upsert_playlist(pl_id, "Server Own", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-1", "")
+        db.set_playlist_targets(pl_id, ["u_admin"])
+
+        SyncState().execute_sync(db, cfg, None, None, None)
+        assert [ep for ep, _ in fake.state.calls if ep in ("createPlaylist", "updatePlaylist")] == []
+        by_server = {s["server_id"]: s for s in db.list_playlist_server_state(pl_id)}
+        assert by_server[nav_id]["status"] == "skipped"
+        assert by_server[nav_id]["error"] == "This is the original playlist"
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_adopted_playlist_empty_server_user_skips_server_account(monkeypatch: pytest.MonkeyPatch) -> None:
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+    from tests.subsonic_fake import FakePlaylist, FakeSong, FakeSubsonic, FakeUser, SubsonicState
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u_admin", "admin", "a@x")
+        fake = FakeSubsonic(
+            SubsonicState(
+                songs=[FakeSong("s1", "Song 1", "Artist 1", "Album 1")],
+                playlists={"sub-1": FakePlaylist("sub-1", "Server Own", "admin", ["s1"])},
+                users={"admin": FakeUser("admin", admin=True, password="pw")},
+            )
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=fake.transport(), sleep=lambda _: None
+        )
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                (
+                    {"kind": "subsonic", "name": "Navidrome", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True},
+                    sub_adapter,
+                ),
+            ],
+        )
+        nav_id = ids["Navidrome"]
+        pl_id = f"subsonic_{nav_id[:8]}_sub-1"
+        db.upsert_playlist(pl_id, "Server Own", service="subsonic")
+        db.set_playlist_tracks_json(pl_id, json.dumps([{"title": "Song 1", "artist": "Artist 1", "album": "Album 1"}]))
+        db.set_server_playlist_source(pl_id, nav_id, "sub-1", "")
+        db.set_playlist_targets(pl_id, ["u_admin"])
+
+        SyncState().execute_sync(db, cfg, None, None, None)
+        assert [ep for ep, _ in fake.state.calls if ep in ("createPlaylist", "updatePlaylist")] == []
+        by_server = {s["server_id"]: s for s in db.list_playlist_server_state(pl_id)}
+        assert by_server[nav_id]["status"] == "skipped"
+        assert by_server[nav_id]["error"] == "This is the original playlist"
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+
+
+
+
+def test_migration_v114_removes_only_adoption_server_excludes(tmp_path) -> None:
+    from pathlib import Path
+
+    db = Database(str(Path(tmp_path) / "v114.db"))
+    try:
+        srv_src = db.insert_media_server_row({"kind": "subsonic", "name": "Nav", "url": "http://nav:4533"})
+        srv_other = db.insert_media_server_row({"kind": "jellyfin", "name": "JF", "url": "http://jf:8096"})
+        db.upsert_playlist("pl_adopted", "Adopted", service="subsonic")
+        db.upsert_playlist("pl_manual", "Manual", service="spotify")
+
+        db.set_server_playlist_source("pl_adopted", srv_src["id"], "sub-1", "ken")
+        db.set_playlist_server_excludes("pl_adopted", [srv_src["id"], srv_other["id"]])
+        db.set_playlist_server_excludes("pl_manual", [srv_src["id"]])
+
+        cur = db.conn.cursor()
+        db._migration_v114(cur)
+        db.conn.commit()
+
+        assert db.get_playlist_server_excludes("pl_adopted") == {srv_other["id"]}
+        assert db.get_playlist_server_excludes("pl_manual") == {srv_src["id"]}
+    finally:
+        db.close()
+
+
+
+
+
+def test_library_pin_clears_missing_and_matches_across_servers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A single library pin resolves a mismatched track on both Subsonic and Jellyfin during sync."""
+    from tests.jellyfin_fake import API_KEY as JELLYFIN_KEY
+    from tests.jellyfin_fake import FakeAudio, FakeJellyfin, JellyfinState
+    from tests.jellyfin_fake import FakeUser as JfUser
+    from tests.subsonic_fake import FakeSong, FakeSubsonic, SubsonicState
+    from tests.subsonic_fake import FakeUser as SubUser
+    from trackseerr.media_servers.jellyfin import JellyfinMediaServer
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    jf_adapter: Optional[JellyfinMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "admin", "admin@example.com")
+        db.upsert_library_artist({"id": "art-1", "name": "Real Artist"})
+        db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Real Album"})
+        db.upsert_library_track(
+            {
+                "id": "trk-1",
+                "album_id": "alb-1",
+                "artist_id": "art-1",
+                "title": "Real Title",
+                "track_number": 1,
+                "disc_number": 1,
+                "duration_seconds": 180.0,
+            }
+        )
+        db.upsert_library_file(
+            {
+                "id": "file-1",
+                "track_id": "trk-1",
+                "file_path": "/music/Real Artist/Real Album/01 Real Title.flac",
+                "relative_path": "01 Real Title.flac",
+                "codec": "flac",
+                "quality_name": "FLAC",
+                "size_bytes": 123456,
+            }
+        )
+        db.set_library_pin("Spotify Weird Title", "Weird Credit", "trk-1")
+
+        sub_fake = FakeSubsonic(
+            SubsonicState(
+                songs=[
+                    FakeSong(
+                        id="s1",
+                        title="Real Title",
+                        artist="Real Artist",
+                        album="Real Album",
+                        path="/srv/Real Artist/Real Album/01 Real Title.flac",
+                    )
+                ],
+                users={"admin": SubUser("admin", admin=True, password="pw")},
+            )
+        )
+        jf_fake = FakeJellyfin(
+            JellyfinState(
+                songs=[
+                    FakeAudio(
+                        id="j1",
+                        title="Real Title",
+                        artist="Real Artist",
+                        album="Real Album",
+                        path="/srv/Real Artist/Real Album/01 Real Title.flac",
+                    )
+                ],
+                users=[JfUser("u-admin", "admin", admin=True)],
+            )
+        )
+        sub_adapter = SubsonicMediaServer("http://nav:4533", "admin", "pw", transport=sub_fake.transport(), sleep=lambda _: None)
+        jf_adapter = JellyfinMediaServer("http://jf:8096", JELLYFIN_KEY, "admin", transport=jf_fake.transport(), sleep=lambda _: None)
+        monkeypatch.setattr("trackseerr.media_servers.subsonic.get_shared_enricher", lambda _db: None)
+        monkeypatch.setattr("trackseerr.media_servers.jellyfin.get_shared_enricher", lambda _db: None)
+
+        ids = _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [
+                ({"kind": "subsonic", "name": "Nav", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True}, sub_adapter),
+                ({"kind": "jellyfin", "name": "JF", "url": "http://jf:8096", "api_key": JELLYFIN_KEY, "sort_order": 1}, jf_adapter),
+            ],
+        )
+
+        db.upsert_playlist("pl_pin", "Pin Mix", service="spotify")
+        db.set_playlist_tracks_json(
+            "pl_pin",
+            json.dumps([{"title": "Spotify Weird Title", "artist": "Weird Credit", "album": "Mix"}]),
+        )
+        db.set_playlist_targets("pl_pin", ["u1"])
+
+        out = SyncState().execute_sync(db, cfg, None, None, None)
+        assert out["status"] == "success"
+        assert out["stats"]["total_matched"] == 1
+        assert out["stats"]["total_missing"] == 0
+        assert db.get_missing_tracks("pl_pin") == []
+        states = {s["server_id"]: s for s in db.list_playlist_server_state("pl_pin")}
+        assert (states[ids["Nav"]]["matched"], states[ids["Nav"]]["missing"]) == (1, 0)
+        assert (states[ids["JF"]]["matched"], states[ids["JF"]]["missing"]) == (1, 0)
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        if jf_adapter is not None:
+            jf_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_execute_sync_is_tracked_and_progress_is_not(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Calling _set_progress creates no job; execute_sync creates and finishes exactly one playlist_sync job."""
+    from trackseerr.job_tracker import job_tracker
+
+    job_tracker.clear()
+    db = Database(":memory:")
+    cfg = Config(plex_url="", plex_token="")
+    registry._reset_for_tests()
+    try:
+        db.upsert_playlist("pl_1", "Mix 1", service="spotify")
+        db.set_playlist_tracks_json("pl_1", json.dumps([{"title": "T1", "artist": "A1", "album": "Al1"}]))
+        db.upsert_playlist("pl_2", "Mix 2", service="spotify")
+        db.set_playlist_tracks_json("pl_2", json.dumps([{"title": "T2", "artist": "A2", "album": "Al2"}]))
+
+        before_ids = {j["id"] for j in job_tracker.snapshot()["recent"]}
+        state = SyncState()
+
+        # _set_progress alone must not create any job
+        state._set_progress(1, 2, "Mix 1", None)
+        assert not any(j["task_id"] == "playlist_sync" for j in job_tracker.snapshot()["running"])
+        assert [j for j in job_tracker.snapshot()["recent"] if j["id"] not in before_ids] == []
+        state.progress = None
+
+        # execute_sync creates exactly one playlist_sync job for the entire cycle
+        seen_running: list[int] = []
+        orig_set_progress = state._set_progress
+
+        def _spy_progress(current: int, total: int, name: str, server: Optional[str]) -> None:
+            orig_set_progress(current, total, name, server)
+            running = [j for j in job_tracker.snapshot()["running"] if j["task_id"] == "playlist_sync"]
+            seen_running.append(len(running))
+
+        monkeypatch.setattr(state, "_set_progress", _spy_progress)
+        out = state.execute_sync(db, cfg, None, None, None, force=True)
+        assert out["status"] == "success"
+        assert seen_running == [1, 1]
+        assert not any(j["task_id"] == "playlist_sync" for j in job_tracker.snapshot()["running"])
+        created = [j for j in job_tracker.snapshot()["recent"] if j["id"] not in before_ids]
+        assert len(created) == 1
+        assert created[0]["task_id"] == "playlist_sync"
+    finally:
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_server_push_outcome_falls_back_to_error_for_skipped_result() -> None:
+    """_server_push_outcome preserves error as skip_reason when skip_reason is unset on a skipped SyncResult."""
+    from trackseerr.api.routes.sync import _server_push_outcome
+    from trackseerr.models import SyncResult
+
+    res = SyncResult(
+        playlist_name="Mix",
+        total_tracks=2,
+        matched_tracks=0,
+        missing_tracks=2,
+        success=False,
+        error="No Plex account for alice",
+        skipped=True,
+    )
+    status, matched, missing, reason = _server_push_outcome([res], 2)
+    assert (status, matched, missing, reason) == ("skipped", 0, [], "No Plex account for alice")
+
+
+def test_primary_skipped_preserves_missing_tracks_and_applies_monitoring(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When the primary server skips every target, missing tracks are still recorded from native match."""
+    from tests.subsonic_fake import FakeSubsonic, SubsonicState
+    from tests.subsonic_fake import FakeUser as SubUser
+    from trackseerr.media_servers.subsonic import SubsonicMediaServer
+
+    db = Database(":memory:")
+    sub_adapter: Optional[SubsonicMediaServer] = None
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "kenhanson", "ken@example.com")
+        # Library has Song 1 but NOT Song 2
+        db.upsert_library_artist({"id": "art-1", "name": "Artist 1"})
+        db.upsert_library_album({"id": "alb-1", "artist_id": "art-1", "title": "Album 1"})
+        db.upsert_library_track(
+            {"id": "trk-1", "album_id": "alb-1", "artist_id": "art-1", "title": "Song 1"}
+        )
+        db.upsert_library_file(
+            {
+                "id": "file-1",
+                "track_id": "trk-1",
+                "file_path": "/lib/Artist 1/Album 1/01 Song 1.flac",
+                "relative_path": "01 Song 1.flac",
+                "codec": "flac",
+                "quality_name": "FLAC",
+                "size_bytes": 123456,
+            }
+        )
+
+        sub_fake = FakeSubsonic(
+            SubsonicState(songs=[], users={"admin": SubUser("admin", admin=True, password="pw")})
+        )
+        sub_adapter = SubsonicMediaServer(
+            "http://nav:4533", "admin", "pw", transport=sub_fake.transport(), sleep=lambda _: None
+        )
+        _install_servers(
+            monkeypatch,
+            db,
+            cfg,
+            [({"kind": "subsonic", "name": "Nav", "url": "http://nav:4533", "username": "admin", "password": "pw", "is_primary": True}, sub_adapter)],
+        )
+
+        db.upsert_playlist("pl_skip", "Skipped Primary Mix", service="spotify")
+        db.set_playlist_tracks_json(
+            "pl_skip",
+            json.dumps([
+                {"title": "Song 1", "artist": "Artist 1", "album": "Album 1"},
+                {"title": "Missing Song", "artist": "Missing Artist", "album": "Missing Album"},
+            ]),
+        )
+        db.set_playlist_targets("pl_skip", ["u1"])
+
+        applied: list[str] = []
+        monkeypatch.setattr(
+            "trackseerr.api.routes.sync.apply_playlist_missing_safely",
+            lambda _db, _cfg, pl_id: applied.append(pl_id),
+        )
+
+        out = SyncState().execute_sync(db, cfg, None, None, None, force=True)
+        assert out["status"] == "success"
+        pl_row = db.get_playlist("pl_skip")
+        assert pl_row["sync_status"] == "skipped"
+        missing = db.get_missing_tracks("pl_skip")
+        assert [t["title"] for t in missing] == ["Missing Song"]
+        assert applied == ["pl_skip"]
+    finally:
+        if sub_adapter is not None:
+            sub_adapter.close()
+        registry._reset_for_tests()
+        db.close()
+
+
+def test_dispatch_server_push_maps_linked_usernames_for_plex_and_jellyfin() -> None:
+    """_dispatch_server_push maps Trackseerr usernames to linked server_username for Plex and Jellyfin."""
+    from trackseerr.api.routes.sync import _dispatch_server_push
+    from trackseerr.media_servers.registry import ServerRecord
+
+    db = Database(":memory:")
+    try:
+        cfg = Config(plex_url="", plex_token="")
+        db.upsert_user("u1", "alice", "alice@example.com")
+        db.upsert_user("u2", "bob", "bob@example.com")
+
+        plex_row = db.insert_media_server_row(
+            {"kind": "plex", "name": "Home Plex", "url": "http://plex:32400", "sort_order": 0}
+        )
+        jf_row = db.insert_media_server_row(
+            {"kind": "jellyfin", "name": "Home JF", "url": "http://jf:8096", "sort_order": 1}
+        )
+        db.link_server_user("u1", plex_row["id"], "plex-id-1", "PlexAlice", source="manual")
+        db.link_server_user("u1", jf_row["id"], "jf-id-1", "JellyAlice", source="manual")
+
+        pl = Playlist(id="pl_link", name="Linked Mix", tracks=[Track("Song 1", "Artist 1", "Album 1")])
+        options = PlaylistSyncOptions.from_config(cfg, db=db)
+
+        for row, expected_alice in [(plex_row, "PlexAlice"), (jf_row, "JellyAlice")]:
+            rec = ServerRecord(
+                id=row["id"],
+                kind=row["kind"],
+                name=row["name"],
+                source="settings",
+                url=row["url"],
+            )
+            adapter = _FakePlaylistAdapter(matched=list(pl.tracks), missing=[])
+            _dispatch_server_push(db, cfg, rec, adapter, pl, ["alice", "bob"], options)
+            assert len(adapter.calls) == 1
+            assert adapter.calls[0][1] == [expected_alice, "bob"]
+    finally:
+        db.close()
+
+
+
+
+def test_plex_sync_skips_missing_account_and_fails_on_connection_error() -> None:
+    """Missing Plex account yields skipped=True; real connection errors stay failed."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+    import requests
+    from plexapi.exceptions import NotFound
+    from trackseerr.clients.plex import PlexClient
+    from trackseerr.models import Playlist, Track
+
+    admin_server = MagicMock()
+    admin_server.myPlexAccount.return_value = SimpleNamespace(username="admin", id=1, email="", thumb="", users=lambda: [])
+    plex_item = SimpleNamespace(
+        ratingKey=1,
+        title="Song A",
+        grandparentTitle="Artist A",
+        parentTitle="Album 1",
+        originalTitle="",
+        type="track",
+        duration=200000,
+        media=[],
+    )
+    admin_server.search.return_value = [plex_item]
+    with patch("trackseerr.clients.plex.PlexServer"):
+        client = PlexClient("http://localhost:32400", "token")
+    client.server = admin_server
+
+    pl = Playlist(id="pl-plex-skip", name="Plex Skip", tracks=[Track("Song A", "Artist A", "Album 1")])
+
+    def _fake_get_user_server(username: str, admin_username: str | None = None):
+        if username == "noaccount":
+            raise NotFound(f"Unable to find user {username}")
+        raise requests.exceptions.ConnectionError("plex.tv unreachable")
+
+    client.get_user_server = _fake_get_user_server  # type: ignore[method-assign]
+    results = client.sync_playlist_to_users(pl, ["noaccount", "connerr"])
+    assert len(results) == 2
+    assert results[0].skipped is True
+    assert results[0].success is False
+    assert "No Plex account for noaccount" in results[0].error
+    assert results[1].skipped is False
+    assert results[1].success is False
+    assert "ConnectionError" in results[1].error
+
 
 

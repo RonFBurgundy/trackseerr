@@ -3628,6 +3628,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/media-servers/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List per-server user links
+         * @description Return linked users per enabled playlist server, including unlinked Plex users on the sign-in Plex.
+         */
+        get: operations["list_media_server_links_api_media_servers_links_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/media-servers/links/{server_id}/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Manually link a user to a media server
+         * @description Create or update a manual ``server_user_links`` entry for ``(server_id, user_id)``.
+         */
+        put: operations["put_media_server_link_api_media_servers_links__server_id___user_id__put"];
+        post?: never;
+        /**
+         * Unlink a user from a media server
+         * @description Remove a ``server_user_links`` entry for ``(server_id, user_id)``.
+         */
+        delete: operations["delete_media_server_link_api_media_servers_links__server_id___user_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/media-servers/{server_id}/playlists": {
         parameters: {
             query?: never;
@@ -3826,7 +3870,7 @@ export interface paths {
         put?: never;
         /**
          * Create Match Override
-         * @description Records a manual match override (Match Memory) and removes corresponding missing tracks.
+         * @description Records a library match pin or manual server override (Match Memory) and clears missing rows.
          */
         post: operations["create_match_override_api_missing_match_post"];
         delete?: never;
@@ -3847,7 +3891,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Match Override
-         * @description Deletes a Match Memory override.
+         * @description Deletes a Match Memory override or library match pin.
          */
         delete: operations["delete_match_override_api_missing_match__override_id__delete"];
         options?: never;
@@ -3864,7 +3908,7 @@ export interface paths {
         };
         /**
          * List Match Overrides
-         * @description Lists all stored Match Memory overrides.
+         * @description Lists all stored Match Memory overrides and cross-server library pins.
          */
         get: operations["list_match_overrides_api_missing_matches_get"];
         put?: never;
@@ -3904,7 +3948,7 @@ export interface paths {
         };
         /**
          * Search Plex Tracks
-         * @description Searches a media server library for tracks to enable manual matching and correction.
+         * @description Searches Trackseerr's library or a media server library for tracks to enable manual matching.
          */
         get: operations["search_plex_tracks_api_missing_search_get"];
         put?: never;
@@ -11336,6 +11380,8 @@ export interface components {
             created_by?: string | null;
             /** Id */
             id: number;
+            /** Kind */
+            kind?: ("library" | "server" | "legacy") | null;
             /** Plex Artist */
             plex_artist: string;
             /** Plex Rating Key */
@@ -11350,6 +11396,8 @@ export interface components {
             source_artist: string;
             /** Source Title */
             source_title: string;
+            /** Track Id */
+            track_id?: string | null;
         };
         /** MatchOverrideRequest */
         MatchOverrideRequest: {
@@ -11357,17 +11405,17 @@ export interface components {
              * Plex Artist
              * @description Artist of matched track in media server
              */
-            plex_artist: string;
+            plex_artist?: string | null;
             /**
              * Plex Rating Key
              * @description Library item id or Plex ratingKey of matched track
              */
-            plex_rating_key: string;
+            plex_rating_key?: string | null;
             /**
              * Plex Title
              * @description Title of matched track in media server
              */
-            plex_title: string;
+            plex_title?: string | null;
             /**
              * Server Id
              * @description Optional media server ID for server-scoped overrides
@@ -11383,6 +11431,11 @@ export interface components {
              * @description Title of the track from source playlist
              */
             source_title: string;
+            /**
+             * Track Id
+             * @description Library track ID for a cross-server library pin
+             */
+            track_id?: string | null;
         };
         /**
          * MatchReleaseGroup
@@ -11961,6 +12014,20 @@ export interface components {
             /** Verify Ssl */
             verify_ssl: boolean;
         };
+        /** MediaServerLinksGroup */
+        MediaServerLinksGroup: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "plex" | "subsonic" | "jellyfin";
+            /** Server Id */
+            server_id: string;
+            /** Server Name */
+            server_name: string;
+            /** Users */
+            users: components["schemas"]["ServerLinkedUser"][];
+        };
         /** MediaServerLoginPayload */
         MediaServerLoginPayload: {
             /** Server Id */
@@ -12071,7 +12138,7 @@ export interface components {
         };
         /**
          * MediaTrackHit
-         * @description A media-server track search hit. Plex adds ``thumb``; Jellyfin and Subsonic add ``id``.
+         * @description A track search hit from Trackseerr's library or a media server.
          */
         MediaTrackHit: {
             /** Album */
@@ -12083,11 +12150,13 @@ export interface components {
             /** Id */
             id?: string | null;
             /** Rating Key */
-            rating_key: string;
+            rating_key?: string | null;
             /** Thumb */
             thumb?: string | null;
             /** Title */
             title: string;
+            /** Track Id */
+            track_id?: string | null;
         };
         /** MetadataProfile */
         MetadataProfile: {
@@ -14781,6 +14850,18 @@ export interface components {
             /** Plex History Poll Minutes */
             plex_history_poll_minutes?: number | null;
         };
+        /** ServerLinkedUser */
+        ServerLinkedUser: {
+            /** Server Username */
+            server_username: string;
+            /**
+             * Synthetic
+             * @default false
+             */
+            synthetic: boolean;
+            /** User Id */
+            user_id: string;
+        };
         /** ServerPlaylistSummary */
         ServerPlaylistSummary: {
             /** Adopted Playlist Id */
@@ -14814,6 +14895,31 @@ export interface components {
             artist: string;
             /** Title */
             title: string;
+        };
+        /** ServerUserLinkDeletedResponse */
+        ServerUserLinkDeletedResponse: {
+            /** Server Id */
+            server_id: string;
+            /** Status */
+            status: string;
+            /** User Id */
+            user_id: string;
+        };
+        /** ServerUserLinkPayload */
+        ServerUserLinkPayload: {
+            /** Server Username */
+            server_username: string;
+        };
+        /** ServerUserLinkResponse */
+        ServerUserLinkResponse: {
+            /** Server Id */
+            server_id: string;
+            /** Server Username */
+            server_username: string;
+            /** Source */
+            source: string;
+            /** User Id */
+            user_id: string;
         };
         /** ServicePingResult */
         ServicePingResult: {
@@ -22461,6 +22567,94 @@ export interface operations {
             };
         };
     };
+    list_media_server_links_api_media_servers_links_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MediaServerLinksGroup"][];
+                };
+            };
+        };
+    };
+    put_media_server_link_api_media_servers_links__server_id___user_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServerUserLinkPayload"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerUserLinkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_media_server_link_api_media_servers_links__server_id___user_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                server_id: string;
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerUserLinkDeletedResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_server_playlists_api_media_servers__server_id__playlists_get: {
         parameters: {
             query?: {
@@ -22821,6 +23015,8 @@ export interface operations {
             query?: {
                 /** @description Optional media server ID for server-scoped overrides */
                 server_id?: string | null;
+                /** @description Override kind ('library' for library pins) */
+                kind?: ("library" | "server" | "legacy") | null;
             };
             header?: never;
             path: {
@@ -22909,6 +23105,8 @@ export interface operations {
                 /** @description Query string to search library tracks */
                 query: string;
                 limit?: number;
+                /** @description Search Trackseerr's library ('library') or a media server ('server') */
+                source?: "library" | "server";
                 /** @description Optional media server ID (defaults to primary server) */
                 server_id?: string | null;
             };

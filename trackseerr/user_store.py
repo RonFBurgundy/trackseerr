@@ -137,7 +137,7 @@ class UserStoreMixin:
             raise PermissionError("Invalid asserted user id")
         existing = self.get_user(uid)
         if existing is not None:
-            if existing.get("auth_type") == "jellyfin":
+            if existing.get("auth_type") in ("jellyfin", "subsonic"):
                 raise PermissionError("Imported media-server accounts cannot sign in")
             return existing
         name = str(username or "").strip() or uid
@@ -427,6 +427,7 @@ class UserStoreMixin:
                 self.conn.execute("UPDATE playlists SET creator_id = NULL WHERE creator_id = ?", (uid,))
                 self.conn.execute("UPDATE match_overrides SET created_by = NULL WHERE created_by = ?", (uid,))
                 self.conn.execute("UPDATE server_match_overrides SET created_by = NULL WHERE created_by = ?", (uid,))
+                self.conn.execute("UPDATE library_match_pins SET created_by = NULL WHERE created_by = ?", (uid,))
                 self.conn.execute("DELETE FROM plex_mix_snapshots WHERE created_by = ?", (uid,))
                 if not uid.startswith("local-"):
                     self.conn.execute("DELETE FROM plex_playlist_registry WHERE plex_user = ?", (username,))

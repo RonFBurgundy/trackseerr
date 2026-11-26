@@ -33,13 +33,15 @@ from trackseerr.media_servers.user_logins import sync_subsonic_for_users
 from trackseerr.clients.spotify import SpotifyClient
 from trackseerr.clients.youtube_music import get_shared_youtube_music_client
 from trackseerr.config import MEDIA_SERVER_SUBSONIC, Config
-from trackseerr.job_tracker import tracked
+from trackseerr.job_tracker import job_tracker, tracked
+from trackseerr.task_manager import TRIGGER_MANUAL, record_task_run
 from trackseerr.list_monitoring import apply_playlist_missing_safely
 from trackseerr.listening_playlists import fetch_listening_tracks
 from trackseerr.playlist_policy import is_listening_playlist, is_smart_collection
 from trackseerr.smart_collections import SmartCollectionError, refresh_tracks
 from trackseerr.models import Playlist, RequestStatus, SyncResult, Track
-from trackseerr.native_match import match_playlist_tracks_native
+from trackseerr.native_match import match_playlist_tracks_native, resolve_playlist_library_hits
+from trackseerr.playlist_identity import LibraryHit
 from trackseerr.storage import Database
 from trackseerr.track_aliases import apply_track_aliases, restore_missing
 from trackseerr.redaction import redact_text, safe_exc
@@ -135,14 +137,182 @@ def _playlist_servers(
     return [(None, fallback_server)] if fallback_server else []
 
 
-def _push_results_outcome(results: Sequence[SyncResult], total_tracks: int) -> tuple[bool, int, list[Track]]:
-    """Derive ``(success, matched_count, missing)`` from per-target push results."""
+def _server_push_outcome(results: Sequence[SyncResult], total_tracks: int) -> tuple[str, int, list[Track], str]:
+    """Derive ``(status, matched_count, missing, error_msg)`` from per-target push results.
+
+    ``status`` is ``"skipped"`` when every target lacked an account on the server, ``"success"`` when every target
+    with an account succeeded, and ``"failed"`` otherwise.
+    """
     if not results:
-        return False, 0, []
-    chosen = next((r for r in results if r.success), results[0])
+        return "failed", 0, [], ""
+    non_skipped = [r for r in results if not getattr(r, "skipped", False)]
+    if not non_skipped:
+        skip_reason = next((r.skip_reason or r.error for r in results if r.skip_reason or r.error), "")
+        return "skipped", 0, [], skip_reason
+    if all(r.success for r in non_skipped):
+        chosen = non_skipped[0]
+        missing = list(getattr(chosen, "missing", None) or [])
+        matched_count = max(0, total_tracks - len(missing))
+        return "success", matched_count, missing, ""
+    chosen = next((r for r in non_skipped if r.success), non_skipped[0])
     missing = list(getattr(chosen, "missing", None) or [])
     matched_count = max(0, total_tracks - len(missing))
-    return any(r.success for r in results), matched_count, missing
+    error_msg = next((r.error for r in non_skipped if not r.success and r.error), "")
+    return "failed", matched_count, missing, error_msg
+
+
+def _push_results_outcome(results: Sequence[SyncResult], total_tracks: int) -> tuple[bool, int, list[Track]]:
+    """Derive ``(success, matched_count, missing)`` from per-target push results."""
+    status, matched_count, missing, _ = _server_push_outcome(results, total_tracks)
+    return status == "success", matched_count, missing
+
+
+def _target_server_username(
+    db: Database,
+    rec: ServerRecord,
+    user: Optional[dict[str, Any]],
+    target_name: str,
+) -> str:
+    """Return the lowercase server-side username for ``target_name`` on ``rec``."""
+    if user is not None:
+        account = db.get_server_account(user["id"], rec.id)
+        if account is not None and account.get("username"):
+            return str(account["username"]).strip().lower()
+        link = db.get_server_user_link(user["id"], rec.id)
+        if link is not None and link.get("server_username"):
+            return str(link["server_username"]).strip().lower()
+    return target_name.strip().lower()
+
+
+def _resolve_empty_adopted_owner(
+    db: Database,
+    rec: ServerRecord,
+    adapter: Any,
+    playlist_id: str,
+    source: dict[str, Any],
+) -> str:
+    """Look up and persist the source playlist owner when ``server_user`` is empty."""
+    list_fn = getattr(adapter, "list_source_playlists", None)
+    source_pid = str(source.get("server_playlist_id") or "").strip()
+    if not callable(list_fn) or not source_pid:
+        return ""
+    try:
+        playlists = list_fn()
+    except MediaServerError:
+        return ""
+    match = next((p for p in playlists if str(p.get("id") or "") == source_pid), None)
+    owner = str(match.get("owner") or "").strip() if isinstance(match, dict) else ""
+    if not owner:
+        return ""
+    db.set_server_playlist_source(playlist_id, rec.id, source_pid, owner)
+    return owner.lower()
+
+
+def _filter_adopted_source_owner(
+    db: Database,
+    rec: Optional[ServerRecord],
+    adapter: Any,
+    playlist: Playlist,
+    target_usernames: list[str],
+) -> tuple[list[str], list[SyncResult]]:
+    """Drop the source playlist's owner when pushing an adopted playlist back to its source server."""
+    if rec is None:
+        return target_usernames, []
+    source = db.get_server_playlist_source(playlist.id)
+    if source is None or source.get("server_id") != rec.id:
+        return target_usernames, []
+
+    owner_key = str(source.get("server_user") or "").strip().lower()
+    if not owner_key:
+        owner_key = _resolve_empty_adopted_owner(db, rec, adapter, playlist.id, source)
+    if not owner_key:
+        owner_key = str(getattr(adapter, "_user", "") or rec.username or "").strip().lower()
+    if not owner_key:
+        return target_usernames, []
+
+    users_by_name = {
+        str(u.get("username") or "").strip().lower(): u
+        for u in db.list_users()
+        if u.get("username")
+    }
+    kept: list[str] = []
+    skipped_results: list[SyncResult] = []
+    total = len(playlist.tracks)
+    for name in target_usernames:
+        cleaned = str(name or "").strip()
+        user = users_by_name.get(cleaned.lower()) if cleaned else None
+        if _target_server_username(db, rec, user, cleaned) == owner_key:
+            logger.info(
+                "Skipping target '%s' on '%s' for adopted playlist '%s': This is the original playlist",
+                cleaned,
+                rec.name,
+                playlist.name,
+            )
+            skipped_results.append(
+                SyncResult(
+                    playlist_name=playlist.name,
+                    total_tracks=total,
+                    matched_tracks=0,
+                    missing_tracks=0,
+                    success=False,
+                    error="This is the original playlist",
+                    skipped=True,
+                    skip_reason="This is the original playlist",
+                )
+            )
+        else:
+            kept.append(name)
+    return kept, skipped_results
+
+
+def _map_linked_server_usernames(
+    db: Database,
+    rec: ServerRecord,
+    target_usernames: list[str],
+) -> list[str]:
+    """Map each Trackseerr target username to its linked ``server_username`` on ``rec``, if any."""
+    users_by_name = {
+        str(u.get("username") or "").strip().lower(): u
+        for u in db.list_users()
+        if u.get("username")
+    }
+    mapped: list[str] = []
+    for name in target_usernames:
+        cleaned = str(name or "").strip()
+        user = users_by_name.get(cleaned.lower()) if cleaned else None
+        link = db.get_server_user_link(user["id"], rec.id) if user is not None else None
+        linked_name = str(link.get("server_username") or "").strip() if link is not None else ""
+        mapped.append(linked_name or name)
+    return mapped
+
+
+def _dispatch_server_push(
+    db: Database,
+    config: Config,
+    rec: Optional[ServerRecord],
+    adapter: Any,
+    model_playlist: Playlist,
+    target_usernames: list[str],
+    options: PlaylistSyncOptions,
+) -> list[SyncResult]:
+    """Push ``model_playlist`` to ``adapter``, skipping the source owner on adopted playlists."""
+    filtered_targets, skipped_results = _filter_adopted_source_owner(
+        db, rec, adapter, model_playlist, target_usernames
+    )
+    if not filtered_targets:
+        return skipped_results
+    if rec is not None and rec.kind == MEDIA_SERVER_SUBSONIC:
+        pushed = sync_subsonic_for_users(
+            db, config, rec, adapter, model_playlist, filtered_targets, options
+        )
+    else:
+        targets = (
+            _map_linked_server_usernames(db, rec, filtered_targets)
+            if rec is not None
+            else filtered_targets
+        )
+        pushed = list(adapter.sync_playlist(model_playlist, targets, options))
+    return [*skipped_results, *pushed]
 
 
 def _push_to_extra_server(
@@ -153,26 +323,26 @@ def _push_to_extra_server(
     model_playlist: Playlist,
     target_usernames: list[str],
     skip_item_ids: Optional[set[str]] = None,
+    library_hits: Optional[dict[int, LibraryHit]] = None,
+    library_missing: Optional[set[int]] = None,
 ) -> None:
     """Push ``model_playlist`` to an additional playlist server and record only its per-server state."""
     try:
-        options = PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_item_ids)
-        if rec.kind == MEDIA_SERVER_SUBSONIC:
-            results = sync_subsonic_for_users(
-                db, config, rec, adapter, model_playlist, target_usernames, options
-            )
-        else:
-            results = adapter.sync_playlist(
-                model_playlist,
-                target_usernames,
-                options,
-            )
-        success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
-        error_msg = "" if success else next((r.error for r in results if not r.success and r.error), "")
+        options = PlaylistSyncOptions.from_config(
+            config,
+            db=db,
+            skip_item_ids=skip_item_ids,
+            library_hits=library_hits,
+            library_missing=library_missing,
+        )
+        results = _dispatch_server_push(
+            db, config, rec, adapter, model_playlist, target_usernames, options
+        )
+        server_status, matched_count, missing, error_msg = _server_push_outcome(results, len(model_playlist.tracks))
         db.record_playlist_server_state(
             model_playlist.id,
             rec.id,
-            "success" if success else "failed",
+            server_status,
             matched=matched_count,
             missing=len(missing),
             error=error_msg,
@@ -202,6 +372,7 @@ class SyncState:
 
     def __init__(self) -> None:
         self.is_syncing: bool = False
+        self.progress: Optional[tuple[int, int, str, Optional[str]]] = None
         self._no_target_logged: set[str] = set()
         self.last_run_at: Optional[str] = None
         self.last_run_stats: dict[str, Any] = {
@@ -405,22 +576,35 @@ class SyncState:
         fingerprint: str,
         server_name: str = "Plex",
         rec: Optional[ServerRecord] = None,
-    ) -> tuple[bool, int, int]:
+        library_hits: Optional[dict[int, LibraryHit]] = None,
+        library_missing: Optional[set[int]] = None,
+    ) -> tuple[str, int, int, str]:
         """Pushes a playlist to the primary media server for its target users and records the outcome."""
         pl_id = pl["id"]
         try:
-            options = PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys)
-            if rec is not None and rec.kind == MEDIA_SERVER_SUBSONIC:
-                results = sync_subsonic_for_users(
-                    db, config, rec, server, model_playlist, target_usernames, options
-                )
-            else:
-                results = server.sync_playlist(
-                    model_playlist,
-                    target_usernames,
-                    options,
-                )
-            success, matched_count, missing = _push_results_outcome(results, len(model_playlist.tracks))
+            options = PlaylistSyncOptions.from_config(
+                config,
+                db=db,
+                skip_item_ids=skip_rating_keys,
+                library_hits=library_hits,
+                library_missing=library_missing,
+            )
+            results = _dispatch_server_push(
+                db, config, rec, server, model_playlist, target_usernames, options
+            )
+            server_status, matched_count, missing, error_msg = _server_push_outcome(
+                results, len(model_playlist.tracks)
+            )
+            if server_status == "skipped":
+                if library_missing is not None:
+                    missing = [t for idx, t in enumerate(model_playlist.tracks) if idx in library_missing]
+                else:
+                    _, missing = match_playlist_tracks_native(db, model_playlist.tracks)
+                missing = restore_missing(missing, original_by_effective, ignored_ids)
+                db.record_sync_result(playlist_id=pl_id, status="skipped", missing_tracks=missing)
+                apply_playlist_missing_safely(db, config, pl_id)
+                return "skipped", 0, 0, error_msg
+            success = server_status == "success"
             missing = restore_missing(missing, original_by_effective, ignored_ids)
             db.record_sync_result(
                 playlist_id=pl_id,
@@ -433,12 +617,13 @@ class SyncState:
                 stats["success_count"] += 1
             stats["total_matched"] += matched_count
             stats["total_missing"] += len(missing)
-            return success, matched_count, len(missing)
+            return server_status, matched_count, len(missing), error_msg
         except Exception as e:
-            logger.error("Error syncing playlist '%s' to %s: %s", pl["name"], server_name, describe_error(e))
+            detail = describe_error(e)
+            logger.error("Error syncing playlist '%s' to %s: %s", pl["name"], server_name, detail)
             logger.debug("Playlist sync traceback", exc_info=True)
             db.record_sync_result(playlist_id=pl_id, status="failed")
-            return False, 0, 0
+            return "failed", 0, 0, detail
 
     def _push_to_servers(
         self,
@@ -455,10 +640,12 @@ class SyncState:
         fingerprint: str,
     ) -> None:
         """Push to the primary/first server (driving playlist status) and fan out to remaining servers."""
+        library_hits, library_missing = resolve_playlist_library_hits(db, model_playlist.tracks)
         first_rec, first_server = servers[0]
         first_skip = skip_rating_keys if (first_rec is None or first_rec.is_login) else None
         server_name = first_rec.name if first_rec is not None else "Plex"
-        success, matched_count, missing_count = self._push_playlist(
+        self._update_progress_server(server_name)
+        server_status, matched_count, missing_count, error_msg = self._push_playlist(
             db,
             config,
             first_server,
@@ -472,20 +659,32 @@ class SyncState:
             fingerprint,
             server_name=server_name,
             rec=first_rec,
+            library_hits=library_hits,
+            library_missing=library_missing,
         )
         if first_rec is not None:
             db.record_playlist_server_state(
                 pl["id"],
                 first_rec.id,
-                "success" if success else "failed",
+                server_status,
                 matched=matched_count,
                 missing=missing_count,
+                error=error_msg,
             )
         for rec, adapter in servers[1:]:
             if rec is not None:
+                self._update_progress_server(rec.name)
                 extra_skip = skip_rating_keys if rec.is_login else None
                 _push_to_extra_server(
-                    db, config, rec, adapter, model_playlist, target_usernames, skip_item_ids=extra_skip
+                    db,
+                    config,
+                    rec,
+                    adapter,
+                    model_playlist,
+                    target_usernames,
+                    skip_item_ids=extra_skip,
+                    library_hits=library_hits,
+                    library_missing=library_missing,
                 )
 
     @staticmethod
@@ -592,6 +791,20 @@ class SyncState:
             stats["total_missing"] - missing_before,
         )
 
+    def _set_progress(
+        self, current: int, total: int, playlist_name: str, server_name: Optional[str]
+    ) -> None:
+        self.progress = (current, total, playlist_name, server_name)
+        msg = f"Syncing '{playlist_name}' to {server_name}" if server_name else f"Matching '{playlist_name}'"
+        for job in job_tracker.snapshot()["running"]:
+            if job["task_id"] == "playlist_sync":
+                job_tracker.update_message(job["id"], msg)
+
+    def _update_progress_server(self, server_name: str) -> None:
+        if self.progress is not None:
+            current, total, playlist_name, _ = self.progress
+            self._set_progress(current, total, playlist_name, server_name)
+
     @tracked("playlist_sync", "Playlist Sync")
     def execute_sync(
         self,
@@ -633,7 +846,8 @@ class SyncState:
             stats["total_playlists"] = len(playlists)
             latest_library_change = db.latest_library_file_change()
 
-            for pl in playlists:
+            for idx, pl in enumerate(playlists, start=1):
+                self._set_progress(idx, len(playlists), pl["name"], None)
                 self._sync_one(
                     db, config, plex_client, server, spotify_client, deezer_client,
                     pl, stats, force, latest_library_change,
@@ -664,6 +878,7 @@ class SyncState:
             logger.debug("Sync cycle traceback", exc_info=True)
             return {"status": "error", "error": safe_exc(e)}
         finally:
+            self.progress = None
             self.is_syncing = False
 
 
@@ -688,15 +903,20 @@ def trigger_sync(
             "message": "Synchronization is already running in background",
         }
 
-    background_tasks.add_task(
-        sync_state.execute_sync,
-        db=db,
-        config=config,
-        plex_client=plex_client,
-        spotify_client=spotify_client,
-        deezer_client=deezer_client,
-        force=True,
-    )
+    def _run_sync() -> None:
+        with record_task_run(db, "playlist_sync", TRIGGER_MANUAL) as run:
+            run.apply_result(
+                sync_state.execute_sync(
+                    db=db,
+                    config=config,
+                    plex_client=plex_client,
+                    spotify_client=spotify_client,
+                    deezer_client=deezer_client,
+                    force=True,
+                )
+            )
+
+    background_tasks.add_task(_run_sync)
 
     return {
         "status": "started",

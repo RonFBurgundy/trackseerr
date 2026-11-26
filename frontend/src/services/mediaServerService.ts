@@ -2,6 +2,7 @@ import { apiRequest } from './apiClient';
 import type {
   MediaServerDeletedResponse,
   MediaServerItem,
+  MediaServerLinksGroup,
   MediaServerLoginResponse,
   MediaServerPayload,
   MediaServerStatus,
@@ -11,6 +12,8 @@ import type {
   PlexAccountDisconnectResponse,
   PlexAccountStatusResponse,
   PlexPinResponse,
+  ServerUserLinkDeletedResponse,
+  ServerUserLinkResponse,
 } from '@/types/mediaServer';
 
 const MEDIA_SERVER_TYPES: readonly MediaServerType[] = ['plex', 'subsonic', 'jellyfin', 'none'];
@@ -84,4 +87,32 @@ export async function setLoginMediaServer(id: string | null): Promise<MediaServe
     method: 'PUT',
     body: { server_id: id },
   });
+}
+
+export async function listMediaServerLinks(): Promise<MediaServerLinksGroup[]> {
+  return apiRequest<MediaServerLinksGroup[]>('/api/media-servers/links');
+}
+
+export async function linkMediaServerUser(
+  serverId: string,
+  userId: string,
+  serverUsername: string
+): Promise<ServerUserLinkResponse> {
+  return apiRequest<ServerUserLinkResponse>(
+    `/api/media-servers/links/${encodeURIComponent(serverId)}/${encodeURIComponent(userId)}`,
+    {
+      method: 'PUT',
+      body: { server_username: serverUsername },
+    }
+  );
+}
+
+export async function unlinkMediaServerUser(
+  serverId: string,
+  userId: string
+): Promise<ServerUserLinkDeletedResponse> {
+  return apiRequest<ServerUserLinkDeletedResponse>(
+    `/api/media-servers/links/${encodeURIComponent(serverId)}/${encodeURIComponent(userId)}`,
+    { method: 'DELETE' }
+  );
 }
