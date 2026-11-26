@@ -553,7 +553,7 @@ const MainApp: React.FC = () => {
                   requestedIds={requestedIds}
                   users={users}
                   currentUserId={auth.user?.id}
-                  canTargetUsers={mediaServer.capabilities.users}
+                  canTargetUsers={mediaServer.allCapabilities.users}
                   serverLabel={mediaServer.label}
                 />
               )}
@@ -579,8 +579,8 @@ const MainApp: React.FC = () => {
                   hasMediaServer={mediaServer.hasMediaServer}
                   serverType={mediaServer.type}
                   serverLabel={mediaServer.label}
-                  canTargetUsers={mediaServer.capabilities.users}
-                  mixesEnabled={mediaServer.capabilities.mixes}
+                  canTargetUsers={mediaServer.allCapabilities.users}
+                  mixesEnabled={mediaServer.hasMediaServer}
                   onRequestItem={handleRequestItem}
                 />
               )}
@@ -612,7 +612,8 @@ const MainApp: React.FC = () => {
                   accountHook={accountHook}
                   currentUserId={auth.user?.id}
                   mfaEnrollmentRequired={mfaEnrollmentRequired}
-                  hasMediaServer={mediaServer.isPlex}
+                  hasMediaServer={mediaServer.hasPlayHistory}
+                  hasPlex={mediaServer.hasPlex}
                   updateCheck={updateCheck}
                 />
               )}

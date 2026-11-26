@@ -23,6 +23,8 @@ class MediaServerStatus(ApiModel):
     type: str
     connected: bool
     capabilities: MediaServerCapabilities
+    kinds: list[str] = Field(default_factory=list)
+    all_capabilities: MediaServerCapabilities
 
 
 class SystemEvent(ApiModel):

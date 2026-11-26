@@ -282,6 +282,46 @@ def test_plex_offline_and_online(test_db, test_config):
     assert bool_stat.online is False
 
 
+def test_ping_plex_uses_login_record_url(test_db, tmp_path):
+    """_ping_plex reads URL from the sign-in Plex record and reports unconfigured without one."""
+    from trackseerr.media_servers import registry
+    from trackseerr.media_servers.registry import ServerRecord
+
+    cfg = Config(plex_url="", plex_token="", data_dir=str(tmp_path))
+    mock_plex = MagicMock()
+    mock_plex.test_connection.return_value = (True, "Connected")
+
+    with registry._records_lock:
+        prev_installed = registry._installed
+        prev_records = registry._records
+    try:
+        registry.install([])
+        unconf = _ping_plex(mock_plex, cfg, test_db)
+        assert unconf.configured is False
+        assert unconf.url is None
+        assert unconf.message == "Plex not configured"
+
+        plex_rec = ServerRecord(
+            id="plex-settings",
+            kind="plex",
+            name="Plex",
+            source="db",
+            url="http://settings-plex:32400",
+            api_key="tok",
+            is_login=True,
+            enabled=True,
+        )
+        registry.install([plex_rec])
+        conf = _ping_plex(mock_plex, cfg, test_db)
+        assert conf.configured is True
+        assert conf.url == "http://settings-plex:32400"
+        assert conf.online is True
+    finally:
+        with registry._records_lock:
+            registry._records = prev_records
+            registry._installed = prev_installed
+
+
 def test_client_and_indexer_pings(test_db):
     """Validates disabled clients/indexers return disabled message without network call,
 

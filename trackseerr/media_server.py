@@ -83,6 +83,16 @@ def _server_reachable(config: Config, connect: Callable[[], Optional[Any]]) -> b
     return hit[1] if hit is not None else False
 
 
+def _union_capabilities(kinds: list[str]) -> dict[str, bool]:
+    """Combine static capabilities across all enabled server kinds."""
+    union = capabilities_for(MEDIA_SERVER_NONE).to_dict()
+    for kind in kinds:
+        for flag, supported in capabilities_for(kind).to_dict().items():
+            if supported:
+                union[flag] = True
+    return union
+
+
 def media_server_status(config: Config, connect: Callable[[], Optional[Any]]) -> dict[str, Any]:
     """Public, non-sensitive description of the active media server and what the UI may offer.
 
@@ -92,10 +102,13 @@ def media_server_status(config: Config, connect: Callable[[], Optional[Any]]) ->
     server_type = rec.kind if rec else MEDIA_SERVER_NONE
     has_server = rec is not None
     connected = has_server and _server_reachable(config, connect)
+    kinds = sorted({r.kind for r in registry.records(config) if r.enabled})
     return {
         "type": server_type,
         "connected": connected,
         "capabilities": capabilities_for(server_type).to_dict(),
+        "kinds": kinds,
+        "all_capabilities": _union_capabilities(kinds),
     }
 
 
