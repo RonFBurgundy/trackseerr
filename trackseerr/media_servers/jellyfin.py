@@ -183,6 +183,7 @@ class JellyfinMediaServer(MediaServer):
         # user lets go of it, never while a sync still holds it (the callback holds the client, not the adapter).
         self._finalizer = weakref.finalize(self, self._http.close)
         self._sleep = sleep
+        self._search_cache: dict[tuple[str, tuple[str, ...], int, int], tuple[list[dict[str, Any]], Any]] = {}
 
     @property
     def capabilities(self) -> ServerCapabilities:
@@ -311,13 +312,20 @@ class JellyfinMediaServer(MediaServer):
         if artist_ids:
             base_params.append(("ArtistIds", ",".join(artist_ids)))
         start = 0
+        artist_key = tuple(artist_ids)
+        clean_query = query.strip()
         while start < limit:
             page = min(_SEARCH_PAGE, limit - start)
-            body = self._request("GET", "/Items", [*base_params, ("StartIndex", start), ("Limit", page)])
-            items = [i for i in (body or {}).get("Items") or [] if isinstance(i, dict) and i.get("Id")]
+            cache_key = (clean_query, artist_key, page, start)
+            if cache_key in self._search_cache:
+                items, total = self._search_cache[cache_key]
+            else:
+                body = self._request("GET", "/Items", [*base_params, ("StartIndex", start), ("Limit", page)])
+                items = [i for i in (body or {}).get("Items") or [] if isinstance(i, dict) and i.get("Id")]
+                total = (body or {}).get("TotalRecordCount")
+                self._search_cache[cache_key] = (items, total)
             for item in items:
                 yield _song_from_item(item)
-            total = (body or {}).get("TotalRecordCount")
             start += len(items)  # a server may cap Limit below what was asked: continue from what actually arrived
             if not items or (start >= total if isinstance(total, int) else len(items) < page):
                 return
@@ -479,19 +487,27 @@ class JellyfinMediaServer(MediaServer):
         db: Optional[Any],
         enricher: Optional[Any] = None,
         budget: Optional[MusicBrainzBudget] = None,
+        *,
+        library_hit: Optional[LibraryHit] = None,
+        skip_search: bool = False,
     ) -> Optional[_Song]:
         override = self._match_override(track, db)
         if override is not None:
             return override
+        if library_hit is not None:
+            hit_song = self._song_for_hit(library_hit)
+            if hit_song is not None:
+                return hit_song
         isrc_match = self._match_by_isrc(track, db)
         if isrc_match is not None:
             return isrc_match
-        fuzzy = self._search_fuzzy(track, threshold)
-        if fuzzy is not None:
-            return fuzzy
-        censored = self._match_censored(track, threshold)
-        if censored is not None:
-            return censored
+        if not skip_search:
+            fuzzy = self._search_fuzzy(track, threshold)
+            if fuzzy is not None:
+                return fuzzy
+            censored = self._match_censored(track, threshold)
+            if censored is not None:
+                return censored
         return self._match_by_musicbrainz(track, db, enricher, budget)
 
     def match_track(
@@ -501,8 +517,18 @@ class JellyfinMediaServer(MediaServer):
         db: Optional[Any] = None,
         enricher: Optional[Any] = None,
         budget: Optional[MusicBrainzBudget] = None,
+        library_hit: Optional[LibraryHit] = None,
+        skip_search: bool = False,
     ) -> Optional[ServerTrackRef]:
-        song = self._best(track, threshold, db, enricher=enricher, budget=budget)
+        song = self._best(
+            track,
+            threshold,
+            db,
+            enricher=enricher,
+            budget=budget,
+            library_hit=library_hit,
+            skip_search=skip_search,
+        )
         return None if song is None else song.ref()
 
     def match_playlist_tracks(
@@ -512,13 +538,25 @@ class JellyfinMediaServer(MediaServer):
         db: Optional[Any] = None,
         enricher: Optional[Any] = None,
         budget: Optional[MusicBrainzBudget] = None,
+        library_hits: Optional[dict[int, LibraryHit]] = None,
+        library_missing: Optional[set[int]] = None,
     ) -> tuple[list[ServerTrackRef], list[Track]]:
         if enricher is not None and budget is None:
             budget = MusicBrainzBudget()
         matched: list[ServerTrackRef] = []
         missing: list[Track] = []
-        for track in tracks:
-            ref = self.match_track(track, threshold, db, enricher=enricher, budget=budget)
+        for idx, track in enumerate(tracks):
+            hit = library_hits.get(idx) if library_hits else None
+            skip_search = bool(library_missing and idx in library_missing)
+            ref = self.match_track(
+                track,
+                threshold,
+                db,
+                enricher=enricher,
+                budget=budget,
+                library_hit=hit,
+                skip_search=skip_search,
+            )
             if ref is None:
                 missing.append(track)
             else:
@@ -849,6 +887,7 @@ class JellyfinMediaServer(MediaServer):
     def sync_playlist(
         self, playlist: Playlist, targets: Sequence[str], options: PlaylistSyncOptions
     ) -> list[SyncResult]:
+        self._search_cache.clear()
         names = list(targets) or [""]
         enricher = (
             get_shared_enricher(options.db)
@@ -856,8 +895,18 @@ class JellyfinMediaServer(MediaServer):
             else None
         )
         budget = MusicBrainzBudget() if enricher is not None else None
+        extra_kwargs: dict[str, Any] = {}
+        if options.library_hits:
+            extra_kwargs["library_hits"] = options.library_hits
+        if options.library_missing:
+            extra_kwargs["library_missing"] = options.library_missing
         matched, missing = self.match_playlist_tracks(
-            playlist.tracks, threshold=options.threshold, db=options.db, enricher=enricher, budget=budget
+            playlist.tracks,
+            threshold=options.threshold,
+            db=options.db,
+            enricher=enricher,
+            budget=budget,
+            **extra_kwargs,
         )
         total = len(playlist.tracks)
 

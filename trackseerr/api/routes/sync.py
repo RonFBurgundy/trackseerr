@@ -40,7 +40,8 @@ from trackseerr.listening_playlists import fetch_listening_tracks
 from trackseerr.playlist_policy import is_listening_playlist, is_smart_collection
 from trackseerr.smart_collections import SmartCollectionError, refresh_tracks
 from trackseerr.models import Playlist, RequestStatus, SyncResult, Track
-from trackseerr.native_match import match_playlist_tracks_native
+from trackseerr.native_match import match_playlist_tracks_native, resolve_playlist_library_hits
+from trackseerr.playlist_identity import LibraryHit
 from trackseerr.storage import Database
 from trackseerr.track_aliases import apply_track_aliases, restore_missing
 from trackseerr.redaction import redact_text, safe_exc
@@ -173,10 +174,18 @@ def _push_to_extra_server(
     model_playlist: Playlist,
     target_usernames: list[str],
     skip_item_ids: Optional[set[str]] = None,
+    library_hits: Optional[dict[int, LibraryHit]] = None,
+    library_missing: Optional[set[int]] = None,
 ) -> None:
     """Push ``model_playlist`` to an additional playlist server and record only its per-server state."""
     try:
-        options = PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_item_ids)
+        options = PlaylistSyncOptions.from_config(
+            config,
+            db=db,
+            skip_item_ids=skip_item_ids,
+            library_hits=library_hits,
+            library_missing=library_missing,
+        )
         if rec.kind == MEDIA_SERVER_SUBSONIC:
             results = sync_subsonic_for_users(
                 db, config, rec, adapter, model_playlist, target_usernames, options
@@ -425,11 +434,19 @@ class SyncState:
         fingerprint: str,
         server_name: str = "Plex",
         rec: Optional[ServerRecord] = None,
+        library_hits: Optional[dict[int, LibraryHit]] = None,
+        library_missing: Optional[set[int]] = None,
     ) -> tuple[str, int, int, str]:
         """Pushes a playlist to the primary media server for its target users and records the outcome."""
         pl_id = pl["id"]
         try:
-            options = PlaylistSyncOptions.from_config(config, db=db, skip_item_ids=skip_rating_keys)
+            options = PlaylistSyncOptions.from_config(
+                config,
+                db=db,
+                skip_item_ids=skip_rating_keys,
+                library_hits=library_hits,
+                library_missing=library_missing,
+            )
             if rec is not None and rec.kind == MEDIA_SERVER_SUBSONIC:
                 results = sync_subsonic_for_users(
                     db, config, rec, server, model_playlist, target_usernames, options
@@ -482,6 +499,7 @@ class SyncState:
         fingerprint: str,
     ) -> None:
         """Push to the primary/first server (driving playlist status) and fan out to remaining servers."""
+        library_hits, library_missing = resolve_playlist_library_hits(db, model_playlist.tracks)
         first_rec, first_server = servers[0]
         first_skip = skip_rating_keys if (first_rec is None or first_rec.is_login) else None
         server_name = first_rec.name if first_rec is not None else "Plex"
@@ -500,6 +518,8 @@ class SyncState:
             fingerprint,
             server_name=server_name,
             rec=first_rec,
+            library_hits=library_hits,
+            library_missing=library_missing,
         )
         if first_rec is not None:
             db.record_playlist_server_state(
@@ -515,7 +535,15 @@ class SyncState:
                 self._update_progress_server(rec.name)
                 extra_skip = skip_rating_keys if rec.is_login else None
                 _push_to_extra_server(
-                    db, config, rec, adapter, model_playlist, target_usernames, skip_item_ids=extra_skip
+                    db,
+                    config,
+                    rec,
+                    adapter,
+                    model_playlist,
+                    target_usernames,
+                    skip_item_ids=extra_skip,
+                    library_hits=library_hits,
+                    library_missing=library_missing,
                 )
 
     @staticmethod

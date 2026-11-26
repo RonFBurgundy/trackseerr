@@ -284,6 +284,7 @@ class SubsonicMediaServer(MediaServer):
         self._is_navidrome: Optional[bool] = None
         self._navidrome_admin: Optional[NavidromeAdmin] = None
         self._navidrome_admin_checked = False
+        self._search_cache: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
 
     def with_login(self, username: str, password: str) -> "SubsonicMediaServer":
         """Return a new adapter against the same server authenticated with ``username`` and ``password``."""
@@ -492,18 +493,24 @@ class SubsonicMediaServer(MediaServer):
         seen: set[str] = set()
         while fetched < limit:
             page = min(_SEARCH_PAGE, limit - fetched)
-            body = self._request(
-                "search3",
-                [
-                    ("query", query),
-                    ("songCount", page),
-                    ("songOffset", offset + fetched),
-                    ("artistCount", 0),
-                    ("albumCount", 0),
-                ],
-            )
-            raw = (body.get("searchResult3") or {}).get("song") or []
-            items = [s for s in raw if isinstance(s, dict) and s.get("id")]
+            song_offset = offset + fetched
+            cache_key = (query, page, song_offset)
+            if cache_key in self._search_cache:
+                items = self._search_cache[cache_key]
+            else:
+                body = self._request(
+                    "search3",
+                    [
+                        ("query", query),
+                        ("songCount", page),
+                        ("songOffset", song_offset),
+                        ("artistCount", 0),
+                        ("albumCount", 0),
+                    ],
+                )
+                raw = (body.get("searchResult3") or {}).get("song") or []
+                items = [s for s in raw if isinstance(s, dict) and s.get("id")]
+                self._search_cache[cache_key] = items
             fresh = [s for s in items if str(s["id"]) not in seen]
             if not fresh:
                 return
@@ -678,19 +685,27 @@ class SubsonicMediaServer(MediaServer):
         db: Optional[Any],
         enricher: Optional[Any] = None,
         budget: Optional[MusicBrainzBudget] = None,
+        *,
+        library_hit: Optional[LibraryHit] = None,
+        skip_search: bool = False,
     ) -> Optional[_Song]:
         override = self._match_override(track, db)
         if override is not None:
             return override
+        if library_hit is not None:
+            hit_song = self._song_for_hit(library_hit)
+            if hit_song is not None:
+                return hit_song
         isrc_match = self._match_by_isrc(track, db)
         if isrc_match is not None:
             return isrc_match
-        fuzzy = self._search_fuzzy(track, threshold)
-        if fuzzy is not None:
-            return fuzzy
-        censored = self._match_censored(track, threshold)
-        if censored is not None:
-            return censored
+        if not skip_search:
+            fuzzy = self._search_fuzzy(track, threshold)
+            if fuzzy is not None:
+                return fuzzy
+            censored = self._match_censored(track, threshold)
+            if censored is not None:
+                return censored
         return self._match_by_musicbrainz(track, db, enricher, budget)
 
     def match_track(
@@ -700,8 +715,18 @@ class SubsonicMediaServer(MediaServer):
         db: Optional[Any] = None,
         enricher: Optional[Any] = None,
         budget: Optional[MusicBrainzBudget] = None,
+        library_hit: Optional[LibraryHit] = None,
+        skip_search: bool = False,
     ) -> Optional[ServerTrackRef]:
-        song = self._best(track, threshold, db, enricher=enricher, budget=budget)
+        song = self._best(
+            track,
+            threshold,
+            db,
+            enricher=enricher,
+            budget=budget,
+            library_hit=library_hit,
+            skip_search=skip_search,
+        )
         return None if song is None else song.ref()
 
     def match_playlist_tracks(
@@ -711,13 +736,25 @@ class SubsonicMediaServer(MediaServer):
         db: Optional[Any] = None,
         enricher: Optional[Any] = None,
         budget: Optional[MusicBrainzBudget] = None,
+        library_hits: Optional[dict[int, LibraryHit]] = None,
+        library_missing: Optional[set[int]] = None,
     ) -> tuple[list[ServerTrackRef], list[Track]]:
         if enricher is not None and budget is None:
             budget = MusicBrainzBudget()
         matched: list[ServerTrackRef] = []
         missing: list[Track] = []
-        for track in tracks:
-            ref = self.match_track(track, threshold, db, enricher=enricher, budget=budget)
+        for idx, track in enumerate(tracks):
+            hit = library_hits.get(idx) if library_hits else None
+            skip_search = bool(library_missing and idx in library_missing)
+            ref = self.match_track(
+                track,
+                threshold,
+                db,
+                enricher=enricher,
+                budget=budget,
+                library_hit=hit,
+                skip_search=skip_search,
+            )
             if ref is None:
                 missing.append(track)
             else:
@@ -941,14 +978,25 @@ class SubsonicMediaServer(MediaServer):
         self, playlist: Playlist, options: PlaylistSyncOptions
     ) -> tuple[list[ServerTrackRef], list[Track]]:
         """Match ``playlist`` tracks against the Subsonic library and update missing CSV if enabled."""
+        self._search_cache.clear()
         enricher = (
             get_shared_enricher(options.db)
             if options.db is not None and hasattr(options.db, "get_media_management_settings")
             else None
         )
         budget = MusicBrainzBudget() if enricher is not None else None
+        extra_kwargs: dict[str, Any] = {}
+        if options.library_hits:
+            extra_kwargs["library_hits"] = options.library_hits
+        if options.library_missing:
+            extra_kwargs["library_missing"] = options.library_missing
         matched, missing = self.match_playlist_tracks(
-            playlist.tracks, threshold=options.threshold, db=options.db, enricher=enricher, budget=budget
+            playlist.tracks,
+            threshold=options.threshold,
+            db=options.db,
+            enricher=enricher,
+            budget=budget,
+            **extra_kwargs,
         )
         if options.write_missing_as_csv:
             if missing:
@@ -983,6 +1031,7 @@ class SubsonicMediaServer(MediaServer):
     def sync_playlist(
         self, playlist: Playlist, targets: Sequence[str], options: PlaylistSyncOptions
     ) -> list[SyncResult]:
+        self._search_cache.clear()
         names = list(targets) or [""]
         matched, missing = self.match_and_prepare(playlist, options)
         total = len(playlist.tracks)

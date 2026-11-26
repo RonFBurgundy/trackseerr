@@ -147,6 +147,10 @@ class PlexMediaServer(MediaServer):
                     extra["db"] = options.db
                 if enricher is not None:
                     extra["enricher"] = enricher
+                if options.library_hits:
+                    extra["library_hits"] = options.library_hits
+                if options.library_missing:
+                    extra["library_missing"] = options.library_missing
                 return [
                     self._client.sync_playlist(
                         playlist=playlist,
@@ -162,6 +166,10 @@ class PlexMediaServer(MediaServer):
             user_extra: dict[str, Any] = {}
             if enricher is not None:
                 user_extra["enricher"] = enricher
+            if options.library_hits:
+                user_extra["library_hits"] = options.library_hits
+            if options.library_missing:
+                user_extra["library_missing"] = options.library_missing
             return list(
                 self._client.sync_playlist_to_users(
                     playlist=playlist,
