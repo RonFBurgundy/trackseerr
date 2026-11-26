@@ -119,7 +119,7 @@ class MixWorker:
             return self._plex
         from trackseerr.media_servers import registry
 
-        return registry.plex_login_client(config)
+        return registry.client_for(registry.primary_server(config))
 
     def start(
         self,
