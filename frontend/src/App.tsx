@@ -553,7 +553,7 @@ const MainApp: React.FC = () => {
                   requestedIds={requestedIds}
                   users={users}
                   currentUserId={auth.user?.id}
-                  canTargetUsers={mediaServer.allCapabilities.users}
+                  canTargetUsers={mediaServer.allCapabilities.users || mediaServer.kinds.includes('subsonic')}
                   serverLabel={mediaServer.label}
                 />
               )}
@@ -579,7 +579,7 @@ const MainApp: React.FC = () => {
                   hasMediaServer={mediaServer.hasMediaServer}
                   serverType={mediaServer.type}
                   serverLabel={mediaServer.label}
-                  canTargetUsers={mediaServer.allCapabilities.users}
+                  canTargetUsers={mediaServer.allCapabilities.users || mediaServer.kinds.includes('subsonic')}
                   mixesEnabled={mediaServer.hasMediaServer}
                   onRequestItem={handleRequestItem}
                 />

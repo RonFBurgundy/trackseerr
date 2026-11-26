@@ -274,6 +274,35 @@ class PlexMediaServer(MediaServer):
             )
         return warnings
 
+    def list_source_playlists(self, user: Optional[str] = None) -> list[dict[str, Any]]:
+        """List the server owner's audio playlists (smart playlists included)."""
+        with _translated():
+            playlists = self._client.server.playlists() or []
+            return [
+                {
+                    "id": str(getattr(pl, "ratingKey", "") or ""),
+                    "title": str(getattr(pl, "title", "") or ""),
+                    "owner": "",
+                    "track_count": int(getattr(pl, "leafCount", 0) or 0),
+                }
+                for pl in playlists
+                if getattr(pl, "playlistType", None) == "audio"
+            ]
+
+    def source_playlist_tracks(self, playlist_id: str, user: Optional[str] = None) -> list[dict[str, str]]:
+        """Return tracks in a Plex audio playlist by ratingKey."""
+        with _translated():
+            playlist = self._client.server.fetchItem(int(playlist_id))
+            items = playlist.items() or []
+            return [
+                {
+                    "title": str(getattr(item, "title", "") or ""),
+                    "artist": str(getattr(item, "grandparentTitle", "") or ""),
+                    "album": str(getattr(item, "parentTitle", "") or ""),
+                }
+                for item in items
+            ]
+
 
 def plex_extras(server: Optional[MediaServer]) -> Optional[PlexClient]:
     """The raw :class:`PlexClient` when ``server`` is Plex, else None. The one gate to Plex-only features."""

@@ -9,7 +9,7 @@ import { ServerPlaylistDetailModal } from './ServerPlaylistDetailModal';
 export interface ServerPlaylistsSectionProps {
   serverId: string;
   serverName: string;
-  kind: Exclude<MediaServerKind, 'plex'>;
+  kind: MediaServerKind;
   users: User[];
 }
 

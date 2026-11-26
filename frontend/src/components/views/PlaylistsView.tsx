@@ -1125,8 +1125,7 @@ export const PlaylistsView: React.FC<PlaylistsViewProps> = (props) => {
   const showMixes = props.mixesEnabled ?? true;
   const adoptableServers = isAdmin
     ? enabledServers.filter(
-        (s): s is MediaServerItem & { kind: 'subsonic' | 'jellyfin' } =>
-          s.kind === 'subsonic' || s.kind === 'jellyfin'
+        (s) => s.kind === 'subsonic' || s.kind === 'jellyfin' || (s.kind === 'plex' && !s.is_login)
       )
     : [];
   const activeServer = adoptableServers.find((s) => `server:${s.id}` === requestedSection);

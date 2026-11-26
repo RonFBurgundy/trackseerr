@@ -31,18 +31,24 @@ router = APIRouter(dependencies=[Depends(require_admin), Depends(require_core_ti
 
 
 def _resolve_server(server_id: str, config: Config) -> tuple[ServerRecord, MediaServer]:
-    """Return ``(record, adapter)`` for a non-Plex server, or raise 404 / 409 / 502."""
+    """Return ``(record, adapter)`` for an adoptable server, or raise 404 / 409 / 502."""
     pair = registry.server_by_id(server_id, config=config)
     if pair is not None:
         record, adapter = pair
-        if record.kind == MEDIA_SERVER_PLEX:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Use the Plex playlists page")
+        if record.kind == MEDIA_SERVER_PLEX and record.is_login:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Use the Plex page for the sign-in Plex server",
+            )
         return record, adapter
     rec = next((r for r in registry.records(config) if r.id == server_id), None)
     if rec is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Media server not found")
-    if rec.kind == MEDIA_SERVER_PLEX:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Use the Plex playlists page")
+    if rec.kind == MEDIA_SERVER_PLEX and rec.is_login:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Use the Plex page for the sign-in Plex server",
+        )
     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Media server '{rec.name}' is unavailable")
 
 

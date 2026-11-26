@@ -210,12 +210,6 @@ def test_adopting_twice_keeps_one_playlist(env) -> None:
     assert env.jf_id in env.db.get_playlist_server_excludes(expected_id)
 
 
-def test_plex_server_returns_409(env) -> None:
-    assert env.tc.get(f"/api/media-servers/{env.plex_id}/playlists", headers=env.admin).status_code == 409
-    assert env.tc.get(f"/api/media-servers/{env.plex_id}/playlists/1/items", headers=env.admin).status_code == 409
-    assert env.tc.post(f"/api/media-servers/{env.plex_id}/playlists/1/adopt", headers=env.admin).status_code == 409
-
-
 def test_non_admin_returns_403(env) -> None:
     assert env.tc.get(f"/api/media-servers/{env.sub_id}/playlists", headers=env.alice).status_code == 403
     assert env.tc.get(f"/api/media-servers/{env.sub_id}/playlists/sub-1/items", headers=env.alice).status_code == 403
@@ -244,3 +238,63 @@ def test_media_server_errors_mapped_cleanly(env) -> None:
     adapter.list_source_playlists = _unsupported  # type: ignore[method-assign]
     resp_unsup = env.tc.get(f"/api/media-servers/{env.sub_id}/playlists", headers=env.admin)
     assert resp_unsup.status_code == 409
+
+
+def test_login_plex_still_409(env) -> None:
+    env.db.conn.execute("UPDATE media_servers SET is_login = 1 WHERE id = ?", (env.plex_id,))
+    env.db.conn.commit()
+    registry.install(registry.load_records(env.cfg, env.db))
+    assert env.tc.get(f"/api/media-servers/{env.plex_id}/playlists", headers=env.admin).status_code == 409
+    assert env.tc.get(f"/api/media-servers/{env.plex_id}/playlists/1/items", headers=env.admin).status_code == 409
+    assert env.tc.post(f"/api/media-servers/{env.plex_id}/playlists/1/adopt", headers=env.admin).status_code == 409
+
+
+def test_second_plex_lists_and_adopts(env) -> None:
+    from trackseerr.media_servers.plex import PlexMediaServer
+
+    audio_pl = SimpleNamespace(
+        ratingKey="42",
+        title="Second Plex Mix",
+        playlistType="audio",
+        leafCount=2,
+        items=lambda: [
+            SimpleNamespace(title="Track A", grandparentTitle="Artist X", parentTitle="Album Y"),
+            SimpleNamespace(title="Track B", grandparentTitle="Artist Z", parentTitle="Album W"),
+        ],
+    )
+    video_pl = SimpleNamespace(ratingKey="99", title="Movies", playlistType="video", leafCount=1, items=lambda: [])
+    fake_server = SimpleNamespace(
+        playlists=lambda: [audio_pl, video_pl],
+        fetchItem=lambda key: audio_pl if int(key) == 42 else None,
+    )
+    adapter = PlexMediaServer(SimpleNamespace(server=fake_server, music_section=None))
+    second_id = _install_record_with_adapter(
+        env.db,
+        env.cfg,
+        {"kind": "plex", "name": "Second Plex", "url": "http://plex-2:32400", "token": "tok2", "is_login": False},
+        adapter,
+    )
+
+    listed = env.tc.get(f"/api/media-servers/{second_id}/playlists", headers=env.admin)
+    assert listed.status_code == 200
+    assert listed.json() == [
+        {
+            "id": "42",
+            "title": "Second Plex Mix",
+            "owner": "",
+            "track_count": 2,
+            "adopted_playlist_id": None,
+        }
+    ]
+
+    items = env.tc.get(f"/api/media-servers/{second_id}/playlists/42/items", headers=env.admin)
+    assert items.status_code == 200
+    assert items.json() == [
+        {"title": "Track A", "artist": "Artist X", "album": "Album Y"},
+        {"title": "Track B", "artist": "Artist Z", "album": "Album W"},
+    ]
+
+    adopted = env.tc.post(f"/api/media-servers/{second_id}/playlists/42/adopt", headers=env.admin)
+    assert adopted.status_code == 201
+    expected_id = f"plex_{second_id[:8]}_42"
+    assert adopted.json()["id"] == expected_id
